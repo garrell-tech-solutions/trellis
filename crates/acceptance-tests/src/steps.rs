@@ -11,12 +11,25 @@ use std::collections::BTreeMap;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::LazyLock;
 
 fn example_value<'a>(example: &'a BTreeMap<String, String>, name: &str) -> Result<&'a str, String> {
     example
         .get(name)
         .map(String::as_str)
         .ok_or_else(|| format!("example is missing placeholder \"{name}\""))
+}
+
+/// Looks up the two `<name>` placeholders captured by a two-group regex
+/// (raw text and source appear together in several step shapes).
+fn example_pair<'a>(
+    example: &'a BTreeMap<String, String>,
+    caps: &regex::Captures,
+) -> Result<(&'a str, &'a str), String> {
+    Ok((
+        example_value(example, &caps[1])?,
+        example_value(example, &caps[2])?,
+    ))
 }
 
 fn workspace_root() -> PathBuf {
@@ -27,6 +40,15 @@ fn workspace_root() -> PathBuf {
         .to_path_buf()
 }
 
+/// Creates a fresh temp-directory-backed database path for a scenario's
+/// background step. The directory is returned alongside the path so the
+/// caller can keep it alive in `World` for the rest of the scenario.
+fn new_temp_db_path(file_name: &str) -> Result<(tempfile::TempDir, PathBuf), String> {
+    let dir = tempfile::tempdir().map_err(|e| format!("create temp dir: {e}"))?;
+    let db_path = dir.path().join(file_name);
+    Ok((dir, db_path))
+}
+
 pub async fn dispatch(
     world: &mut World,
     step: &Step,
@@ -34,145 +56,14 @@ pub async fn dispatch(
 ) -> Result<(), String> {
     let text = step.text.as_str();
 
-    // --- capture endpoint -------------------------------------------------
-
-    if Regex::new(r"^the trellis server is running with an empty captures table$")
-        .unwrap()
-        .is_match(text)
-    {
-        return capture::given_empty_captures_table(world).await;
+    if let Some(outcome) = capture::dispatch(world, text, example).await {
+        return outcome;
     }
-
-    if let Some(caps) = Regex::new(
-        r#"^the QA agent sends a capture request with raw text "<([A-Za-z0-9_]+)>" and source "<([A-Za-z0-9_]+)>"$"#,
-    )
-    .unwrap()
-    .captures(text)
-    {
-        let raw_text = example_value(example, &caps[1])?;
-        let source = example_value(example, &caps[2])?;
-        return capture::when_capture_request_sent(world, raw_text, source).await;
+    if let Some(outcome) = migrations::dispatch(world, text).await {
+        return outcome;
     }
-
-    if let Some(caps) = Regex::new(r"^the response status is (\d+)$")
-        .unwrap()
-        .captures(text)
-    {
-        let expected: u16 = caps[1]
-            .parse()
-            .map_err(|e| format!("bad status code: {e}"))?;
-        return capture::then_response_status_is(world, expected);
-    }
-
-    if let Some(caps) = Regex::new(r"^the response is received within (\d+) milliseconds$")
-        .unwrap()
-        .captures(text)
-    {
-        let budget_ms: u128 = caps[1]
-            .parse()
-            .map_err(|e| format!("bad millisecond budget: {e}"))?;
-        return capture::then_response_within_budget(world, budget_ms);
-    }
-
-    if let Some(caps) = Regex::new(
-        r#"^a row exists in the captures table with raw text "<([A-Za-z0-9_]+)>" and source "<([A-Za-z0-9_]+)>"$"#,
-    )
-    .unwrap()
-    .captures(text)
-    {
-        let raw_text = example_value(example, &caps[1])?;
-        let source = example_value(example, &caps[2])?;
-        return capture::then_row_exists(world, raw_text, source).await;
-    }
-
-    // --- migrations ---------------------------------------------------------
-
-    if Regex::new(r"^an empty trellis database file$")
-        .unwrap()
-        .is_match(text)
-    {
-        return migrations::given_empty_database_file(world);
-    }
-
-    if Regex::new(r"^a trellis database that has already been migrated once$")
-        .unwrap()
-        .is_match(text)
-    {
-        return migrations::given_already_migrated_database(world).await;
-    }
-
-    if Regex::new(r"^the migration command is run$")
-        .unwrap()
-        .is_match(text)
-    {
-        return migrations::when_migration_command_is_run(world).await;
-    }
-
-    if Regex::new(r"^the migration command exits successfully$")
-        .unwrap()
-        .is_match(text)
-    {
-        return migrations::then_migration_exits_successfully(world);
-    }
-
-    if let Some(caps) = Regex::new(r#"^the database journal mode is "(\w+)"$"#)
-        .unwrap()
-        .captures(text)
-    {
-        return migrations::then_journal_mode_is(world, &caps[1]).await;
-    }
-
-    if Regex::new(r"^the database schema is unchanged$")
-        .unwrap()
-        .is_match(text)
-    {
-        return migrations::then_schema_is_unchanged(world).await;
-    }
-
-    // --- release binary / scheduler-core purity (shared background step) ---
-
-    if Regex::new(r"^the workspace is checked out$")
-        .unwrap()
-        .is_match(text)
-    {
-        return build::given_workspace_checked_out();
-    }
-
-    if Regex::new(r"^the release binary is built for the musl target$")
-        .unwrap()
-        .is_match(text)
-    {
-        return build::when_release_binary_built_for_musl(world);
-    }
-
-    if Regex::new(r"^exactly one release binary is produced$")
-        .unwrap()
-        .is_match(text)
-    {
-        return build::then_exactly_one_release_binary(world);
-    }
-
-    if Regex::new(r"^the binary reports no dynamic executable dependencies$")
-        .unwrap()
-        .is_match(text)
-    {
-        return build::then_binary_has_no_dynamic_dependencies(world);
-    }
-
-    if Regex::new(r"^the dependency tree for the scheduler-core crate is listed$")
-        .unwrap()
-        .is_match(text)
-    {
-        return build::when_scheduler_core_dependency_tree_listed(world);
-    }
-
-    if let Some(caps) =
-        Regex::new(r#"^the dependency tree contains zero occurrences of "<([A-Za-z0-9_]+)>"$"#)
-            .unwrap()
-            .captures(text)
-    {
-        let forbidden = example_value(example, &caps[1])?;
-        return build::then_dependency_tree_excludes(world, forbidden);
+    if let Some(outcome) = build::dispatch(world, text, example) {
+        return outcome;
     }
 
     Err(format!("unsupported step: {} {}", step.keyword, step.text))
@@ -184,9 +75,70 @@ mod capture {
     use axum::http::Request;
     use tower::ServiceExt;
 
+    static GIVEN_EMPTY_TABLE: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r"^the trellis server is running with an empty captures table$").unwrap()
+    });
+    static WHEN_CAPTURE_SENT: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(
+            r#"^the QA agent sends a capture request with raw text "<([A-Za-z0-9_]+)>" and source "<([A-Za-z0-9_]+)>"$"#,
+        )
+        .unwrap()
+    });
+    static THEN_STATUS_IS: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"^the response status is (\d+)$").unwrap());
+    static THEN_WITHIN_BUDGET: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r"^the response is received within (\d+) milliseconds$").unwrap()
+    });
+    static THEN_ROW_EXISTS: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(
+            r#"^a row exists in the captures table with raw text "<([A-Za-z0-9_]+)>" and source "<([A-Za-z0-9_]+)>"$"#,
+        )
+        .unwrap()
+    });
+
+    pub async fn dispatch(
+        world: &mut World,
+        text: &str,
+        example: &BTreeMap<String, String>,
+    ) -> Option<Result<(), String>> {
+        if GIVEN_EMPTY_TABLE.is_match(text) {
+            return Some(given_empty_captures_table(world).await);
+        }
+        if let Some(caps) = WHEN_CAPTURE_SENT.captures(text) {
+            let (raw_text, source) = match example_pair(example, &caps) {
+                Ok(pair) => pair,
+                Err(e) => return Some(Err(e)),
+            };
+            return Some(when_capture_request_sent(world, raw_text, source).await);
+        }
+        if let Some(caps) = THEN_STATUS_IS.captures(text) {
+            return Some(
+                caps[1]
+                    .parse()
+                    .map_err(|e| format!("bad status code: {e}"))
+                    .and_then(|expected: u16| then_response_status_is(world, expected)),
+            );
+        }
+        if let Some(caps) = THEN_WITHIN_BUDGET.captures(text) {
+            return Some(
+                caps[1]
+                    .parse()
+                    .map_err(|e| format!("bad millisecond budget: {e}"))
+                    .and_then(|budget_ms: u128| then_response_within_budget(world, budget_ms)),
+            );
+        }
+        if let Some(caps) = THEN_ROW_EXISTS.captures(text) {
+            let (raw_text, source) = match example_pair(example, &caps) {
+                Ok(pair) => pair,
+                Err(e) => return Some(Err(e)),
+            };
+            return Some(then_row_exists(world, raw_text, source).await);
+        }
+        None
+    }
+
     pub async fn given_empty_captures_table(world: &mut World) -> Result<(), String> {
-        let dir = tempfile::tempdir().map_err(|e| format!("create temp dir: {e}"))?;
-        let db_path = dir.path().join("acceptance.db");
+        let (dir, db_path) = new_temp_db_path("acceptance.db")?;
         let pool = trellis_server::db::connect(&db_path)
             .await
             .map_err(|e| format!("connect: {e}"))?;
@@ -271,6 +223,42 @@ mod capture {
 mod migrations {
     use super::*;
 
+    static GIVEN_EMPTY_FILE: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"^an empty trellis database file$").unwrap());
+    static GIVEN_ALREADY_MIGRATED: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r"^a trellis database that has already been migrated once$").unwrap()
+    });
+    static WHEN_MIGRATION_RUN: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"^the migration command is run$").unwrap());
+    static THEN_MIGRATION_EXITS_OK: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"^the migration command exits successfully$").unwrap());
+    static THEN_JOURNAL_MODE_IS: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r#"^the database journal mode is "(\w+)"$"#).unwrap());
+    static THEN_SCHEMA_UNCHANGED: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"^the database schema is unchanged$").unwrap());
+
+    pub async fn dispatch(world: &mut World, text: &str) -> Option<Result<(), String>> {
+        if GIVEN_EMPTY_FILE.is_match(text) {
+            return Some(given_empty_database_file(world));
+        }
+        if GIVEN_ALREADY_MIGRATED.is_match(text) {
+            return Some(given_already_migrated_database(world).await);
+        }
+        if WHEN_MIGRATION_RUN.is_match(text) {
+            return Some(when_migration_command_is_run(world).await);
+        }
+        if THEN_MIGRATION_EXITS_OK.is_match(text) {
+            return Some(then_migration_exits_successfully(world));
+        }
+        if let Some(caps) = THEN_JOURNAL_MODE_IS.captures(text) {
+            return Some(then_journal_mode_is(world, &caps[1]).await);
+        }
+        if THEN_SCHEMA_UNCHANGED.is_match(text) {
+            return Some(then_schema_is_unchanged(world).await);
+        }
+        None
+    }
+
     async fn table_names(pool: &sqlx::SqlitePool) -> Result<Vec<String>, String> {
         sqlx::query_scalar("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name")
             .fetch_all(pool)
@@ -279,8 +267,7 @@ mod migrations {
     }
 
     pub fn given_empty_database_file(world: &mut World) -> Result<(), String> {
-        let dir = tempfile::tempdir().map_err(|e| format!("create temp dir: {e}"))?;
-        let db_path = dir.path().join("acceptance.db");
+        let (dir, db_path) = new_temp_db_path("acceptance.db")?;
         world.db_path = Some(db_path);
         world.tmp_dir = Some(dir);
         Ok(())
@@ -359,6 +346,53 @@ mod build {
 
     const MUSL_TARGET: &str = "x86_64-unknown-linux-musl";
 
+    static GIVEN_WORKSPACE_CHECKED_OUT: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"^the workspace is checked out$").unwrap());
+    static WHEN_RELEASE_BUILT: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"^the release binary is built for the musl target$").unwrap());
+    static THEN_EXACTLY_ONE_BINARY: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"^exactly one release binary is produced$").unwrap());
+    static THEN_NO_DYNAMIC_DEPS: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r"^the binary reports no dynamic executable dependencies$").unwrap()
+    });
+    static WHEN_DEP_TREE_LISTED: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r"^the dependency tree for the scheduler-core crate is listed$").unwrap()
+    });
+    static THEN_DEP_TREE_EXCLUDES: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r#"^the dependency tree contains zero occurrences of "<([A-Za-z0-9_]+)>"$"#)
+            .unwrap()
+    });
+
+    pub fn dispatch(
+        world: &mut World,
+        text: &str,
+        example: &BTreeMap<String, String>,
+    ) -> Option<Result<(), String>> {
+        if GIVEN_WORKSPACE_CHECKED_OUT.is_match(text) {
+            return Some(given_workspace_checked_out());
+        }
+        if WHEN_RELEASE_BUILT.is_match(text) {
+            return Some(when_release_binary_built_for_musl(world));
+        }
+        if THEN_EXACTLY_ONE_BINARY.is_match(text) {
+            return Some(then_exactly_one_release_binary(world));
+        }
+        if THEN_NO_DYNAMIC_DEPS.is_match(text) {
+            return Some(then_binary_has_no_dynamic_dependencies(world));
+        }
+        if WHEN_DEP_TREE_LISTED.is_match(text) {
+            return Some(when_scheduler_core_dependency_tree_listed(world));
+        }
+        if let Some(caps) = THEN_DEP_TREE_EXCLUDES.captures(text) {
+            let forbidden = match example_value(example, &caps[1]) {
+                Ok(v) => v,
+                Err(e) => return Some(Err(e)),
+            };
+            return Some(then_dependency_tree_excludes(world, forbidden));
+        }
+        None
+    }
+
     pub fn given_workspace_checked_out() -> Result<(), String> {
         let root = workspace_root();
         if root.join("Cargo.toml").is_file() {
@@ -366,6 +400,23 @@ mod build {
         } else {
             Err(format!("no workspace Cargo.toml under {}", root.display()))
         }
+    }
+
+    fn executable_files_in(dir: &Path) -> Result<Vec<PathBuf>, String> {
+        let mut files = Vec::new();
+        for entry in std::fs::read_dir(dir).map_err(|e| format!("read {}: {e}", dir.display()))? {
+            let entry = entry.map_err(|e| format!("read dir entry: {e}"))?;
+            let path = entry.path();
+            let is_executable_file = path.is_file()
+                && path
+                    .metadata()
+                    .map(|m| m.permissions().mode() & 0o111 != 0)
+                    .unwrap_or(false);
+            if is_executable_file {
+                files.push(path);
+            }
+        }
+        Ok(files)
     }
 
     pub fn when_release_binary_built_for_musl(world: &mut World) -> Result<(), String> {
@@ -392,30 +443,19 @@ mod build {
         }
 
         let release_dir = root.join("target").join(MUSL_TARGET).join("release");
-        let mut binaries = Vec::new();
-        for entry in std::fs::read_dir(&release_dir)
-            .map_err(|e| format!("read {}: {e}", release_dir.display()))?
-        {
-            let entry = entry.map_err(|e| format!("read dir entry: {e}"))?;
-            let path = entry.path();
-            let is_executable_file = path.is_file()
-                && path
-                    .metadata()
-                    .map(|m| m.permissions().mode() & 0o111 != 0)
-                    .unwrap_or(false);
-            if is_executable_file {
-                binaries.push(path);
-            }
-        }
-        world.release_binaries = Some(binaries);
+        world.release_binaries = Some(executable_files_in(&release_dir)?);
         Ok(())
     }
 
-    pub fn then_exactly_one_release_binary(world: &mut World) -> Result<(), String> {
-        let binaries = world
+    fn release_binaries(world: &World) -> Result<&Vec<PathBuf>, String> {
+        world
             .release_binaries
             .as_ref()
-            .ok_or_else(|| "release binary was never built".to_string())?;
+            .ok_or_else(|| "release binary was never built".to_string())
+    }
+
+    pub fn then_exactly_one_release_binary(world: &mut World) -> Result<(), String> {
+        let binaries = release_binaries(world)?;
         if binaries.len() == 1 {
             Ok(())
         } else {
@@ -427,10 +467,7 @@ mod build {
     }
 
     pub fn then_binary_has_no_dynamic_dependencies(world: &mut World) -> Result<(), String> {
-        let binaries = world
-            .release_binaries
-            .as_ref()
-            .ok_or_else(|| "release binary was never built".to_string())?;
+        let binaries = release_binaries(world)?;
         let binary = binaries
             .first()
             .ok_or_else(|| "no release binary to inspect".to_string())?;

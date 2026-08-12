@@ -21,44 +21,47 @@ fn require_db_arg(args: &[String]) -> PathBuf {
     }
 }
 
+async fn run_migrate(args: &[String]) -> ExitCode {
+    let db_path = require_db_arg(args);
+    let pool = match trellis_server::db::connect(&db_path).await {
+        Ok(pool) => pool,
+        Err(err) => {
+            eprintln!("could not open database: {err}");
+            return ExitCode::FAILURE;
+        }
+    };
+    match trellis_server::db::run_migrations(&pool).await {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(err) => {
+            eprintln!("migration failed: {err}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+async fn run_serve(args: &[String]) -> ExitCode {
+    let db_path = require_db_arg(args);
+    let addr = arg_value(args, "--addr").unwrap_or_else(|| "127.0.0.1:8080".to_string());
+    let pool = trellis_server::db::connect(&db_path)
+        .await
+        .expect("open database");
+    trellis_server::db::run_migrations(&pool)
+        .await
+        .expect("run migrations");
+    let app = trellis_server::app::build_app(pool);
+    let listener = tokio::net::TcpListener::bind(&addr)
+        .await
+        .expect("bind address");
+    axum::serve(listener, app).await.expect("serve");
+    ExitCode::SUCCESS
+}
+
 #[tokio::main]
 async fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().collect();
     match args.get(1).map(String::as_str) {
-        Some("migrate") => {
-            let db_path = require_db_arg(&args[2..]);
-            let pool = match trellis_server::db::connect(&db_path).await {
-                Ok(pool) => pool,
-                Err(err) => {
-                    eprintln!("could not open database: {err}");
-                    return ExitCode::FAILURE;
-                }
-            };
-            match trellis_server::db::run_migrations(&pool).await {
-                Ok(()) => ExitCode::SUCCESS,
-                Err(err) => {
-                    eprintln!("migration failed: {err}");
-                    ExitCode::FAILURE
-                }
-            }
-        }
-        Some("serve") => {
-            let db_path = require_db_arg(&args[2..]);
-            let addr =
-                arg_value(&args[2..], "--addr").unwrap_or_else(|| "127.0.0.1:8080".to_string());
-            let pool = trellis_server::db::connect(&db_path)
-                .await
-                .expect("open database");
-            trellis_server::db::run_migrations(&pool)
-                .await
-                .expect("run migrations");
-            let app = trellis_server::app::build_app(pool);
-            let listener = tokio::net::TcpListener::bind(&addr)
-                .await
-                .expect("bind address");
-            axum::serve(listener, app).await.expect("serve");
-            ExitCode::SUCCESS
-        }
+        Some("migrate") => run_migrate(&args[2..]).await,
+        Some("serve") => run_serve(&args[2..]).await,
         _ => {
             eprintln!("usage: trellis <migrate|serve> --db <path> [--addr <host:port>]");
             ExitCode::from(2)

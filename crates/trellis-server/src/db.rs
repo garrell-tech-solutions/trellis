@@ -19,11 +19,16 @@ pub async fn run_migrations(pool: &SqlitePool) -> Result<(), MigrateError> {
 mod tests {
     use super::*;
 
-    #[tokio::test]
-    async fn migrations_apply_to_empty_database_and_enable_wal() {
+    async fn connected_test_db() -> (tempfile::TempDir, SqlitePool) {
         let dir = tempfile::tempdir().unwrap();
         let db_path = dir.path().join("test.db");
         let pool = connect(&db_path).await.unwrap();
+        (dir, pool)
+    }
+
+    #[tokio::test]
+    async fn migrations_apply_to_empty_database_and_enable_wal() {
+        let (_dir, pool) = connected_test_db().await;
 
         run_migrations(&pool).await.unwrap();
 
@@ -36,9 +41,7 @@ mod tests {
 
     #[tokio::test]
     async fn rerunning_migrations_against_already_migrated_database_is_a_noop() {
-        let dir = tempfile::tempdir().unwrap();
-        let db_path = dir.path().join("test.db");
-        let pool = connect(&db_path).await.unwrap();
+        let (_dir, pool) = connected_test_db().await;
         run_migrations(&pool).await.unwrap();
         let schema_before = table_names(&pool).await;
 

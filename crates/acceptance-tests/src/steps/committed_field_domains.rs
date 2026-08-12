@@ -10,9 +10,9 @@
 //! already matched generically by [`super::triage::dispatch`], tried before
 //! this module — nothing here duplicates them.
 
-use super::triage::{task_row, when_triaged};
+use super::triage::{task_row, then_rejection_reports_invalid, when_triaged};
 use super::*;
-use serde_json::{json, Value};
+use serde_json::json;
 
 static WHEN_TRIAGED_WITH_DEADLINE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r#"^the capture is triaged as a committed task with a deadline of "<(\w+)>"$"#)
@@ -56,6 +56,30 @@ pub async fn dispatch(
         return Some(then_rejection_reports_invalid(world, &caps[1]));
     }
     None
+}
+
+async fn dispatch_deadline_is_instant(
+    world: &World,
+    example: &BTreeMap<String, String>,
+    caps: &regex::Captures<'_>,
+) -> Result<(), String> {
+    let expected_epoch_ms = example_value(example, &caps[1])?;
+    then_deadline_is_instant(world, expected_epoch_ms).await
+}
+
+async fn then_deadline_is_instant(world: &World, expected_epoch_ms: &str) -> Result<(), String> {
+    let expected: i64 = expected_epoch_ms
+        .parse()
+        .map_err(|e| format!("bad expected_epoch_ms {expected_epoch_ms:?}: {e}"))?;
+    let row = task_row(world).await?;
+    if row.deadline == Some(expected) {
+        Ok(())
+    } else {
+        Err(format!(
+            "expected deadline {expected}ms since the epoch, got {:?}",
+            row.deadline
+        ))
+    }
 }
 
 async fn dispatch_with_deadline(
@@ -112,38 +136,48 @@ async fn dispatch_with_priority(
     .await
 }
 
-async fn dispatch_deadline_is_instant(
-    world: &World,
-    example: &BTreeMap<String, String>,
-    caps: &regex::Captures<'_>,
-) -> Result<(), String> {
-    let expected_epoch_ms = example_value(example, &caps[1])?;
-    let expected: i64 = expected_epoch_ms
-        .parse()
-        .map_err(|e| format!("bad expected_epoch_ms {expected_epoch_ms:?}: {e}"))?;
-    let row = task_row(world).await?;
-    if row.deadline == Some(expected) {
-        Ok(())
-    } else {
-        Err(format!(
-            "expected deadline {expected}ms since the epoch, got {:?}",
-            row.deadline
-        ))
-    }
-}
+#[cfg(test)]
+mod tests {
+    use super::super::triage::given_capture_waiting;
+    use super::*;
 
-/// Shared verbatim by `quota_triage_validation` (`period`'s invalid-value
-/// scenario reports the same way) rather than routed through one dispatcher,
-/// per this module's own doc comment on `triage::dispatch`'s complexity.
-fn then_rejection_reports_invalid(world: &mut World, expected_field: &str) -> Result<(), String> {
-    let body = world
-        .last_response_body
-        .as_ref()
-        .ok_or_else(|| "no rejection body recorded".to_string())?;
-    match body.get("invalid_field").and_then(Value::as_str) {
-        Some(field) if field == expected_field => Ok(()),
-        other => Err(format!(
-            "expected rejection to report {expected_field} as invalid, body reported {other:?}"
-        )),
+    #[tokio::test]
+    async fn a_valid_deadline_is_stored_as_the_instant_it_names() {
+        let mut world = migrated_world().await;
+        given_capture_waiting(&mut world, "buy milk").await.unwrap();
+        when_triaged(
+            &mut world,
+            json!({
+                "kind": "committed",
+                "deadline": "2026-08-20T17:00:00Z",
+                "deadline_type": "hard",
+                "priority": "P1",
+            }),
+        )
+        .await
+        .unwrap();
+
+        then_deadline_is_instant(&world, "1787245200000")
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn a_field_outside_its_domain_is_rejected_and_reports_itself_as_invalid() {
+        for (field, value) in [("deadline_type", "squishy"), ("priority", "P9")] {
+            let mut world = migrated_world().await;
+            given_capture_waiting(&mut world, "buy milk").await.unwrap();
+            let mut payload = json!({
+                "kind": "committed",
+                "deadline": "2026-08-20T17:00:00Z",
+                "deadline_type": "hard",
+                "priority": "P1",
+            });
+            payload[field] = json!(value);
+
+            when_triaged(&mut world, payload).await.unwrap();
+
+            then_rejection_reports_invalid(&mut world, field).unwrap();
+        }
     }
 }

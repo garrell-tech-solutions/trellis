@@ -65,3 +65,31 @@ fn then_rejection_reports_unknown_kind(world: &mut World) -> Result<(), String> 
         ))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::super::triage::given_capture_waiting;
+    use super::*;
+
+    #[tokio::test]
+    async fn a_kind_outside_the_three_known_kinds_is_rejected_and_reports_it_was_unknown() {
+        let mut world = migrated_world().await;
+        given_capture_waiting(&mut world, "buy milk").await.unwrap();
+
+        when_triaged(&mut world, json!({ "kind": "someday" }))
+            .await
+            .unwrap();
+
+        then_rejection_reports_unknown_kind(&mut world).unwrap();
+    }
+
+    #[tokio::test]
+    async fn a_triage_with_no_kind_named_is_rejected_and_reports_it_was_unknown() {
+        let mut world = migrated_world().await;
+        given_capture_waiting(&mut world, "buy milk").await.unwrap();
+
+        when_triaged(&mut world, json!({})).await.unwrap();
+
+        then_rejection_reports_unknown_kind(&mut world).unwrap();
+    }
+}

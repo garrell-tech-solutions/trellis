@@ -43,3 +43,27 @@ async fn dispatch_triaged_empty(
     payload[empty_field] = json!("");
     when_triaged(world, payload).await
 }
+
+#[cfg(test)]
+mod tests {
+    use super::super::triage::{given_capture_waiting, then_rejection_names};
+    use super::*;
+
+    #[tokio::test]
+    async fn a_committed_triage_with_priority_left_empty_is_rejected_the_same_as_absent() {
+        let mut world = migrated_world().await;
+        given_capture_waiting(&mut world, "call the dentist")
+            .await
+            .unwrap();
+        let payload = json!({
+            "kind": "committed",
+            "deadline": "2026-08-20T17:00:00Z",
+            "deadline_type": "hard",
+            "priority": "",
+        });
+
+        when_triaged(&mut world, payload).await.unwrap();
+
+        then_rejection_names(&mut world, "priority").unwrap();
+    }
+}

@@ -11,9 +11,9 @@
 //! [`super::triage::dispatch`], tried before this module — nothing here
 //! duplicates them.
 
-use super::triage::when_triaged;
+use super::triage::{then_rejection_reports_invalid, when_triaged};
 use super::*;
-use serde_json::{json, Value};
+use serde_json::json;
 
 static WHEN_TRIAGED_MISSING: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r#"^the capture is triaged as a quota task with "<(\w+)>" omitted$"#).unwrap()
@@ -94,15 +94,48 @@ async fn dispatch_with_period(
     when_triaged(world, payload).await
 }
 
-fn then_rejection_reports_invalid(world: &mut World, expected_field: &str) -> Result<(), String> {
-    let body = world
-        .last_response_body
-        .as_ref()
-        .ok_or_else(|| "no rejection body recorded".to_string())?;
-    match body.get("invalid_field").and_then(Value::as_str) {
-        Some(field) if field == expected_field => Ok(()),
-        other => Err(format!(
-            "expected rejection to report {expected_field} as invalid, body reported {other:?}"
-        )),
+#[cfg(test)]
+mod tests {
+    use super::super::triage::{given_capture_waiting, then_rejection_names};
+    use super::*;
+
+    #[tokio::test]
+    async fn a_quota_triage_missing_a_required_field_is_rejected() {
+        let mut world = migrated_world().await;
+        given_capture_waiting(&mut world, "go to the gym")
+            .await
+            .unwrap();
+        let mut payload = complete_quota_payload();
+        payload.as_object_mut().unwrap().remove("target_count");
+
+        when_triaged(&mut world, payload).await.unwrap();
+
+        then_rejection_names(&mut world, "target_count").unwrap();
+    }
+
+    #[tokio::test]
+    async fn a_quota_triage_with_period_left_empty_is_rejected_the_same_as_absent() {
+        let mut world = migrated_world().await;
+        given_capture_waiting(&mut world, "go to the gym")
+            .await
+            .unwrap();
+
+        when_triaged_period_empty(&mut world).await.unwrap();
+
+        then_rejection_names(&mut world, "period").unwrap();
+    }
+
+    #[tokio::test]
+    async fn a_quota_triage_with_an_invalid_period_is_rejected_and_reports_itself_as_invalid() {
+        let mut world = migrated_world().await;
+        given_capture_waiting(&mut world, "go to the gym")
+            .await
+            .unwrap();
+        let mut payload = complete_quota_payload();
+        payload["period"] = json!("fortnight");
+
+        when_triaged(&mut world, payload).await.unwrap();
+
+        then_rejection_reports_invalid(&mut world, "period").unwrap();
     }
 }

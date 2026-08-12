@@ -412,6 +412,25 @@ pub fn then_rejection_names(world: &mut World, expected_field: &str) -> Result<(
     }
 }
 
+/// [`then_rejection_names`]'s counterpart for a field that was present but
+/// outside its domain. Shared by `committed_field_domains` and
+/// `quota_triage_validation`, which both report this way.
+pub fn then_rejection_reports_invalid(
+    world: &mut World,
+    expected_field: &str,
+) -> Result<(), String> {
+    let body = world
+        .last_response_body
+        .as_ref()
+        .ok_or_else(|| "no rejection body recorded".to_string())?;
+    match body.get("invalid_field").and_then(Value::as_str) {
+        Some(field) if field == expected_field => Ok(()),
+        other => Err(format!(
+            "expected rejection to report {expected_field} as invalid, body reported {other:?}"
+        )),
+    }
+}
+
 pub async fn then_task_list_is_empty(world: &World) -> Result<(), String> {
     let pool = world.pool()?;
     let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM tasks")
@@ -522,6 +541,30 @@ mod tests {
 
         then_triage_is_rejected(&mut world).unwrap();
         then_rejection_names(&mut world, "deadline").unwrap();
+        then_task_list_is_empty(&world).await.unwrap();
+        then_capture_still_waiting(&world).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn invalid_field_triage_is_rejected_and_leaves_no_trace() {
+        let mut world = migrated_world().await;
+        given_capture_waiting(&mut world, "call the dentist")
+            .await
+            .unwrap();
+        when_triaged(
+            &mut world,
+            json!({
+                "kind": "committed",
+                "deadline": "2026-08-20T17:00:00Z",
+                "deadline_type": "squishy",
+                "priority": "P1",
+            }),
+        )
+        .await
+        .unwrap();
+
+        then_triage_is_rejected(&mut world).unwrap();
+        then_rejection_reports_invalid(&mut world, "deadline_type").unwrap();
         then_task_list_is_empty(&world).await.unwrap();
         then_capture_still_waiting(&world).await.unwrap();
     }

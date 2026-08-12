@@ -41,19 +41,11 @@ No Rust tool emits the contract natively. Each `Run` is a wrapper under
   Run:         `scripts/analyzers/mutation.sh <path>`
   Threshold:   90  # minimum kill rate (%)
   Parallelism: scheduler-core: 8   |   every other crate: 1
-  # scheduler-core is pure, so its mutants are safely parallel. Other crates
-  # share one SQLite file; parallel mutants truncate each other's database and
-  # the symptom is timeouts, not an obvious collision. Do not raise the timeout.
 
 - Complexity:  rust-code-analysis-cli
   Install:     `cargo install rust-code-analysis-cli`
   Run:         `scripts/analyzers/complexity.sh <path>`
   Threshold:   8   # max cyclomatic complexity per function
-  # Derived, not conventional: the largest enum in the domain model has 5
-  # variants, so an exhaustive `match` over it scores 6. 8 leaves headroom for
-  # one guard on top of that and still flags real branching. A function over 8
-  # is carrying logic that is not the match -- extract that, do not flatten the
-  # match into if/else.
 
 - CRAP:        custom — composes the coverage and complexity analyzers
   Install:     none

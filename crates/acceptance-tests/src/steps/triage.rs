@@ -263,14 +263,14 @@ pub async fn when_triaged_committed_missing(
 /// A named struct (rather than the query's positional tuple) so each
 /// assertion names the field it cares about instead of counting
 /// underscores.
-struct TaskRow {
-    kind: String,
-    deadline: Option<String>,
-    deadline_type: Option<String>,
-    priority: Option<String>,
-    target_count: Option<i64>,
-    target_minutes_each: Option<i64>,
-    period: Option<String>,
+pub(super) struct TaskRow {
+    pub(super) kind: String,
+    pub(super) deadline: Option<i64>,
+    pub(super) deadline_type: Option<String>,
+    pub(super) priority: Option<String>,
+    pub(super) target_count: Option<i64>,
+    pub(super) target_minutes_each: Option<i64>,
+    pub(super) period: Option<String>,
 }
 
 impl sqlx::FromRow<'_, sqlx::sqlite::SqliteRow> for TaskRow {
@@ -288,7 +288,7 @@ impl sqlx::FromRow<'_, sqlx::sqlite::SqliteRow> for TaskRow {
     }
 }
 
-async fn task_row(world: &World) -> Result<TaskRow, String> {
+pub(super) async fn task_row(world: &World) -> Result<TaskRow, String> {
     let pool = world.pool()?;
     let capture_id = capture_id(world)?;
     sqlx::query_as(
@@ -332,19 +332,25 @@ pub async fn then_task_has_no_quota_target(world: &World) -> Result<(), String> 
     }
 }
 
+/// `deadline` is stored as epoch milliseconds (T3); the Gherkin example gives
+/// the deadline as text, so the expectation is parsed the same way the
+/// triage boundary parses a submission, and compared as the instant it
+/// names rather than as text.
 pub async fn then_task_has_deadline(
     world: &World,
     expected_type: &str,
     expected_deadline: &str,
 ) -> Result<(), String> {
+    let expected_ms = expected_deadline
+        .parse::<jiff::Timestamp>()
+        .map_err(|e| format!("bad expected deadline {expected_deadline:?}: {e}"))?
+        .as_millisecond();
     let row = task_row(world).await?;
-    if row.deadline.as_deref() == Some(expected_deadline)
-        && row.deadline_type.as_deref() == Some(expected_type)
-    {
+    if row.deadline == Some(expected_ms) && row.deadline_type.as_deref() == Some(expected_type) {
         Ok(())
     } else {
         Err(format!(
-            "expected {expected_type} deadline {expected_deadline}, \
+            "expected {expected_type} deadline {expected_deadline} ({expected_ms}ms), \
                  got deadline_type={:?} deadline={:?}",
             row.deadline_type, row.deadline
         ))

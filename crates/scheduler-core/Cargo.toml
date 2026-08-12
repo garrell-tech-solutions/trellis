@@ -3,9 +3,12 @@ name = "scheduler-core"
 version = "0.1.0"
 edition.workspace = true
 
+# T4: no dependency here may pull in tokio or sqlx. jiff is a pure date/time
+# library (deadline parsing is a triage rule, so it lives here per T15) and
+# carries neither, directly or transitively.
 [dependencies]
+jiff = "0.2.35"
 
-# T4: this crate has no runtime dependencies and is meant to keep it that way.
 # proptest is a dev-dependency only, and pulls in neither tokio nor sqlx —
 # scheduler_core_purity.feature checks that with `cargo tree`, which includes
 # dev-dependencies.

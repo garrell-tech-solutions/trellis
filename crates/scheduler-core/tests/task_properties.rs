@@ -12,7 +12,7 @@
 
 use proptest::prelude::*;
 use scheduler_core::task::{
-    CommittedField, TaskAttributes, TaskKind, TriageFields, TriageRejection, COMMITTED, POOL, QUOTA,
+    Field, TaskAttributes, TaskKind, TriageFields, TriageRejection, COMMITTED, POOL, QUOTA,
 };
 
 /// Every field a caller could send, chosen independently of the kind.
@@ -47,16 +47,29 @@ fn with_kind(fields: TriageFields, kind: &str) -> TriageFields {
     }
 }
 
-fn has_deadline(attributes: &TaskAttributes<'_>) -> bool {
+fn has_deadline(attributes: &TaskAttributes) -> bool {
     attributes.deadline.is_some()
         || attributes.deadline_type.is_some()
         || attributes.priority.is_some()
 }
 
-fn has_quota_target(attributes: &TaskAttributes<'_>) -> bool {
+fn has_quota_target(attributes: &TaskAttributes) -> bool {
     attributes.target_count.is_some()
         || attributes.target_minutes_each.is_some()
         || attributes.period.is_some()
+}
+
+/// A handful of well-formed deadlines and the instant each names, since
+/// deadline validity (T3) is exercised by the unit tests — this generator
+/// only needs enough variety to keep the round-trip property honest.
+fn valid_deadline() -> impl Strategy<Value = (&'static str, i64)> {
+    prop::sample::select(vec![
+        ("2026-08-20T17:00:00Z", 1787245200000i64),
+        ("2026-08-20T17:00:00.000Z", 1787245200000i64),
+        ("2026-08-20T19:00:00+02:00", 1787245200000i64),
+        ("2000-01-01T00:00:00Z", 946684800000i64),
+        ("2099-12-31T23:59:59Z", 4102444799000i64),
+    ])
 }
 
 proptest! {
@@ -73,19 +86,22 @@ proptest! {
     }
 
     /// A committed task reports back exactly the metadata it was given, and
-    /// never a quota target.
+    /// never a quota target. `deadline_type`/`priority` are drawn from their
+    /// closed domains (validity itself is the unit tests' job); the deadline
+    /// is reported as the instant it names, not the text that named it.
     #[test]
     #[ignore]
     fn a_committed_task_round_trips_its_metadata_and_carries_no_quota_target(
         fields in any_fields(),
-        deadline in ".{0,40}",
-        deadline_type in ".{0,40}",
-        priority in ".{0,40}",
+        deadline in valid_deadline(),
+        deadline_type in prop::sample::select(vec!["hard", "soft"]),
+        priority in prop::sample::select(vec!["P1", "P2", "P3", "P4"]),
     ) {
+        let (deadline_text, deadline_ms) = deadline;
         let fields = TriageFields {
-            deadline: Some(deadline.clone()),
-            deadline_type: Some(deadline_type.clone()),
-            priority: Some(priority.clone()),
+            deadline: Some(deadline_text.to_string()),
+            deadline_type: Some(deadline_type.to_string()),
+            priority: Some(priority.to_string()),
             ..with_kind(fields, COMMITTED)
         };
 
@@ -93,30 +109,44 @@ proptest! {
         let attributes = kind.attributes();
 
         prop_assert_eq!(attributes.kind, COMMITTED);
-        prop_assert_eq!(attributes.deadline, Some(deadline.as_str()));
-        prop_assert_eq!(attributes.deadline_type, Some(deadline_type.as_str()));
-        prop_assert_eq!(attributes.priority, Some(priority.as_str()));
+        prop_assert_eq!(attributes.deadline, Some(deadline_ms));
+        prop_assert_eq!(attributes.deadline_type, Some(deadline_type));
+        prop_assert_eq!(attributes.priority, Some(priority));
         prop_assert!(!has_quota_target(&attributes));
     }
 
     /// A quota task reports back exactly the target it was given, and never a
-    /// deadline. The target fields stay nullable per T11.
+    /// deadline. T17 requires all three target fields at triage, so unlike
+    /// the pool case this generates only valid, complete targets.
     #[test]
     #[ignore]
-    fn a_quota_task_round_trips_its_target_and_carries_no_deadline(fields in any_fields()) {
-        let expected = fields.clone();
-        let kind = TaskKind::from_fields(&with_kind(fields, QUOTA)).unwrap();
+    fn a_quota_task_round_trips_its_target_and_carries_no_deadline(
+        fields in any_fields(),
+        target_count in any::<i64>(),
+        target_minutes_each in any::<i64>(),
+        period in prop::sample::select(vec!["week", "month"]),
+    ) {
+        let fields = TriageFields {
+            target_count: Some(target_count),
+            target_minutes_each: Some(target_minutes_each),
+            period: Some(period.to_string()),
+            ..with_kind(fields, QUOTA)
+        };
+
+        let kind = TaskKind::from_fields(&fields).unwrap();
         let attributes = kind.attributes();
 
         prop_assert_eq!(attributes.kind, QUOTA);
-        prop_assert_eq!(attributes.target_count, expected.target_count);
-        prop_assert_eq!(attributes.target_minutes_each, expected.target_minutes_each);
-        prop_assert_eq!(attributes.period, expected.period.as_deref());
+        prop_assert_eq!(attributes.target_count, Some(target_count));
+        prop_assert_eq!(attributes.target_minutes_each, Some(target_minutes_each));
+        prop_assert_eq!(attributes.period, Some(period));
         prop_assert!(!has_deadline(&attributes));
     }
 
     /// Whichever kind is accepted, at most one attribute group is populated.
     /// This is the invariant the three-variant sum type exists to guarantee.
+    /// Every field required by any kind is supplied and valid, so the
+    /// outcome turns only on which `kind` was named.
     #[test]
     #[ignore]
     fn an_accepted_task_never_populates_both_attribute_groups(
@@ -128,6 +158,9 @@ proptest! {
             deadline: Some("2026-08-20T17:00:00Z".to_string()),
             deadline_type: Some("hard".to_string()),
             priority: Some("P1".to_string()),
+            target_count: Some(3),
+            target_minutes_each: Some(45),
+            period: Some("week".to_string()),
             ..with_kind(fields, name)
         };
 
@@ -154,15 +187,11 @@ proptest! {
             ..with_kind(fields, COMMITTED)
         };
 
-        let expected = [
-            CommittedField::Deadline,
-            CommittedField::DeadlineType,
-            CommittedField::Priority,
-        ]
-        .into_iter()
-        .zip(&present)
-        .find(|(_, supplied)| !**supplied)
-        .map(|(field, _)| field);
+        let expected = [Field::Deadline, Field::DeadlineType, Field::Priority]
+            .into_iter()
+            .zip(&present)
+            .find(|(_, supplied)| !**supplied)
+            .map(|(field, _)| field);
 
         match expected {
             Some(field) => prop_assert_eq!(

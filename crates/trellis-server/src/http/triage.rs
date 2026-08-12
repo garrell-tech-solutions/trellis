@@ -38,6 +38,7 @@ fn triage_fields(payload: &Value) -> TriageFields {
 fn rejected(rejection: TriageRejection) -> (StatusCode, Json<Value>) {
     let body = match rejection {
         TriageRejection::MissingField(field) => json!({ "missing_field": field.name() }),
+        TriageRejection::InvalidField(field) => json!({ "invalid_field": field.name() }),
         TriageRejection::UnknownKind(submitted) => json!({ "unknown_kind": submitted }),
     };
     (StatusCode::UNPROCESSABLE_ENTITY, Json(body))
@@ -70,7 +71,7 @@ mod tests {
     use crate::test_support::test_pool;
     use axum::body::Body;
     use axum::http::Request;
-    use scheduler_core::task::CommittedField;
+    use scheduler_core::task::Field;
     use tower::ServiceExt;
 
     async fn insert_untriaged_capture(pool: &SqlitePool, raw_text: &str) -> i64 {
@@ -127,7 +128,7 @@ mod tests {
         let response = triage_response(&pool, capture_id, json!({ "kind": "pool" })).await;
 
         assert_eq!(response.status(), StatusCode::CREATED);
-        let row: (String, Option<String>, Option<i64>, Option<i64>, Option<String>) =
+        let row: (String, Option<i64>, Option<i64>, Option<i64>, Option<String>) =
             sqlx::query_as(
                 "SELECT kind, deadline, target_count, target_minutes_each, period FROM tasks WHERE capture_id = ?",
             )
@@ -160,7 +161,7 @@ mod tests {
         .await;
 
         assert_eq!(response.status(), StatusCode::CREATED);
-        let row: (String, Option<String>, Option<String>, Option<String>, Option<i64>) =
+        let row: (String, Option<i64>, Option<String>, Option<String>, Option<i64>) =
             sqlx::query_as(
                 "SELECT kind, deadline, deadline_type, priority, target_count FROM tasks WHERE capture_id = ?",
             )
@@ -169,7 +170,7 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(row.0, "committed");
-        assert_eq!(row.1.as_deref(), Some("2026-08-20T17:00:00Z"));
+        assert_eq!(row.1, Some(1787245200000));
         assert_eq!(row.2.as_deref(), Some("hard"));
         assert_eq!(row.3.as_deref(), Some("P1"));
         assert_eq!(row.4, None, "committed task must have no quota target");
@@ -270,6 +271,184 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn triaging_as_committed_with_a_required_field_left_empty_is_rejected_the_same_as_absent()
+    {
+        for field in ["deadline", "deadline_type", "priority"] {
+            let (_dir, pool) = test_pool().await;
+            let capture_id = insert_untriaged_capture(&pool, "call the dentist").await;
+
+            let mut payload = json!({
+                "kind": "committed",
+                "deadline": "2026-08-20T17:00:00Z",
+                "deadline_type": "hard",
+                "priority": "P1",
+            });
+            payload[field] = json!("");
+
+            let response = triage_response(&pool, capture_id, payload).await;
+
+            assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+            let body = response_json(response).await;
+            assert_eq!(
+                body.get("missing_field").and_then(Value::as_str),
+                Some(field),
+                "an empty {field} should be reported the same as an absent one"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn triaging_as_committed_with_an_unparseable_deadline_is_rejected_naming_it_invalid() {
+        let (_dir, pool) = test_pool().await;
+        let capture_id = insert_untriaged_capture(&pool, "call the dentist").await;
+
+        let response = triage_response(
+            &pool,
+            capture_id,
+            json!({
+                "kind": "committed",
+                "deadline": "banana",
+                "deadline_type": "hard",
+                "priority": "P1",
+            }),
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+        assert_eq!(
+            response_json(response).await,
+            json!({ "invalid_field": "deadline" })
+        );
+    }
+
+    #[tokio::test]
+    async fn triaging_as_committed_with_an_invalid_deadline_type_is_rejected_naming_it_invalid() {
+        let (_dir, pool) = test_pool().await;
+        let capture_id = insert_untriaged_capture(&pool, "call the dentist").await;
+
+        let response = triage_response(
+            &pool,
+            capture_id,
+            json!({
+                "kind": "committed",
+                "deadline": "2026-08-20T17:00:00Z",
+                "deadline_type": "squishy",
+                "priority": "P1",
+            }),
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+        assert_eq!(
+            response_json(response).await,
+            json!({ "invalid_field": "deadline_type" })
+        );
+    }
+
+    #[tokio::test]
+    async fn triaging_as_committed_with_an_invalid_priority_is_rejected_naming_it_invalid() {
+        let (_dir, pool) = test_pool().await;
+        let capture_id = insert_untriaged_capture(&pool, "call the dentist").await;
+
+        let response = triage_response(
+            &pool,
+            capture_id,
+            json!({
+                "kind": "committed",
+                "deadline": "2026-08-20T17:00:00Z",
+                "deadline_type": "hard",
+                "priority": "P9",
+            }),
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+        assert_eq!(
+            response_json(response).await,
+            json!({ "invalid_field": "priority" })
+        );
+    }
+
+    #[tokio::test]
+    async fn triaging_as_quota_without_a_required_target_field_is_rejected() {
+        for field in ["target_count", "target_minutes_each", "period"] {
+            let (_dir, pool) = test_pool().await;
+            let capture_id = insert_untriaged_capture(&pool, "go to the gym").await;
+
+            let mut payload = json!({
+                "kind": "quota",
+                "target_count": 3,
+                "target_minutes_each": 45,
+                "period": "week",
+            });
+            payload.as_object_mut().unwrap().remove(field);
+
+            let response = triage_response(&pool, capture_id, payload).await;
+
+            assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+            let body = response_json(response).await;
+            assert_eq!(
+                body.get("missing_field").and_then(Value::as_str),
+                Some(field)
+            );
+
+            let task_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM tasks")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+            assert_eq!(task_count, 0);
+        }
+    }
+
+    #[tokio::test]
+    async fn triaging_as_quota_with_period_left_empty_is_rejected_the_same_as_absent() {
+        let (_dir, pool) = test_pool().await;
+        let capture_id = insert_untriaged_capture(&pool, "go to the gym").await;
+
+        let response = triage_response(
+            &pool,
+            capture_id,
+            json!({
+                "kind": "quota",
+                "target_count": 3,
+                "target_minutes_each": 45,
+                "period": "",
+            }),
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+        assert_eq!(
+            response_json(response).await,
+            json!({ "missing_field": "period" })
+        );
+    }
+
+    #[tokio::test]
+    async fn triaging_as_quota_with_an_invalid_period_is_rejected_naming_it_invalid() {
+        let (_dir, pool) = test_pool().await;
+        let capture_id = insert_untriaged_capture(&pool, "go to the gym").await;
+
+        let response = triage_response(
+            &pool,
+            capture_id,
+            json!({
+                "kind": "quota",
+                "target_count": 3,
+                "target_minutes_each": 45,
+                "period": "fortnight",
+            }),
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+        assert_eq!(
+            response_json(response).await,
+            json!({ "invalid_field": "period" })
+        );
+    }
+
+    #[tokio::test]
     async fn triaging_as_a_kind_that_is_not_one_of_the_three_is_rejected_naming_it() {
         let (_dir, pool) = test_pool().await;
         let capture_id = insert_untriaged_capture(&pool, "buy milk").await;
@@ -342,9 +521,15 @@ mod tests {
 
     #[test]
     fn a_missing_field_rejection_names_the_field() {
-        let (status, Json(body)) =
-            rejected(TriageRejection::MissingField(CommittedField::Priority));
+        let (status, Json(body)) = rejected(TriageRejection::MissingField(Field::Priority));
         assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
         assert_eq!(body, json!({ "missing_field": "priority" }));
+    }
+
+    #[test]
+    fn an_invalid_field_rejection_names_the_field() {
+        let (status, Json(body)) = rejected(TriageRejection::InvalidField(Field::Deadline));
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+        assert_eq!(body, json!({ "invalid_field": "deadline" }));
     }
 }

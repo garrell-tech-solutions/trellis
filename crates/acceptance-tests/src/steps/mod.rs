@@ -16,8 +16,12 @@ use std::sync::LazyLock;
 
 mod build;
 mod capture;
+mod committed_empty_fields;
+mod committed_field_domains;
 mod migrations;
+mod quota_triage_validation;
 mod triage;
+mod unknown_kind_rejection;
 
 fn example_value<'a>(example: &'a BTreeMap<String, String>, name: &str) -> Result<&'a str, String> {
     example
@@ -102,6 +106,18 @@ pub async fn dispatch(
         return outcome;
     }
     if let Some(outcome) = triage::dispatch(world, text, example).await {
+        return outcome;
+    }
+    if let Some(outcome) = committed_empty_fields::dispatch(world, text, example).await {
+        return outcome;
+    }
+    if let Some(outcome) = committed_field_domains::dispatch(world, text, example).await {
+        return outcome;
+    }
+    if let Some(outcome) = quota_triage_validation::dispatch(world, text, example).await {
+        return outcome;
+    }
+    if let Some(outcome) = unknown_kind_rejection::dispatch(world, text, example).await {
         return outcome;
     }
     if let Some(outcome) = migrations::dispatch(world, text).await {

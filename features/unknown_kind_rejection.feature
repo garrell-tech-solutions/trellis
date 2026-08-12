@@ -1,3 +1,7 @@
+# acceptance-mutation-manifest-begin
+# {"version":1,"tested_at":"2026-08-12T21:49:22.950315036Z","feature_name":"Triage rejects a kind outside pool, committed and quota","feature_path":"features/unknown_kind_rejection.feature","background_hash":"0c56ef91538254d551a330ee3bf0b84ef91c3138861767ae4fe24fedb5500548","implementation_hash":"sha256:4b4809c877479bced618ae3873df3499e07b73b46333a4302b6a79552fc0d349","scenarios":[]}
+# acceptance-mutation-manifest-end
+
 # unknown-kind-rejection-named-01: triaging with a kind outside pool, committed and quota is rejected and creates nothing
 # unknown-kind-rejection-absent-02: triaging without naming a kind is rejected and creates nothing
 Feature: Triage rejects a kind outside pool, committed and quota

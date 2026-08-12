@@ -1,0 +1,10 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/scheduler-core",
+    "crates/trellis-server",
+    "crates/acceptance-tests",
+]
+
+[workspace.package]
+edition = "2021"

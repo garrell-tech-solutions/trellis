@@ -24,6 +24,11 @@ build/acceptance/
 build/acceptance-mutation/
 acceptance/generated/
 
+# This project's generated entrypoint dir (scripts/acceptance/generate.bb
+# writes here; Cargo auto-discovers tests/*.rs as integration test binaries).
+crates/acceptance-tests/tests/*_acceptance.rs
+crates/acceptance-tests/tests/metadata/
+
 # RustRover
 #  JetBrains specific template is maintained in a separate JetBrains.gitignore that can
 #  be found at https://github.com/github/gitignore/blob/main/Global/JetBrains.gitignore

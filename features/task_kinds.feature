@@ -1,3 +1,7 @@
+# acceptance-mutation-manifest-begin
+# {"version":1,"tested_at":"2026-08-12T18:23:53.222129929Z","feature_name":"Triage creates tasks in one of three kinds","feature_path":"features/task_kinds.feature","background_hash":"0c56ef91538254d551a330ee3bf0b84ef91c3138861767ae4fe24fedb5500548","implementation_hash":"sha256:f42eb6e18ae094316ca129abf7901128ee1ad1c94067533923abb7ac41c9b218","scenarios":[]}
+# acceptance-mutation-manifest-end
+
 # task-kinds-pool-01: triaging a capture as pool creates a pool task with no deadline and no quota target
 Feature: Triage creates tasks in one of three kinds
 

@@ -6,40 +6,23 @@
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
+source "$SCRIPT_DIR/lib.sh"
 cd "$ROOT_DIR"
 
 TMP_DIR="./tmp/qa-capture-endpoint"
 rm -rf "$TMP_DIR"
 mkdir -p "$TMP_DIR"
-DB_PATH="$TMP_DIR/captures.sqlite"
 
 echo "building trellis..." >&2
 cargo build --quiet -p trellis-server --bin trellis
 BIN="$ROOT_DIR/target/debug/trellis"
 
-PORT="$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1]); s.close()')"
-ADDR="127.0.0.1:$PORT"
+SERVER_PID=""
+trap qa_stop_server EXIT
 
 # Setup: start the server against a fresh database (no prior schema, so the
 # captures table starts empty).
-"$BIN" serve --db "$DB_PATH" --addr "$ADDR" >"$TMP_DIR/server.log" 2>&1 &
-SERVER_PID=$!
-cleanup() { kill "$SERVER_PID" 2>/dev/null || true; wait "$SERVER_PID" 2>/dev/null || true; }
-trap cleanup EXIT
-
-# Confirm the server is reachable before sending any capture request.
-READY=0
-for _ in $(seq 1 50); do
-  if (exec 3<>"/dev/tcp/127.0.0.1/$PORT") 2>/dev/null; then
-    exec 3<&- 3>&-
-    READY=1
-    break
-  fi
-  sleep 0.1
-done
-if [[ "$READY" -ne 1 ]]; then
-  echo "FAIL: server never became reachable at $ADDR" >&2
-  cat "$TMP_DIR/server.log" >&2
+if ! qa_start_server "$BIN" "$TMP_DIR/captures.sqlite" "$TMP_DIR/server.log"; then
   exit 1
 fi
 

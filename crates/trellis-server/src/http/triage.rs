@@ -1,62 +1,46 @@
+//! `POST /captures/{id}/triage`.
+
 use crate::clock::now_ms;
+use crate::http::write_failed;
+use crate::store;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::Json;
+use scheduler_core::task::{TaskKind, TriageFields, TriageRejection};
 use serde_json::{json, Value};
 use sqlx::SqlitePool;
 
-fn missing_committed_field(payload: &Value) -> Option<&'static str> {
-    ["deadline", "deadline_type", "priority"]
-        .into_iter()
-        .find(|field| payload.get(field).is_none())
+fn string_field(payload: &Value, name: &str) -> Option<String> {
+    payload
+        .get(name)
+        .and_then(Value::as_str)
+        .map(str::to_string)
 }
 
-async fn insert_task_row(
-    pool: &SqlitePool,
-    capture_id: i64,
-    payload: &Value,
-    created_at_ms: i64,
-) -> Result<(), StatusCode> {
-    let kind = payload.get("kind").and_then(Value::as_str).unwrap_or("");
-    let deadline = payload.get("deadline").and_then(Value::as_str);
-    let deadline_type = payload.get("deadline_type").and_then(Value::as_str);
-    let priority = payload.get("priority").and_then(Value::as_str);
-    let target_count = payload.get("target_count").and_then(Value::as_i64);
-    let target_minutes_each = payload.get("target_minutes_each").and_then(Value::as_i64);
-    let period = payload.get("period").and_then(Value::as_str);
-
-    sqlx::query(
-        "INSERT INTO tasks (capture_id, kind, deadline, deadline_type, priority, \
-         target_count, target_minutes_each, period, created_at_ms) \
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-    )
-    .bind(capture_id)
-    .bind(kind)
-    .bind(deadline)
-    .bind(deadline_type)
-    .bind(priority)
-    .bind(target_count)
-    .bind(target_minutes_each)
-    .bind(period)
-    .bind(created_at_ms)
-    .execute(pool)
-    .await
-    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    Ok(())
+/// Translates the JSON body into the core's triage input. This function is
+/// the whole of the transport's involvement: nothing it calls sees
+/// `serde_json`.
+fn triage_fields(payload: &Value) -> TriageFields {
+    TriageFields {
+        kind: string_field(payload, "kind"),
+        deadline: string_field(payload, "deadline"),
+        deadline_type: string_field(payload, "deadline_type"),
+        priority: string_field(payload, "priority"),
+        target_count: payload.get("target_count").and_then(Value::as_i64),
+        target_minutes_each: payload.get("target_minutes_each").and_then(Value::as_i64),
+        period: string_field(payload, "period"),
+    }
 }
 
-async fn mark_capture_triaged(
-    pool: &SqlitePool,
-    capture_id: i64,
-    triaged_at_ms: i64,
-) -> Result<(), StatusCode> {
-    sqlx::query("UPDATE captures SET triaged_at = ? WHERE id = ?")
-        .bind(triaged_at_ms)
-        .bind(capture_id)
-        .execute(pool)
-        .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    Ok(())
+/// The rejection contract: a client error whose body names what was wrong.
+/// A rejection that does not say what was wrong is a failure even with the
+/// right status code.
+fn rejected(rejection: TriageRejection) -> (StatusCode, Json<Value>) {
+    let body = match rejection {
+        TriageRejection::MissingField(field) => json!({ "missing_field": field.name() }),
+        TriageRejection::UnknownKind(submitted) => json!({ "unknown_kind": submitted }),
+    };
+    (StatusCode::UNPROCESSABLE_ENTITY, Json(body))
 }
 
 pub async fn create_triage(
@@ -64,19 +48,18 @@ pub async fn create_triage(
     Path(capture_id): Path<i64>,
     Json(payload): Json<Value>,
 ) -> Result<(StatusCode, Json<Value>), StatusCode> {
-    let kind = payload.get("kind").and_then(Value::as_str).unwrap_or("");
-    if kind == "committed" {
-        if let Some(field) = missing_committed_field(&payload) {
-            return Ok((
-                StatusCode::UNPROCESSABLE_ENTITY,
-                Json(json!({ "missing_field": field })),
-            ));
-        }
-    }
+    let kind = match TaskKind::from_fields(&triage_fields(&payload)) {
+        Ok(kind) => kind,
+        Err(rejection) => return Ok(rejected(rejection)),
+    };
 
     let created_at_ms = now_ms();
-    insert_task_row(&pool, capture_id, &payload, created_at_ms).await?;
-    mark_capture_triaged(&pool, capture_id, created_at_ms).await?;
+    store::task::insert(&pool, capture_id, &kind, created_at_ms)
+        .await
+        .map_err(write_failed)?;
+    store::capture::mark_triaged(&pool, capture_id, created_at_ms)
+        .await
+        .map_err(write_failed)?;
 
     Ok((StatusCode::CREATED, Json(json!({}))))
 }
@@ -86,11 +69,11 @@ mod tests {
     use super::*;
     use crate::test_support::test_pool;
     use axum::body::Body;
-    use axum::http::{Request, StatusCode};
-    use serde_json::json;
+    use axum::http::Request;
+    use scheduler_core::task::CommittedField;
     use tower::ServiceExt;
 
-    async fn insert_untriaged_capture(pool: &sqlx::SqlitePool, raw_text: &str) -> i64 {
+    async fn insert_untriaged_capture(pool: &SqlitePool, raw_text: &str) -> i64 {
         sqlx::query_scalar(
             "INSERT INTO captures (raw_text, source, created_at_ms) VALUES (?, 'web', 0) RETURNING id",
         )
@@ -101,9 +84,9 @@ mod tests {
     }
 
     async fn triage_response(
-        pool: &sqlx::SqlitePool,
+        pool: &SqlitePool,
         capture_id: i64,
-        body: serde_json::Value,
+        body: Value,
     ) -> axum::response::Response {
         let app = crate::app::build_app(pool.clone());
         app.oneshot(
@@ -116,6 +99,24 @@ mod tests {
         )
         .await
         .unwrap()
+    }
+
+    async fn response_json(response: axum::response::Response) -> Value {
+        let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        serde_json::from_slice(&bytes).unwrap()
+    }
+
+    fn committed_payload_missing(field: &str) -> Value {
+        let mut payload = json!({
+            "kind": "committed",
+            "deadline": "2026-08-20T17:00:00Z",
+            "deadline_type": "hard",
+            "priority": "P1"
+        });
+        payload.as_object_mut().unwrap().remove(field);
+        payload
     }
 
     #[tokio::test]
@@ -139,13 +140,6 @@ mod tests {
         assert_eq!(row.2, None, "pool task must have no quota target");
         assert_eq!(row.3, None, "pool task must have no quota target");
         assert_eq!(row.4, None, "pool task must have no quota target");
-    }
-
-    async fn response_json(response: axum::response::Response) -> serde_json::Value {
-        let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
-            .await
-            .unwrap();
-        serde_json::from_slice(&bytes).unwrap()
     }
 
     #[tokio::test]
@@ -214,15 +208,23 @@ mod tests {
         assert_eq!(row.4, None, "quota task must have no deadline");
     }
 
-    async fn committed_payload_missing(field: &str) -> serde_json::Value {
-        let mut payload = json!({
-            "kind": "committed",
-            "deadline": "2026-08-20T17:00:00Z",
-            "deadline_type": "hard",
-            "priority": "P1"
-        });
-        payload.as_object_mut().unwrap().remove(field);
-        payload
+    #[tokio::test]
+    async fn an_accepted_triage_stamps_the_capture_as_triaged() {
+        let (_dir, pool) = test_pool().await;
+        let capture_id = insert_untriaged_capture(&pool, "buy milk").await;
+
+        triage_response(&pool, capture_id, json!({ "kind": "pool" })).await;
+
+        let triaged_at: Option<i64> =
+            sqlx::query_scalar("SELECT triaged_at FROM captures WHERE id = ?")
+                .bind(capture_id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert!(
+            triaged_at.is_some(),
+            "an accepted triage consumes the capture"
+        );
     }
 
     #[tokio::test]
@@ -232,7 +234,7 @@ mod tests {
             let capture_id = insert_untriaged_capture(&pool, "call the dentist").await;
 
             let response =
-                triage_response(&pool, capture_id, committed_payload_missing(field).await).await;
+                triage_response(&pool, capture_id, committed_payload_missing(field)).await;
 
             assert_eq!(
                 response.status(),
@@ -267,40 +269,82 @@ mod tests {
         }
     }
 
+    #[tokio::test]
+    async fn triaging_as_a_kind_that_is_not_one_of_the_three_is_rejected_naming_it() {
+        let (_dir, pool) = test_pool().await;
+        let capture_id = insert_untriaged_capture(&pool, "buy milk").await;
+
+        let response = triage_response(&pool, capture_id, json!({ "kind": "someday" })).await;
+
+        assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+        assert_eq!(
+            response_json(response).await,
+            json!({ "unknown_kind": "someday" })
+        );
+
+        let task_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM tasks")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(task_count, 0);
+    }
+
+    #[tokio::test]
+    async fn triaging_without_naming_a_kind_is_rejected() {
+        let (_dir, pool) = test_pool().await;
+        let capture_id = insert_untriaged_capture(&pool, "buy milk").await;
+
+        let response = triage_response(&pool, capture_id, json!({})).await;
+
+        assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+        assert_eq!(
+            response_json(response).await,
+            json!({ "unknown_kind": Value::Null })
+        );
+    }
+
     #[test]
-    fn missing_committed_field_is_none_when_all_three_are_present() {
+    fn triage_fields_reads_every_field_the_core_asks_for() {
         let payload = json!({
+            "kind": "quota",
             "deadline": "2026-08-20T17:00:00Z",
             "deadline_type": "hard",
-            "priority": "P1"
+            "priority": "P1",
+            "target_count": 3,
+            "target_minutes_each": 45,
+            "period": "week"
         });
-        assert_eq!(missing_committed_field(&payload), None);
+
+        assert_eq!(
+            triage_fields(&payload),
+            TriageFields {
+                kind: Some("quota".to_string()),
+                deadline: Some("2026-08-20T17:00:00Z".to_string()),
+                deadline_type: Some("hard".to_string()),
+                priority: Some("P1".to_string()),
+                target_count: Some(3),
+                target_minutes_each: Some(45),
+                period: Some("week".to_string()),
+            }
+        );
     }
 
     #[test]
-    fn missing_committed_field_reports_a_missing_deadline() {
-        let payload = json!({
-            "deadline_type": "hard",
-            "priority": "P1"
-        });
-        assert_eq!(missing_committed_field(&payload), Some("deadline"));
+    fn triage_fields_treats_an_empty_body_as_nothing_submitted() {
+        assert_eq!(triage_fields(&json!({})), TriageFields::default());
     }
 
     #[test]
-    fn missing_committed_field_reports_a_missing_deadline_type() {
-        let payload = json!({
-            "deadline": "2026-08-20T17:00:00Z",
-            "priority": "P1"
-        });
-        assert_eq!(missing_committed_field(&payload), Some("deadline_type"));
+    fn triage_fields_ignores_a_field_submitted_with_the_wrong_json_type() {
+        let payload = json!({ "kind": 7, "target_count": "three" });
+        assert_eq!(triage_fields(&payload), TriageFields::default());
     }
 
     #[test]
-    fn missing_committed_field_reports_a_missing_priority() {
-        let payload = json!({
-            "deadline": "2026-08-20T17:00:00Z",
-            "deadline_type": "hard"
-        });
-        assert_eq!(missing_committed_field(&payload), Some("priority"));
+    fn a_missing_field_rejection_names_the_field() {
+        let (status, Json(body)) =
+            rejected(TriageRejection::MissingField(CommittedField::Priority));
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+        assert_eq!(body, json!({ "missing_field": "priority" }));
     }
 }

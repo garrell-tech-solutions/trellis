@@ -53,6 +53,8 @@ against it rather than quietly reversing it.
 | T12 | Pins are a first-class entity in the Constraints layer: `pin { task_id, start, end, source }`. `pinned` is **not** a column on `Block`. Lands at **M3**, with the `schedule()` signature that consumes it — not at M1. | Resolves C1. Blocks are Plan-layer: disposable, engine-written, deleted wholesale on every recompute (R10). A pin is user-authored intent, so a pin living on a block cannot survive the recompute that deletes its row — which makes M3's regeneration property ("delete all future blocks, re-run, get byte-identical placements") and M6's "a drag creates a pin that survives the next recompute" mutually unsatisfiable. `schedule(tasks, hard_events, guardrails, **pins**, now)` had already made the call implicitly by taking pins as an *input*. Rejected alternative: keep `pinned` on `Block` and exempt pinned rows from deletion — that makes the Plan layer partly durable, the exact fact/plan confusion C2 is separately untangling, and weakens M3's strongest property to "delete all *non-pinned* blocks". Deferred to M3 because pins have no M1 behaviour: no `Block` to drop the column from, no scheduler to consume them, no drag to create one. |
 | T13 | Auto-close is recorded as an **event**, not a column: `auto_close_event { task_id, closed_at, remaining_minutes_before, undone_at }`. Lands at **M6** with auto-close itself. | Resolves C4, and goes further than the issue proposed. The AC bundled two requirements into one column: *undo restores exactly*, and *R1 can measure an undo rate*. A column on `task` serves the first and cannot serve the second — it is overwritten on the second close, so the event denominator is wrong and a task that auto-closes repeatedly (the strongest possible evidence that silence does **not** mean done for that work) collapses to a single row. Undo restores from the latest event with `undone_at IS NULL`; undo rate is `count(undone_at IS NOT NULL) / count(*)`, which is what R1's 15%/30% thresholds actually need. Falling back to `estimated_minutes` was never viable: it is correct only for never-started tasks, where undo matters least, and silently inflates every partially-completed one. Additive, so it does not block M1. |
 | T14 | `archived_at` is the single archive signal. `status: dropped` is removed. | Resolves N1. Two fields for one state, in a system where D7 makes archiving the *default* outcome reached implicitly from several paths — decay pass, three-strike, and simply closing the review (U7) — means every path gets two chances to set one and forget the other. The resulting half-archived task is alive on whichever surface filters the field that was missed: a task returning from the dead, in a product whose entire value is that the user trusts what it shows. M8's all-surfaces proptest is the test designed to catch this, and it can only assert a clean invariant against one field. `archived_at` also carries strictly more information — the reckoning's "47 archived this quarter, 31 Learning" needs a timestamp, which `status: dropped` cannot supply. |
+| T15 | Three layers, dependencies pointing inward: `scheduler-core` holds the rules; `trellis-server::http` translates requests into core inputs; `trellis-server::store` translates core types into rows. Adapters name core types; the core names neither. | The rules had been living inside the axum handlers, expressed as `serde_json::Value` probes and `StatusCode` returns — the function that wrote a task row took a *transport* type as a parameter and returned an *HTTP* type as its error. That leaves no seam to test a rule at: answering "is this triage valid?" required a running server and a SQLite pool. It also made T2's "a Postgres swap stays mechanical" untrue, since the queries were spread across handler modules instead of confined to one layer. The split is what makes `scheduler-core` non-empty for the first time, and gives T4's no-tokio rule something to protect. `store/mod.rs` carries a unit test asserting that no store module names `axum` or `StatusCode`: a layering rule nothing checks is a comment. |
+| T16 | `kind` is validated against the three variants at the boundary. A submission naming anything else is rejected with `422 {"unknown_kind": <submitted>}`. | T11 committed to a three-variant sum type, but the M1 implementation read `kind` as `payload.get("kind").and_then(as_str).unwrap_or("")` and stored whatever string arrived, so `{"kind":"banana"}` wrote `banana` into a column whose domain is three values. That is the failure mode T11 named — not the `if committed {} else {}` shape it predicted, but a weaker one, with no discrimination at all. Since `tasks.kind` carries no `CHECK` constraint, the only thing standing between a typo and durable out-of-domain data was the caller. Rejecting is a **behaviour change on input nothing specifies**: no feature, QA procedure or unit test covered an unrecognised kind, and the old permissiveness was an artifact of `unwrap_or("")` rather than a decision. Rejected alternative: keep a fourth catch-all variant to preserve the old behaviour exactly — that reintroduces the stringly-typed hole inside the very type introduced to close it, and makes every future `match` carry an arm that means "we do not know what this is". |
 
 ## Rejected
 
@@ -147,3 +149,35 @@ menu, pool or review — is M8's proptest to own.
    scheduler look broken, and the infeasibility report's closed reason enum
    (`no_window`, `capacity_exceeded`, `deadline_unreachable`,
    `chunk_policy_unsatisfiable`) has no code for "a stale pin is in the way".
+
+### 2026-08-12 — M1 layering
+
+Recorded as T15 and T16. The M1 triage slice worked, but all of it lived in the
+axum handlers: `scheduler-core` was three lines of doc comment, and the crate
+purity rule T4 guards was guarding an empty room.
+
+**One externally visible behaviour change**, called out because it is not a
+refactor: triaging with a `kind` outside `pool | committed | quota` — including
+omitting `kind` entirely — now returns `422 {"unknown_kind": <submitted>}`
+instead of `201` with the arbitrary string written to `tasks.kind`. See T16 for
+why this was treated as a schema-integrity hole rather than behaviour worth
+preserving. Everything the acceptance criteria *do* specify is unchanged,
+including the `{"missing_field": ...}` rejection body and the order the three
+committed fields are reported in.
+
+**What the sum type bought immediately.** "A pool task has no deadline" and "a
+quota task has no deadline" were previously assertions about the payload a test
+happened to send; the handler would have stored a deadline on a pool task had
+one been supplied. They are now properties of the type, and
+`crates/scheduler-core/tests/task_properties.rs` asserts them against arbitrary
+inputs rather than the two example rows.
+
+**Known-red gate, untouched and pre-existing:** `scripts/analyzers/complexity.sh`
+reports three violations, all in `crates/acceptance-tests/src/steps/`
+(`capture::dispatch` 14, `triage::dispatch` 17, `when_triaged` 9) against T9's
+threshold of 8. Verified identical before and after this change. These are step
+dispatchers — regex chains where every arm is a one-line delegation — so T9's
+"extract the logic that is not the match" does not straightforwardly apply, and
+the fix is more likely to be splitting the step modules by Gherkin phase than
+flattening anything. Left alone deliberately rather than absorbed into a
+layering change.

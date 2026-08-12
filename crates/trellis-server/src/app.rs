@@ -1,9 +1,12 @@
+//! Composition root: wires the delivery layer's handlers onto routes and
+//! hands them the pool they persist through.
+
 use axum::routing::post;
 use axum::Router;
 use sqlx::SqlitePool;
 
-use crate::capture::create_capture;
-use crate::triage::create_triage;
+use crate::http::capture::create_capture;
+use crate::http::triage::create_triage;
 
 pub fn build_app(pool: SqlitePool) -> Router {
     Router::new()

@@ -68,7 +68,8 @@ Keep it dense. Cite state, do not re-narrate the roadmap; link to the milestone 
 ## Handing Off To The Specifier
 Once the user signs off on a slice:
 
-1. Write the handoff brief at `docs/plans/YYYY-MM-DD-<slug>-brief.md`: goal and scope; decisions already made (marked "confirm, don't re-litigate"); acceptance scenarios worth specifying; known repo gotchas; dependencies and sequencing; open questions for the specifier; links to source design docs and issues.
+1. Write the handoff brief at `docs/plans/YYYY-MM-DD-<slug>-brief.md`: goal and scope; **the demo**; decisions already made (marked "confirm, don't re-litigate"); acceptance scenarios worth specifying; known repo gotchas; dependencies and sequencing; open questions for the specifier; links to source design docs and issues.
+   - **Every brief carries a Demo section**: the exact commands to run the application after this slice merges, what to do, and what the user will see that they could not see before. Write it before the scope section — if you cannot write it, the slice is not shaped right and needs recutting, not handing out. A slice whose only observable effect is that tests pass does not meet the project's definition of done; pair it with the thinnest surface that exposes it.
 2. Mirror the brief onto its issue: lead the body with "**Handoff brief — ready for specifier.**" and include a `## Source` link to the brief file.
 3. Invent a short stable task name for the slice. The specifier preserves it through the pipeline and uses it for the branch and pull-request title, so make it a slug: lowercase, hyphenated, no spaces.
 4. Commit the brief on the base branch — docs-only.

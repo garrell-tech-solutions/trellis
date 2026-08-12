@@ -4,3 +4,10 @@ version = "0.1.0"
 edition.workspace = true
 
 [dependencies]
+
+# T4: this crate has no runtime dependencies and is meant to keep it that way.
+# proptest is a dev-dependency only, and pulls in neither tokio nor sqlx —
+# scheduler_core_purity.feature checks that with `cargo tree`, which includes
+# dev-dependencies.
+[dev-dependencies]
+proptest = "1.11.0"

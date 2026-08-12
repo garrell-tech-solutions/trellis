@@ -1,0 +1,97 @@
+name: CI
+
+# The fast gate. Every check here is one of the canonical commands from
+# swarmforge/constitution/articles/stack.prompt, or an existing executable QA
+# procedure under scripts/qa/. Nothing is reimplemented in YAML: the scripts
+# stay the single authoritative definition of what they assert.
+#
+# The slow analyzers (mutation, CRAP, DRY, coverage) are deliberately NOT here
+# -- see issue #23. Add them once this gate is green and trusted.
+
+on:
+  push:
+    branches: [trunk]
+  pull_request:
+    branches: [trunk]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  gate:
+    name: fmt, clippy, test, T4 purity, musl release
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v5
+
+      # libsqlite3-sys compiles C against the musl target, so the release
+      # build needs a musl C toolchain. The cc crate picks up musl-gcc for
+      # x86_64-unknown-linux-musl automatically once musl-tools is present.
+      - name: Install musl C toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends musl-tools
+
+      # No toolchain action: `rustup toolchain install` with no toolchain
+      # argument installs exactly the toolchain rust-toolchain.toml pins,
+      # rather than overriding the pin with a RUSTUP_TOOLCHAIN of its own.
+      #
+      # The component/target adds are a separate, deliberate step. When the
+      # pinned toolchain is already present -- which it is on ubuntu-latest,
+      # since the runner images ship stable -- `rustup toolchain install`
+      # short-circuits with "using existing install" and silently ignores its
+      # own --component and --target flags. Passing them there looks correct
+      # and does nothing. `rustup {component,target} add` is idempotent and
+      # applies to the active (pinned) toolchain, so it works either way.
+      - name: Install the toolchain pinned by rust-toolchain.toml
+        run: |
+          rustup toolchain install --profile minimal
+          rustup component add clippy rustfmt
+          rustup target add x86_64-unknown-linux-musl
+          rustup show active-toolchain
+          cargo --version
+          rustc --version
+
+      # Fail loudly and early if the musl std is missing, rather than 400
+      # crates later with a confusing "can't find crate for `core`".
+      - name: Verify the musl target is installed
+        run: |
+          rustup target list --installed
+          rustup target list --installed | grep -qx x86_64-unknown-linux-musl
+
+      # Caches the cargo registry and target/ only. The T4 purity gate below
+      # resolves from Cargo.toml and Cargo.lock via `cargo tree`, so no cached
+      # build artifact can make it pass when it should fail.
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Format
+        run: cargo fmt --all -- --check
+
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Test
+        run: cargo test --workspace
+
+      # decisions.md T4 / issue #8 acceptance criterion 3: scheduler-core must
+      # not depend on tokio or sqlx. Release gate for every milestone from M0
+      # onward. Runs even when an earlier step failed, so a red test suite can
+      # never mask a purity regression.
+      - name: T4 release gate -- scheduler-core purity
+        if: ${{ !cancelled() }}
+        run: ./scripts/qa/scheduler_core_purity.sh
+
+      # Runs `cargo build --release --target x86_64-unknown-linux-musl` and
+      # then asserts via ldd that the produced binary is actually static --
+      # a release build that exits 0 but links dynamically is not a pass.
+      - name: Release build (musl, static)
+        run: ./scripts/qa/release_binary.sh

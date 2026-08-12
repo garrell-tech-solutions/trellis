@@ -15,6 +15,7 @@ mod tests {
     use super::*;
     use axum::body::Body;
     use axum::http::{Request, StatusCode};
+    use proptest::prelude::*;
     use tower::ServiceExt;
 
     async fn test_pool() -> (tempfile::TempDir, sqlx::SqlitePool) {
@@ -52,5 +53,41 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(row, ("buy milk".to_string(), "web".to_string()));
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig { cases: 32, ..ProptestConfig::default() })]
+        #[test]
+        #[ignore]
+        fn capture_round_trips_arbitrary_text_and_source(raw_text in ".{0,200}", source in ".{0,50}") {
+            let rt = tokio::runtime::Runtime::new().unwrap();
+            let (status, stored) = rt.block_on(async {
+                let (_dir, pool) = test_pool().await;
+                let app = build_app(pool.clone());
+
+                let body = serde_json::json!({"raw_text": raw_text, "source": source}).to_string();
+                let response = app
+                    .oneshot(
+                        Request::builder()
+                            .method("POST")
+                            .uri("/captures")
+                            .header("content-type", "application/json")
+                            .body(Body::from(body))
+                            .unwrap(),
+                    )
+                    .await
+                    .unwrap();
+                let status = response.status();
+
+                let row: (String, String) = sqlx::query_as("SELECT raw_text, source FROM captures")
+                    .fetch_one(&pool)
+                    .await
+                    .unwrap();
+                (status, row)
+            });
+
+            prop_assert_eq!(status, StatusCode::CREATED);
+            prop_assert_eq!(stored, (raw_text, source));
+        }
     }
 }

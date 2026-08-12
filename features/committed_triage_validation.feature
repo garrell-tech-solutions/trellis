@@ -4,11 +4,14 @@
 # acceptance-mutation-manifest-end
 
 # committed-triage-validation-missing-field-01: committed triage is rejected when a required field is absent
+# committed-triage-validation-empty-field-02: committed triage is rejected when a required field is left empty, the same way as when it is absent
 Feature: Committed triage requires deadline, deadline type and priority
 
-  Scenario: Triaging as committed without a required field is rejected and creates nothing
+  Background:
     Given the trellis server is running with an empty task list
     And a capture with raw text "call the dentist" is waiting in the untriaged queue
+
+  Scenario: Triaging as committed without a required field is rejected and creates nothing
     When the capture is triaged as a committed task with "<missing_field>" omitted
     Then the triage is rejected
     And the rejection names "<missing_field>"
@@ -17,6 +20,20 @@ Feature: Committed triage requires deadline, deadline type and priority
 
     Examples:
       | missing_field |
+      | deadline      |
+      | deadline_type |
+      | priority      |
+
+  # committed-triage-validation-empty-field-02: committed triage is rejected when a required field is left empty, the same way as when it is absent
+  Scenario: Triaging as committed with a required field left empty is rejected the same way as omitting it
+    When the capture is triaged as a committed task with "<empty_field>" left empty
+    Then the triage is rejected
+    And the rejection names "<empty_field>"
+    And the task list is still empty
+    And the capture is still waiting in the untriaged queue
+
+    Examples:
+      | empty_field   |
       | deadline      |
       | deadline_type |
       | priority      |

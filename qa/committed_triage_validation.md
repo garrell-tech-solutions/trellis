@@ -46,6 +46,35 @@ For each row:
 - The capture is still present in the untriaged queue, and is still untriaged —
   a rejected triage must not consume the capture.
 
+## Procedure — required field left empty — repeat once per example row
+
+Example rows — the field submitted as an empty string in an otherwise complete
+committed submission:
+
+| empty_field   |
+|---------------|
+| deadline      |
+| deadline_type |
+| priority      |
+
+For each row:
+
+1. Triage the capture as kind `committed`, supplying every required field with
+   its normal value, except the row's `empty_field`, which is submitted as
+   `""`.
+2. Observe the response status.
+3. Observe the response body.
+4. Query the tasks table and count its rows.
+5. Re-read the untriaged queue.
+
+### Expected Observable Outcomes
+- Triage is rejected, and the response body names the empty field — the same
+  rejection shape as the row's field being omitted entirely. An empty string
+  is not a value the field is willing to accept; it must not be treated as
+  "present."
+- The tasks table is still empty and the capture is still present, untriaged,
+  in the queue.
+
 ## Independent of Implementation
 
 This procedure depends only on the triage endpoint's rejection contract and on

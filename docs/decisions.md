@@ -12,8 +12,26 @@ against it rather than quietly reversing it.
 - **State** (what is in flight, what is done): the project board —
   https://github.com/orgs/garrell-tech-solutions/projects/4
 - **Phases and acceptance criteria**: GitHub Milestones and their epic issues.
-- **Architecture**: `docs/design/brief.md`.
+- **Architecture**: `docs/design/brief.md` — **does not exist yet.** Every epic
+  links to it. Until it lands, the vocabulary it would define lives nowhere; see
+  the 2026-08-12 vocabulary note below.
 - **Rationale and rejected options**: this file.
+
+## How to read the IDs
+
+Rows are referenced by prefix throughout the repo and the tracker.
+
+| Prefix | Where | Means |
+|---|---|---|
+| **D**_n_ | this file | Settled **product** decision |
+| **T**_n_ | this file | Settled **technical** decision |
+| **R**_n_ | this file | **Rejected** — considered and refused, with why |
+| **O**_n_ | this file | **Open** question, not yet answered |
+| **C**_n_ | issues #2–#6 | **Correction** — a place the original product brief contradicts itself |
+| **U**_n_, N1 | issue #7 | **Underspecified** — the brief is silent and an agent will guess |
+
+`O2` is titled `OQ2` on issue #1. Same question; the issue title predates this
+scheme.
 
 ---
 
@@ -34,6 +52,7 @@ against it rather than quietly reversing it.
 | D11 | Emergent gaps are offered, not filled. | Dragging Thursday's deep work into a random Tuesday hole is behaving badly. Recompute committed work at domain boundaries; surface the menu mid-stream. |
 | D12 | Staleness threshold is deliberately unset; instrument first, tune at the first monthly reckoning. Per-domain config. | The pool's turnover rate is unknown until the system runs. Seeded at 21 days / ≥3 offers. |
 | D13 | An unmet quota does **not** roll over. A missed week is missed. | Carrying it forward re-creates exactly the accumulating phantom obligation that D4 (silence-means-done) exists to prevent. "You did 1 of 3 runs last week" is a reckoning fact, not a debt. Paired with T11. |
+| D14 | **Every pipeline slice ends in something the user can run and see.** A slice is not done when its tests pass; it is done when the owner can start the app and watch the new behaviour happen. A slice with no visible surface carries the thinnest surface that exposes it. Size does not matter — smaller is better. | This is the owner's professional standard with their own clients, not a preference about this project: continuous visible delivery is the customer's best case, and building for fifteen slices before the customer can try anything is the failure mode it exists to prevent. Three things it buys, all of which the plan was otherwise deferring. **Feedback:** #20's risk register (R1/R2/R3) names three assumptions that are all behavioural — silence-means-done, the ~40% committed ratio, whether the menu beats a list. None can be tested by building a correct scheduler; they need the owner living with the thing, so calendar time is the scarce resource, not engineering time. #9's AC-6 already conceded this by requiring `/stats` live "weeks before it is read". **Clear thinking:** a working system is a better argument about what to build next than a roadmap is. **Value:** the product is useful as an inbox long before it is useful as a scheduler. Cost, accepted knowingly: some slices grow a surface they would not otherwise need, and early surfaces are plain and will be reworked. Rejected alternative: keep the horizontal milestone cut and add UI at the end — that is precisely the fifteen-slice wait, and it defers every behavioural risk to the point where acting on what is learned is most expensive. |
 
 ## Settled — technical
 
@@ -55,6 +74,7 @@ against it rather than quietly reversing it.
 | T14 | `archived_at` is the single archive signal. `status: dropped` is removed. | Resolves N1. Two fields for one state, in a system where D7 makes archiving the *default* outcome reached implicitly from several paths — decay pass, three-strike, and simply closing the review (U7) — means every path gets two chances to set one and forget the other. The resulting half-archived task is alive on whichever surface filters the field that was missed: a task returning from the dead, in a product whose entire value is that the user trusts what it shows. M8's all-surfaces proptest is the test designed to catch this, and it can only assert a clean invariant against one field. `archived_at` also carries strictly more information — the reckoning's "47 archived this quarter, 31 Learning" needs a timestamp, which `status: dropped` cannot supply. |
 | T15 | Three layers, dependencies pointing inward: `scheduler-core` holds the rules; `trellis-server::http` translates requests into core inputs; `trellis-server::store` translates core types into rows. Adapters name core types; the core names neither. | The rules had been living inside the axum handlers, expressed as `serde_json::Value` probes and `StatusCode` returns — the function that wrote a task row took a *transport* type as a parameter and returned an *HTTP* type as its error. That leaves no seam to test a rule at: answering "is this triage valid?" required a running server and a SQLite pool. It also made T2's "a Postgres swap stays mechanical" untrue, since the queries were spread across handler modules instead of confined to one layer. The split is what makes `scheduler-core` non-empty for the first time, and gives T4's no-tokio rule something to protect. `store/mod.rs` carries a unit test asserting that no store module names `axum` or `StatusCode`: a layering rule nothing checks is a comment. |
 | T16 | `kind` is validated against the three variants at the boundary. A submission naming anything else is rejected with `422 {"unknown_kind": <submitted>}`. | T11 committed to a three-variant sum type, but the M1 implementation read `kind` as `payload.get("kind").and_then(as_str).unwrap_or("")` and stored whatever string arrived, so `{"kind":"banana"}` wrote `banana` into a column whose domain is three values. That is the failure mode T11 named — not the `if committed {} else {}` shape it predicted, but a weaker one, with no discrimination at all. Since `tasks.kind` carries no `CHECK` constraint, the only thing standing between a typo and durable out-of-domain data was the caller. Rejecting is a **behaviour change on input nothing specifies**: no feature, QA procedure or unit test covered an unrecognised kind, and the old permissiveness was an artifact of `unwrap_or("")` rather than a decision. Rejected alternative: keep a fourth catch-all variant to preserve the old behaviour exactly — that reintroduces the stringly-typed hole inside the very type introduced to close it, and makes every future `match` carry an arm that means "we do not know what this is". |
+| T17 | **The fact/plan line runs inside the `Block` table, by block state.** `proposed` and `published` future blocks are the **Plan layer** — disposable, engine-written, deleted wholesale and regenerated on every recompute. `in_progress`, `completed` and `missed` blocks, plus pins, are the **Constraints layer** — immutable facts, read by the engine and never written by it. The determinism property is therefore: *delete every `proposed`/`published` future block, re-run with the same facts, get byte-identical placements.* The signature is `schedule(tasks, busy, guardrails, pins, facts, prior_plan, now) -> placements`. | Resolves C2 (#3), ratified by the owner 2026-08-12. As originally written — "delete every block and regenerate" — the property was not merely wrong but **untestable**, because the move penalty makes the objective depend on previous placements and past blocks are immutable inputs. Wiping the table would destroy history and pins alongside the plan. Drawing the line inside the table rather than splitting it keeps one query surface while making the disposable set precisely definable. Two naming rules come with it, because the vocabulary was in use before it was defined: (1) **"Plan" and "Constraints" are the layer names**; "Facts" is informal shorthand for the immutable block subset, not a third layer. (2) **"Layer" is reserved for this domain split** — T15's code organisation is the **module boundary**, not layers, because a `Block` row is otherwise Plan-layer and store-layer at once and the word stops carrying information. Note T15's inline five-argument rendering of `schedule()` predates this and is an abbreviation, not a competing decision; the seven-argument form above is the contract, and #11's AC-1 already says "corrected signature per C2". |
 
 ## Rejected
 
@@ -181,3 +201,39 @@ dispatchers — regex chains where every arm is a one-line delegation — so T9'
 the fix is more likely to be splitting the step modules by Gherkin phase than
 flattening anything. Left alone deliberately rather than absorbed into a
 layering change.
+
+### 2026-08-12 — Delivery shape, and the vocabulary gap
+
+**D14 changes what a slice is.** Every pipeline slice now ends in something the
+owner can run and see. This is a resequencing, not new scope: M1's remaining
+work is unchanged, but it is cut so that each merge is observable rather than
+grouped by component. M1's story 2 — "Untriaged queue UI" — was already in
+scope and simply had not been sliced yet.
+
+The constraint that forced the point: at the time of writing the application
+serves **two routes, both POST, both JSON**, no `askama` dependency and no
+templates. There is no GET route. Trellis cannot be opened in a browser at all;
+the only way to observe it is `curl`. Under the previous milestone cut that
+remained true until roughly M6.
+
+**T17 settles the layer vocabulary** (C2, #3). Worth recording why it sat open
+so long: T12 was *settled* while standing on C2's *unratified* proposal, and
+M3's acceptance criteria (#11) were written in vocabulary that nothing in the
+repo defined. Every agent reading "Plan layer" was inferring it.
+
+**Still missing, and now the largest documented gap:** `docs/design/brief.md`.
+Nineteen issues link to it; it has never existed. The specific casualty is
+**invariants 1–5**, asserted by number in #11's strongest acceptance criterion
+("Invariants 1-5 hold under `proptest` … >= 1000 cases"). Only two are
+described anywhere in the repo or the tracker:
+
+- **Invariant 2** — a block lies entirely within **one** allowed window
+  (recovered from U4).
+- **Invariant 5** — the placed/unplaceable partition is **total**, every
+  unplaceable task carrying a reason from the closed enum (recovered from #11
+  AC-6).
+
+1, 3 and 4 exist nowhere. Reconstruction offered and awaiting ratification:
+non-overlap; conservation under splitting; hard deadlines hold. Until they are
+written down M3 cannot be specified, because the specifier cannot write Gherkin
+for a criterion whose terms are undefined.

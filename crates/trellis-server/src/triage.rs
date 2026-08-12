@@ -1,9 +1,9 @@
+use crate::clock::now_ms;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::Json;
 use serde_json::{json, Value};
 use sqlx::SqlitePool;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 fn missing_committed_field(payload: &Value) -> Option<&'static str> {
     ["deadline", "deadline_type", "priority"]
@@ -11,29 +11,13 @@ fn missing_committed_field(payload: &Value) -> Option<&'static str> {
         .find(|field| payload.get(field).is_none())
 }
 
-fn now_ms() -> i64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .expect("system clock before epoch")
-        .as_millis() as i64
-}
-
-pub async fn create_triage(
-    State(pool): State<SqlitePool>,
-    Path(capture_id): Path<i64>,
-    Json(payload): Json<Value>,
-) -> Result<(StatusCode, Json<Value>), StatusCode> {
+async fn insert_task_row(
+    pool: &SqlitePool,
+    capture_id: i64,
+    payload: &Value,
+    created_at_ms: i64,
+) -> Result<(), StatusCode> {
     let kind = payload.get("kind").and_then(Value::as_str).unwrap_or("");
-
-    if kind == "committed" {
-        if let Some(field) = missing_committed_field(&payload) {
-            return Ok((
-                StatusCode::UNPROCESSABLE_ENTITY,
-                Json(json!({ "missing_field": field })),
-            ));
-        }
-    }
-
     let deadline = payload.get("deadline").and_then(Value::as_str);
     let deadline_type = payload.get("deadline_type").and_then(Value::as_str);
     let priority = payload.get("priority").and_then(Value::as_str);
@@ -41,7 +25,6 @@ pub async fn create_triage(
     let target_minutes_each = payload.get("target_minutes_each").and_then(Value::as_i64);
     let period = payload.get("period").and_then(Value::as_str);
 
-    let created_at_ms = now_ms();
     sqlx::query(
         "INSERT INTO tasks (capture_id, kind, deadline, deadline_type, priority, \
          target_count, target_minutes_each, period, created_at_ms) \
@@ -56,16 +39,44 @@ pub async fn create_triage(
     .bind(target_minutes_each)
     .bind(period)
     .bind(created_at_ms)
-    .execute(&pool)
+    .execute(pool)
     .await
     .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    Ok(())
+}
 
+async fn mark_capture_triaged(
+    pool: &SqlitePool,
+    capture_id: i64,
+    triaged_at_ms: i64,
+) -> Result<(), StatusCode> {
     sqlx::query("UPDATE captures SET triaged_at = ? WHERE id = ?")
-        .bind(created_at_ms)
+        .bind(triaged_at_ms)
         .bind(capture_id)
-        .execute(&pool)
+        .execute(pool)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    Ok(())
+}
+
+pub async fn create_triage(
+    State(pool): State<SqlitePool>,
+    Path(capture_id): Path<i64>,
+    Json(payload): Json<Value>,
+) -> Result<(StatusCode, Json<Value>), StatusCode> {
+    let kind = payload.get("kind").and_then(Value::as_str).unwrap_or("");
+    if kind == "committed" {
+        if let Some(field) = missing_committed_field(&payload) {
+            return Ok((
+                StatusCode::UNPROCESSABLE_ENTITY,
+                Json(json!({ "missing_field": field })),
+            ));
+        }
+    }
+
+    let created_at_ms = now_ms();
+    insert_task_row(&pool, capture_id, &payload, created_at_ms).await?;
+    mark_capture_triaged(&pool, capture_id, created_at_ms).await?;
 
     Ok((StatusCode::CREATED, Json(json!({}))))
 }
@@ -73,18 +84,11 @@ pub async fn create_triage(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_support::test_pool;
     use axum::body::Body;
     use axum::http::{Request, StatusCode};
     use serde_json::json;
     use tower::ServiceExt;
-
-    async fn test_pool() -> (tempfile::TempDir, sqlx::SqlitePool) {
-        let dir = tempfile::tempdir().unwrap();
-        let db_path = dir.path().join("test.db");
-        let pool = crate::db::connect(&db_path).await.unwrap();
-        crate::db::run_migrations(&pool).await.unwrap();
-        (dir, pool)
-    }
 
     async fn insert_untriaged_capture(pool: &sqlx::SqlitePool, raw_text: &str) -> i64 {
         sqlx::query_scalar(

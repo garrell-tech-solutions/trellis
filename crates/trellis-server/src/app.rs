@@ -15,18 +15,11 @@ pub fn build_app(pool: SqlitePool) -> Router {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_support::test_pool;
     use axum::body::Body;
     use axum::http::{Request, StatusCode};
     use proptest::prelude::*;
     use tower::ServiceExt;
-
-    async fn test_pool() -> (tempfile::TempDir, sqlx::SqlitePool) {
-        let dir = tempfile::tempdir().unwrap();
-        let db_path = dir.path().join("test.db");
-        let pool = crate::db::connect(&db_path).await.unwrap();
-        crate::db::run_migrations(&pool).await.unwrap();
-        (dir, pool)
-    }
 
     #[tokio::test]
     async fn capture_request_persists_a_row_and_responds_within_50ms() {

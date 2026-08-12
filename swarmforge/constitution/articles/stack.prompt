@@ -48,7 +48,12 @@ No Rust tool emits the contract natively. Each `Run` is a wrapper under
 - Complexity:  rust-code-analysis-cli
   Install:     `cargo install rust-code-analysis-cli`
   Run:         `scripts/analyzers/complexity.sh <path>`
-  Threshold:   4   # max cyclomatic complexity per function
+  Threshold:   8   # max cyclomatic complexity per function
+  # Derived, not conventional: the largest enum in the domain model has 5
+  # variants, so an exhaustive `match` over it scores 6. 8 leaves headroom for
+  # one guard on top of that and still flags real branching. A function over 8
+  # is carrying logic that is not the match -- extract that, do not flatten the
+  # match into if/else.
 
 - CRAP:        custom — composes the coverage and complexity analyzers
   Install:     none

@@ -3,10 +3,12 @@ use axum::Router;
 use sqlx::SqlitePool;
 
 use crate::capture::create_capture;
+use crate::triage::create_triage;
 
 pub fn build_app(pool: SqlitePool) -> Router {
     Router::new()
         .route("/captures", post(create_capture))
+        .route("/captures/{id}/triage", post(create_triage))
         .with_state(pool)
 }
 

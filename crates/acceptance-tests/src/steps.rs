@@ -111,6 +111,9 @@ pub async fn dispatch(
     if let Some(outcome) = capture::dispatch(world, text, example).await {
         return outcome;
     }
+    if let Some(outcome) = triage::dispatch(world, text, example).await {
+        return outcome;
+    }
     if let Some(outcome) = migrations::dispatch(world, text).await {
         return outcome;
     }
@@ -344,6 +347,515 @@ mod capture {
                     .is_err(),
                 "should not match an unrelated raw_text/source pair"
             );
+        }
+    }
+}
+
+mod triage {
+    use super::*;
+    use axum::body::Body;
+    use axum::http::Request;
+    use serde_json::{json, Value};
+    use tower::ServiceExt;
+
+    static GIVEN_EMPTY_TASK_LIST: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r"^the trellis server is running with an empty task list$").unwrap()
+    });
+    static GIVEN_CAPTURE_WAITING: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r#"^a capture with raw text "([^"]+)" is waiting in the untriaged queue$"#)
+            .unwrap()
+    });
+    static WHEN_TRIAGED_AS_POOL: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"^the capture is triaged as a pool task$").unwrap());
+    static WHEN_TRIAGED_AS_COMMITTED: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(
+            r#"^the capture is triaged as a committed task with a "<(\w+)>" deadline of "<(\w+)>" and priority "<(\w+)>"$"#,
+        )
+        .unwrap()
+    });
+    static WHEN_TRIAGED_AS_QUOTA: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(
+            r#"^the capture is triaged as a quota task targeting "<(\w+)>" sessions of "<(\w+)>" minutes per "week"$"#,
+        )
+        .unwrap()
+    });
+    static WHEN_TRIAGED_AS_COMMITTED_MISSING: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r#"^the capture is triaged as a committed task with "<(\w+)>" omitted$"#)
+            .unwrap()
+    });
+    static THEN_KIND_IS: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r#"^the resulting task has kind "(\w+)"$"#).unwrap());
+    static THEN_NO_DEADLINE: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"^the resulting task has no deadline$").unwrap());
+    static THEN_NO_QUOTA_TARGET: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"^the resulting task has no quota target$").unwrap());
+    static THEN_HAS_DEADLINE: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r#"^the resulting task has a "<(\w+)>" deadline of "<(\w+)>"$"#).unwrap()
+    });
+    static THEN_HAS_PRIORITY: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r#"^the resulting task has priority "<(\w+)>"$"#).unwrap());
+    static THEN_HAS_QUOTA_TARGET: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(
+            r#"^the resulting task has a quota target of "<(\w+)>" sessions of "<(\w+)>" minutes per "week"$"#,
+        )
+        .unwrap()
+    });
+    static THEN_REJECTED: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"^the triage is rejected$").unwrap());
+    static THEN_REJECTION_NAMES: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r#"^the rejection names "<(\w+)>"$"#).unwrap());
+    static THEN_TASK_LIST_EMPTY: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"^the task list is still empty$").unwrap());
+    static THEN_CAPTURE_STILL_WAITING: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r"^the capture is still waiting in the untriaged queue$").unwrap()
+    });
+
+    pub async fn dispatch(
+        world: &mut World,
+        text: &str,
+        example: &BTreeMap<String, String>,
+    ) -> Option<Result<(), String>> {
+        if GIVEN_EMPTY_TASK_LIST.is_match(text) {
+            return Some(given_empty_task_list(world).await);
+        }
+        if let Some(caps) = GIVEN_CAPTURE_WAITING.captures(text) {
+            return Some(given_capture_waiting(world, &caps[1]).await);
+        }
+        if WHEN_TRIAGED_AS_POOL.is_match(text) {
+            return Some(when_triaged(world, json!({ "kind": "pool" })).await);
+        }
+        if let Some(caps) = WHEN_TRIAGED_AS_COMMITTED.captures(text) {
+            let deadline_type = match example_value(example, &caps[1]) {
+                Ok(v) => v,
+                Err(e) => return Some(Err(e)),
+            };
+            let deadline = match example_value(example, &caps[2]) {
+                Ok(v) => v,
+                Err(e) => return Some(Err(e)),
+            };
+            let priority = match example_value(example, &caps[3]) {
+                Ok(v) => v,
+                Err(e) => return Some(Err(e)),
+            };
+            let body = json!({
+                "kind": "committed",
+                "deadline": deadline,
+                "deadline_type": deadline_type,
+                "priority": priority,
+            });
+            return Some(when_triaged(world, body).await);
+        }
+        if let Some(caps) = WHEN_TRIAGED_AS_QUOTA.captures(text) {
+            let target_count = match example_value(example, &caps[1]) {
+                Ok(v) => v,
+                Err(e) => return Some(Err(e)),
+            };
+            let target_minutes_each = match example_value(example, &caps[2]) {
+                Ok(v) => v,
+                Err(e) => return Some(Err(e)),
+            };
+            let target_count: i64 = match target_count.parse() {
+                Ok(v) => v,
+                Err(e) => return Some(Err(format!("bad target_count: {e}"))),
+            };
+            let target_minutes_each: i64 = match target_minutes_each.parse() {
+                Ok(v) => v,
+                Err(e) => return Some(Err(format!("bad target_minutes_each: {e}"))),
+            };
+            let body = json!({
+                "kind": "quota",
+                "target_count": target_count,
+                "target_minutes_each": target_minutes_each,
+                "period": "week",
+            });
+            return Some(when_triaged(world, body).await);
+        }
+        if let Some(caps) = WHEN_TRIAGED_AS_COMMITTED_MISSING.captures(text) {
+            let missing_field = match example_value(example, &caps[1]) {
+                Ok(v) => v,
+                Err(e) => return Some(Err(e)),
+            };
+            return Some(when_triaged_committed_missing(world, missing_field).await);
+        }
+        if let Some(caps) = THEN_KIND_IS.captures(text) {
+            return Some(then_task_has_kind(world, &caps[1]).await);
+        }
+        if THEN_NO_DEADLINE.is_match(text) {
+            return Some(then_task_has_no_deadline(world).await);
+        }
+        if THEN_NO_QUOTA_TARGET.is_match(text) {
+            return Some(then_task_has_no_quota_target(world).await);
+        }
+        if let Some(caps) = THEN_HAS_DEADLINE.captures(text) {
+            let deadline_type = match example_value(example, &caps[1]) {
+                Ok(v) => v,
+                Err(e) => return Some(Err(e)),
+            };
+            let deadline = match example_value(example, &caps[2]) {
+                Ok(v) => v,
+                Err(e) => return Some(Err(e)),
+            };
+            return Some(then_task_has_deadline(world, deadline_type, deadline).await);
+        }
+        if let Some(caps) = THEN_HAS_PRIORITY.captures(text) {
+            let priority = match example_value(example, &caps[1]) {
+                Ok(v) => v,
+                Err(e) => return Some(Err(e)),
+            };
+            return Some(then_task_has_priority(world, priority).await);
+        }
+        if let Some(caps) = THEN_HAS_QUOTA_TARGET.captures(text) {
+            let target_count = match example_value(example, &caps[1]) {
+                Ok(v) => v,
+                Err(e) => return Some(Err(e)),
+            };
+            let target_minutes_each = match example_value(example, &caps[2]) {
+                Ok(v) => v,
+                Err(e) => return Some(Err(e)),
+            };
+            return Some(
+                then_task_has_quota_target(world, target_count, target_minutes_each).await,
+            );
+        }
+        if THEN_REJECTED.is_match(text) {
+            return Some(then_triage_is_rejected(world));
+        }
+        if let Some(caps) = THEN_REJECTION_NAMES.captures(text) {
+            let missing_field = match example_value(example, &caps[1]) {
+                Ok(v) => v,
+                Err(e) => return Some(Err(e)),
+            };
+            return Some(then_rejection_names(world, missing_field));
+        }
+        if THEN_TASK_LIST_EMPTY.is_match(text) {
+            return Some(then_task_list_is_empty(world).await);
+        }
+        if THEN_CAPTURE_STILL_WAITING.is_match(text) {
+            return Some(then_capture_still_waiting(world).await);
+        }
+        None
+    }
+
+    pub async fn given_empty_task_list(world: &mut World) -> Result<(), String> {
+        let (dir, db_path) = new_temp_db_path("acceptance.db")?;
+        let pool = connected_and_migrated(&db_path).await?;
+        world.db_path = Some(db_path);
+        world.pool = Some(pool);
+        world.tmp_dir = Some(dir);
+        Ok(())
+    }
+
+    pub async fn given_capture_waiting(world: &mut World, raw_text: &str) -> Result<(), String> {
+        let pool = world.pool()?;
+        let id: i64 = sqlx::query_scalar(
+            "INSERT INTO captures (raw_text, source, created_at_ms) VALUES (?, 'web', 0) RETURNING id",
+        )
+        .bind(raw_text)
+        .fetch_one(pool)
+        .await
+        .map_err(|e| format!("insert capture: {e}"))?;
+        world.last_capture_id = Some(id);
+        Ok(())
+    }
+
+    fn capture_id(world: &World) -> Result<i64, String> {
+        world
+            .last_capture_id
+            .ok_or_else(|| "no capture set up for this scenario".to_string())
+    }
+
+    pub async fn when_triaged(world: &mut World, body: Value) -> Result<(), String> {
+        let pool = world.pool()?.clone();
+        let capture_id = capture_id(world)?;
+        let app = trellis_server::app::build_app(pool);
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!("/captures/{capture_id}/triage"))
+                    .header("content-type", "application/json")
+                    .body(Body::from(body.to_string()))
+                    .map_err(|e| format!("build request: {e}"))?,
+            )
+            .await
+            .map_err(|e| format!("send request: {e}"))?;
+
+        world.last_status = Some(response.status().as_u16());
+        let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .map_err(|e| format!("read response body: {e}"))?;
+        world.last_response_body = serde_json::from_slice(&bytes).ok();
+        Ok(())
+    }
+
+    pub async fn when_triaged_committed_missing(
+        world: &mut World,
+        missing_field: &str,
+    ) -> Result<(), String> {
+        let mut body = json!({
+            "kind": "committed",
+            "deadline": "2026-08-20T17:00:00Z",
+            "deadline_type": "hard",
+            "priority": "P1",
+        });
+        body.as_object_mut()
+            .expect("committed payload is an object")
+            .remove(missing_field);
+        when_triaged(world, body).await
+    }
+
+    async fn task_row(
+        world: &World,
+    ) -> Result<
+        (
+            String,
+            Option<String>,
+            Option<String>,
+            Option<String>,
+            Option<i64>,
+            Option<i64>,
+            Option<String>,
+        ),
+        String,
+    > {
+        let pool = world.pool()?;
+        let capture_id = capture_id(world)?;
+        sqlx::query_as(
+            "SELECT kind, deadline, deadline_type, priority, target_count, target_minutes_each, period \
+             FROM tasks WHERE capture_id = ?",
+        )
+        .bind(capture_id)
+        .fetch_one(pool)
+        .await
+        .map_err(|e| format!("query resulting task: {e}"))
+    }
+
+    pub async fn then_task_has_kind(world: &World, expected: &str) -> Result<(), String> {
+        let (kind, ..) = task_row(world).await?;
+        if kind == expected {
+            Ok(())
+        } else {
+            Err(format!("expected task kind {expected}, got {kind}"))
+        }
+    }
+
+    pub async fn then_task_has_no_deadline(world: &World) -> Result<(), String> {
+        let (_, deadline, ..) = task_row(world).await?;
+        if deadline.is_none() {
+            Ok(())
+        } else {
+            Err(format!("expected no deadline, got {deadline:?}"))
+        }
+    }
+
+    pub async fn then_task_has_no_quota_target(world: &World) -> Result<(), String> {
+        let (_, _, _, _, target_count, target_minutes_each, period) = task_row(world).await?;
+        if target_count.is_none() && target_minutes_each.is_none() && period.is_none() {
+            Ok(())
+        } else {
+            Err(format!(
+                "expected no quota target, got target_count={target_count:?} \
+                 target_minutes_each={target_minutes_each:?} period={period:?}"
+            ))
+        }
+    }
+
+    pub async fn then_task_has_deadline(
+        world: &World,
+        expected_type: &str,
+        expected_deadline: &str,
+    ) -> Result<(), String> {
+        let (_, deadline, deadline_type, ..) = task_row(world).await?;
+        if deadline.as_deref() == Some(expected_deadline)
+            && deadline_type.as_deref() == Some(expected_type)
+        {
+            Ok(())
+        } else {
+            Err(format!(
+                "expected {expected_type} deadline {expected_deadline}, \
+                 got deadline_type={deadline_type:?} deadline={deadline:?}"
+            ))
+        }
+    }
+
+    pub async fn then_task_has_priority(world: &World, expected: &str) -> Result<(), String> {
+        let (_, _, _, priority, ..) = task_row(world).await?;
+        if priority.as_deref() == Some(expected) {
+            Ok(())
+        } else {
+            Err(format!("expected priority {expected}, got {priority:?}"))
+        }
+    }
+
+    pub async fn then_task_has_quota_target(
+        world: &World,
+        expected_count: &str,
+        expected_minutes_each: &str,
+    ) -> Result<(), String> {
+        let (_, _, _, _, target_count, target_minutes_each, period) = task_row(world).await?;
+        let expected_count: i64 = expected_count
+            .parse()
+            .map_err(|e| format!("bad expected target_count: {e}"))?;
+        let expected_minutes_each: i64 = expected_minutes_each
+            .parse()
+            .map_err(|e| format!("bad expected target_minutes_each: {e}"))?;
+        if target_count == Some(expected_count)
+            && target_minutes_each == Some(expected_minutes_each)
+            && period.as_deref() == Some("week")
+        {
+            Ok(())
+        } else {
+            Err(format!(
+                "expected quota target {expected_count}x{expected_minutes_each}min per week, \
+                 got target_count={target_count:?} target_minutes_each={target_minutes_each:?} period={period:?}"
+            ))
+        }
+    }
+
+    pub fn then_triage_is_rejected(world: &mut World) -> Result<(), String> {
+        match world.last_status {
+            Some(status) if (400..500).contains(&status) => Ok(()),
+            Some(status) => Err(format!("expected a client error, got status {status}")),
+            None => Err("no triage response recorded".to_string()),
+        }
+    }
+
+    pub fn then_rejection_names(world: &mut World, expected_field: &str) -> Result<(), String> {
+        let body = world
+            .last_response_body
+            .as_ref()
+            .ok_or_else(|| "no rejection body recorded".to_string())?;
+        match body.get("missing_field").and_then(Value::as_str) {
+            Some(field) if field == expected_field => Ok(()),
+            other => Err(format!(
+                "expected rejection to name {expected_field}, body reported {other:?}"
+            )),
+        }
+    }
+
+    pub async fn then_task_list_is_empty(world: &World) -> Result<(), String> {
+        let pool = world.pool()?;
+        let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM tasks")
+            .fetch_one(pool)
+            .await
+            .map_err(|e| format!("count tasks: {e}"))?;
+        if count == 0 {
+            Ok(())
+        } else {
+            Err(format!("expected an empty task list, found {count} row(s)"))
+        }
+    }
+
+    pub async fn then_capture_still_waiting(world: &World) -> Result<(), String> {
+        let pool = world.pool()?;
+        let capture_id = capture_id(world)?;
+        let triaged_at: Option<i64> =
+            sqlx::query_scalar("SELECT triaged_at FROM captures WHERE id = ?")
+                .bind(capture_id)
+                .fetch_one(pool)
+                .await
+                .map_err(|e| format!("query capture: {e}"))?;
+        if triaged_at.is_none() {
+            Ok(())
+        } else {
+            Err("expected the capture to still be untriaged".to_string())
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        async fn task_list_world() -> World {
+            let (dir, db_path) = new_temp_db_path("acceptance.db").unwrap();
+            let pool = connected_and_migrated(&db_path).await.unwrap();
+            let mut world = World::new();
+            world.tmp_dir = Some(dir);
+            world.db_path = Some(db_path);
+            world.pool = Some(pool);
+            world
+        }
+
+        #[tokio::test]
+        async fn given_capture_waiting_records_the_capture_id() {
+            let mut world = task_list_world().await;
+            given_capture_waiting(&mut world, "buy milk").await.unwrap();
+            assert!(world.last_capture_id.is_some());
+        }
+
+        #[tokio::test]
+        async fn pool_triage_round_trips_through_the_task_assertions() {
+            let mut world = task_list_world().await;
+            given_capture_waiting(&mut world, "buy milk").await.unwrap();
+            when_triaged(&mut world, json!({ "kind": "pool" }))
+                .await
+                .unwrap();
+
+            then_task_has_kind(&world, "pool").await.unwrap();
+            then_task_has_no_deadline(&world).await.unwrap();
+            then_task_has_no_quota_target(&world).await.unwrap();
+        }
+
+        #[tokio::test]
+        async fn committed_triage_round_trips_through_the_task_assertions() {
+            let mut world = task_list_world().await;
+            given_capture_waiting(&mut world, "buy milk").await.unwrap();
+            when_triaged(
+                &mut world,
+                json!({
+                    "kind": "committed",
+                    "deadline": "2026-08-20T17:00:00Z",
+                    "deadline_type": "hard",
+                    "priority": "P1",
+                }),
+            )
+            .await
+            .unwrap();
+
+            then_task_has_kind(&world, "committed").await.unwrap();
+            then_task_has_deadline(&world, "hard", "2026-08-20T17:00:00Z")
+                .await
+                .unwrap();
+            then_task_has_priority(&world, "P1").await.unwrap();
+            then_task_has_no_quota_target(&world).await.unwrap();
+        }
+
+        #[tokio::test]
+        async fn quota_triage_round_trips_through_the_task_assertions() {
+            let mut world = task_list_world().await;
+            given_capture_waiting(&mut world, "buy milk").await.unwrap();
+            when_triaged(
+                &mut world,
+                json!({
+                    "kind": "quota",
+                    "target_count": 3,
+                    "target_minutes_each": 45,
+                    "period": "week",
+                }),
+            )
+            .await
+            .unwrap();
+
+            then_task_has_kind(&world, "quota").await.unwrap();
+            then_task_has_quota_target(&world, "3", "45").await.unwrap();
+            then_task_has_no_deadline(&world).await.unwrap();
+        }
+
+        #[tokio::test]
+        async fn missing_field_triage_is_rejected_and_leaves_no_trace() {
+            let mut world = task_list_world().await;
+            given_capture_waiting(&mut world, "call the dentist")
+                .await
+                .unwrap();
+            when_triaged_committed_missing(&mut world, "deadline")
+                .await
+                .unwrap();
+
+            then_triage_is_rejected(&mut world).unwrap();
+            then_rejection_names(&mut world, "deadline").unwrap();
+            then_task_list_is_empty(&world).await.unwrap();
+            then_capture_still_waiting(&world).await.unwrap();
         }
     }
 }

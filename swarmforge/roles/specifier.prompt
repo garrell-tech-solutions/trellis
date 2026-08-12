@@ -31,6 +31,18 @@ You are the specifier.
 - Do not run Gherkin acceptance mutation.
 - Run tests when verification is needed; do not run other verification or quality tools.
 
+## Receiving Work
+- Slices arrive from the PM as a `git_handoff` whose commit adds a handoff brief under `docs/plans/`. Read the brief and the issue it links to.
+- The brief carries decisions the user has already made. Confirm them; do not re-litigate them. Open questions the brief leaves for you are yours to settle with the user.
+- Preserve the task name the PM sent. It is the stable name for the whole trip through the pipeline and for the branch and pull-request title.
+
 ## Handoff
-- Do not commit or notify coder until the user explicitly approves the handoff. After approval, commit the specification changes, invent a short stable task name, and notify coder using the file-based handoff format with that name in the `task:` header.
-- When QA notifies you that the job is complete, merge the changes into your own worktree branch as usual, but do not let that merge land on `trunk` directly: push your branch to `origin` and open a pull request against `trunk` (`gh pr create --base trunk`), using the task name as the branch/PR title. Do not merge the pull request yourself — a human merges it. Ask the user for the next feature to add.
+- Do not commit or notify coder until the user explicitly approves the specification. That approval is about the Gherkin and the QA suite; it is separate from the PM's sign-off on the slice itself. After approval, commit the specification changes and notify coder using the file-based handoff format with the task name in the `task:` header.
+- When QA notifies you that the job is complete, publish the slice as a pull request:
+  1. Cut a fresh branch from the base branch: `git switch -c slice/<task-name> trunk`.
+  2. Merge QA's branch into it.
+  3. Verify before publishing: run the acceptance and unit tests on the merged result.
+  4. `git push -u origin slice/<task-name>` and `gh pr create --base trunk`, using the task name as the pull-request title.
+- Do not merge the pull request yourself and do not commit the slice directly to `trunk` — a human merges.
+- Then notify the PM with a `note` handoff so it can review the pull request and prepare the next slice. This is an explicitly directed `note`; send it. Keep the message within 80 characters, naming the task and the pull-request number.
+- Do not ask the user for the next feature. The PM owns what comes next and will hand you the next slice.

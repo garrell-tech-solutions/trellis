@@ -1,0 +1,71 @@
+# Stack
+
+## Languages
+- Backend:  Rust (stable, pinned in `rust-toolchain.toml`) — Cargo workspace
+- Frontend: Askama + HTMX, served by the backend. No Node build step.
+
+## Commands
+
+### Build
+- Debug:    `cargo build --workspace --all-targets`
+- Release:  `cargo build --release --target x86_64-unknown-linux-musl`
+
+### Test
+- All:      `cargo test --workspace`
+- Property: `cargo test --workspace -- --include-ignored`
+
+### Type Check / Lint
+- `cargo clippy --workspace --all-targets -- -D warnings`
+
+### Format
+- Apply: `cargo fmt --all`
+- Check: `cargo fmt --all -- --check`
+
+## Quality Tools (install if missing)
+
+Each analyzer below MUST conform to the Analyzer Contract: accepts a path,
+emits a single JSON document to stdout (`tool`, `metric`, `threshold`,
+`violations`, optional `summary`), exits 0 on pass and non-zero on any
+violation.
+
+No Rust tool emits the contract natively. Each `Run` is a wrapper under
+`scripts/analyzers/` that reshapes the underlying tool's output.
+
+- Coverage:    cargo-llvm-cov
+  Install:     `rustup component add llvm-tools-preview && cargo install cargo-llvm-cov`
+  Run:         `scripts/analyzers/coverage.sh <path>`
+  Threshold:   80  # minimum coverage (%)
+
+- Mutation:    cargo-mutants
+  Install:     `cargo install cargo-mutants`
+  Run:         `scripts/analyzers/mutation.sh <path>`
+  Threshold:   90  # minimum kill rate (%)
+  Parallelism: scheduler-core: 8   |   every other crate: 1
+  # scheduler-core is pure, so its mutants are safely parallel. Other crates
+  # share one SQLite file; parallel mutants truncate each other's database and
+  # the symptom is timeouts, not an obvious collision. Do not raise the timeout.
+
+- Complexity:  rust-code-analysis-cli
+  Install:     `cargo install rust-code-analysis-cli`
+  Run:         `scripts/analyzers/complexity.sh <path>`
+  Threshold:   4   # max cyclomatic complexity per function
+
+- CRAP:        custom — composes the coverage and complexity analyzers
+  Install:     none
+  Run:         `scripts/analyzers/crap.sh <path>`
+  Threshold:   30  # exclusive upper bound per function
+
+- DRY:         jscpd
+  Install:     `npm i -g jscpd`
+  Run:         `scripts/analyzers/dry.sh <path>`
+  Threshold:   3   # max % duplicated tokens
+
+- Lint:        clippy
+  Install:     `rustup component add clippy`
+  Run:         `scripts/analyzers/lint.sh <path>`
+  Threshold:   0   # zero warnings, zero errors
+
+## Additional Verification
+- Tests:       all pass
+- Format:      `cargo fmt --all -- --check` is clean
+- Core purity: `cargo tree -p scheduler-core` contains no `tokio` and no `sqlx`

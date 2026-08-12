@@ -1228,6 +1228,9 @@ checksum = "9774ba4a74de5f7b1c1451ed6cd5285a32eddb5cccb8cc655a4e50009e06477f"
 [[package]]
 name = "scheduler-core"
 version = "0.1.0"
+dependencies = [
+ "proptest",
+]
 
 [[package]]
 name = "scopeguard"
@@ -1805,6 +1808,7 @@ version = "0.1.0"
 dependencies = [
  "axum",
  "proptest",
+ "scheduler-core",
  "serde",
  "serde_json",
  "sqlx",

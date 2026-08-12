@@ -24,7 +24,7 @@ trap 'rm -f "$COBERTURA_FILE"' EXIT
 cargo llvm-cov "${SCOPE[@]}" --cobertura --output-path "$COBERTURA_FILE" >/dev/null 2>&1 -- --include-ignored
 
 python3 - "$TARGET" "$THRESHOLD" "$SCRIPT_DIR" "$COBERTURA_FILE" <<'PYEOF'
-import json, subprocess, sys
+import json, os, subprocess, sys
 import xml.etree.ElementTree as ET
 
 target, threshold, script_dir, cobertura_path = (
@@ -34,10 +34,15 @@ sys.path.insert(0, script_dir)
 from _common import rust_files_under, production_functions
 
 # file -> [(short_name, line_rate, [line numbers])]
+# Keyed on normpath: cargo-llvm-cov's cobertura export writes filenames
+# without a "./" prefix (e.g. "crates/foo/src/lib.rs"), while `find .`
+# (rust_files_under) yields paths with one (e.g. "./crates/foo/src/lib.rs").
+# Without normalizing both sides to the same form, every lookup below misses
+# and every function is silently scored at 0% coverage.
 coverage_by_file = {}
 tree = ET.parse(cobertura_path)
 for cls in tree.iter("class"):
-    filename = cls.get("filename")
+    filename = os.path.normpath(cls.get("filename"))
     methods_el = cls.find("methods")
     if methods_el is None:
         continue
@@ -58,7 +63,7 @@ def coverage_for(filename, fn_name, start, end):
     # <method> entry per binary. Take the best (max) line-rate seen: the
     # function is covered if any binary that links it exercises it.
     best = None
-    for short_name, line_rate, line_numbers in coverage_by_file.get(filename, []):
+    for short_name, line_rate, line_numbers in coverage_by_file.get(os.path.normpath(filename), []):
         if short_name != fn_name:
             continue
         if not any(start <= n <= end for n in line_numbers):

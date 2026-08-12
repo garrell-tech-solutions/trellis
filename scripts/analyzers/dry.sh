@@ -12,7 +12,7 @@ OUT_DIR="$(mktemp -d)"
 trap 'rm -rf "$OUT_DIR"' EXIT
 
 jscpd "$TARGET" --reporters json --output "$OUT_DIR" --silent \
-  --ignore "**/target/**,**/mutants.out*/**,**/build/**,crates/acceptance-tests/tests/**" \
+  --ignore "**/target/**,**/mutants.out*/**,**/build/**,crates/acceptance-tests/tests/**,**/tmp/**" \
   >/dev/null 2>&1 || true
 
 python3 - "$THRESHOLD" "$OUT_DIR" <<'PYEOF'

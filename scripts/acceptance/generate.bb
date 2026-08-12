@@ -9,7 +9,8 @@
 (ns generate
   (:require [cheshire.core :as json]
             [clojure.string :as str]
-            [babashka.fs :as fs])
+            [babashka.fs :as fs]
+            [babashka.process :as process])
   (:import [java.security MessageDigest]))
 
 (defn usage! []
@@ -76,11 +77,19 @@
       (fs/create-dirs out-dir-abs)
       (fs/create-dirs metadata-dir)
       (spit (str test-file) contents)
-      (let [rel-generated (str (fs/relativize out-dir-abs test-file))
+      ;; Reformat with rustfmt so the generated file satisfies `cargo fmt --all
+      ;; -- --check` the same as hand-written source, then hash the file as it
+      ;; actually sits on disk rather than the pre-format string.
+      (let [{:keys [exit err]} (process/sh "rustfmt" "--edition" "2021" (str test-file))]
+        (when-not (zero? exit)
+          (binding [*out* *err*] (println "rustfmt failed on" (str test-file) ":" err))
+          (System/exit 1)))
+      (let [formatted (slurp (str test-file))
+            rel-generated (str (fs/relativize out-dir-abs test-file))
             metadata {:schema_version 1
                        :feature_path feature-path
                        :ir_path (str ir-path)
-                       :implementation_hash (str "sha256:" (sha256-hex contents))
+                       :implementation_hash (str "sha256:" (sha256-hex formatted))
                        :hash_scope "generated_files"
                        :generated_files [rel-generated]}]
         (spit (str metadata-file) (json/generate-string metadata {:pretty true})))

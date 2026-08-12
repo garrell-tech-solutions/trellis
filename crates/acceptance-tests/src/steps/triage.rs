@@ -1,8 +1,7 @@
+use super::app_client;
+use super::payloads;
 use super::*;
-use axum::body::Body;
-use axum::http::Request;
 use serde_json::{json, Value};
-use tower::ServiceExt;
 
 static GIVEN_EMPTY_TASK_LIST: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"^the trellis server is running with an empty task list$").unwrap()
@@ -65,7 +64,7 @@ pub async fn dispatch(
         return Some(given_capture_waiting(world, &caps[1]).await);
     }
     if WHEN_TRIAGED_AS_POOL.is_match(text) {
-        return Some(when_triaged(world, json!({ "kind": "pool" })).await);
+        return Some(when_triaged(world, payloads::pool()).await);
     }
     if let Some(caps) = WHEN_TRIAGED_AS_COMMITTED.captures(text) {
         return Some(dispatch_triaged_as_committed(world, example, &caps).await);
@@ -219,27 +218,12 @@ fn capture_id(world: &World) -> Result<i64, String> {
 }
 
 pub async fn when_triaged(world: &mut World, body: Value) -> Result<(), String> {
-    let pool = world.pool()?.clone();
     let capture_id = capture_id(world)?;
-    let app = trellis_server::app::build_app(pool);
+    let uri = format!("/captures/{capture_id}/triage");
+    let response = app_client::post_json(world, &uri, &body).await?;
 
-    let response = app
-        .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri(format!("/captures/{capture_id}/triage"))
-                .header("content-type", "application/json")
-                .body(Body::from(body.to_string()))
-                .map_err(|e| format!("build request: {e}"))?,
-        )
-        .await
-        .map_err(|e| format!("send request: {e}"))?;
-
-    world.last_status = Some(response.status().as_u16());
-    let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
-        .await
-        .map_err(|e| format!("read response body: {e}"))?;
-    world.last_response_body = serde_json::from_slice(&bytes).ok();
+    world.last_status = Some(response.status);
+    world.last_response_body = response.body;
     Ok(())
 }
 
@@ -247,15 +231,7 @@ pub async fn when_triaged_committed_missing(
     world: &mut World,
     missing_field: &str,
 ) -> Result<(), String> {
-    let mut body = json!({
-        "kind": "committed",
-        "deadline": "2026-08-20T17:00:00Z",
-        "deadline_type": "hard",
-        "priority": "P1",
-    });
-    body.as_object_mut()
-        .expect("committed payload is an object")
-        .remove(missing_field);
+    let body = payloads::without_field(payloads::committed(), missing_field);
     when_triaged(world, body).await
 }
 
@@ -475,9 +451,7 @@ mod tests {
     async fn pool_triage_round_trips_through_the_task_assertions() {
         let mut world = migrated_world().await;
         given_capture_waiting(&mut world, "buy milk").await.unwrap();
-        when_triaged(&mut world, json!({ "kind": "pool" }))
-            .await
-            .unwrap();
+        when_triaged(&mut world, payloads::pool()).await.unwrap();
 
         then_task_has_kind(&world, "pool").await.unwrap();
         then_task_has_no_deadline(&world).await.unwrap();
@@ -488,20 +462,12 @@ mod tests {
     async fn committed_triage_round_trips_through_the_task_assertions() {
         let mut world = migrated_world().await;
         given_capture_waiting(&mut world, "buy milk").await.unwrap();
-        when_triaged(
-            &mut world,
-            json!({
-                "kind": "committed",
-                "deadline": "2026-08-20T17:00:00Z",
-                "deadline_type": "hard",
-                "priority": "P1",
-            }),
-        )
-        .await
-        .unwrap();
+        when_triaged(&mut world, payloads::committed())
+            .await
+            .unwrap();
 
         then_task_has_kind(&world, "committed").await.unwrap();
-        then_task_has_deadline(&world, "hard", "2026-08-20T17:00:00Z")
+        then_task_has_deadline(&world, "hard", payloads::VALID_DEADLINE)
             .await
             .unwrap();
         then_task_has_priority(&world, "P1").await.unwrap();
@@ -512,17 +478,7 @@ mod tests {
     async fn quota_triage_round_trips_through_the_task_assertions() {
         let mut world = migrated_world().await;
         given_capture_waiting(&mut world, "buy milk").await.unwrap();
-        when_triaged(
-            &mut world,
-            json!({
-                "kind": "quota",
-                "target_count": 3,
-                "target_minutes_each": 45,
-                "period": "week",
-            }),
-        )
-        .await
-        .unwrap();
+        when_triaged(&mut world, payloads::quota()).await.unwrap();
 
         then_task_has_kind(&world, "quota").await.unwrap();
         then_task_has_quota_target(&world, "3", "45").await.unwrap();
@@ -551,17 +507,9 @@ mod tests {
         given_capture_waiting(&mut world, "call the dentist")
             .await
             .unwrap();
-        when_triaged(
-            &mut world,
-            json!({
-                "kind": "committed",
-                "deadline": "2026-08-20T17:00:00Z",
-                "deadline_type": "squishy",
-                "priority": "P1",
-            }),
-        )
-        .await
-        .unwrap();
+        let payload =
+            payloads::with_field(payloads::committed(), "deadline_type", json!("squishy"));
+        when_triaged(&mut world, payload).await.unwrap();
 
         then_triage_is_rejected(&mut world).unwrap();
         then_rejection_reports_invalid(&mut world, "deadline_type").unwrap();

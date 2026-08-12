@@ -200,3 +200,59 @@ Recorded as T17–T19.
 - **`period` closed to `week | month` (T19).** Matches how `deadline_type` and
   `priority` are closed in the same slice, for the same D3 reason: M8's cadence
   math cannot branch on an unvalidated string.
+
+### 2026-08-12 — triage-validation harness seams and the complexity gate
+
+The triage-validation slice landed the closed domains in `scheduler-core`,
+which is where T15 says they belong — the layering held with no correction
+needed. The architectural work this round was in the acceptance harness, which
+had grown two missing seams.
+
+**The definition of a valid submission had no home.** Closing four field
+domains meant every "…is rejected because X is wrong" scenario needed a
+payload valid in every respect *except* X. Written inline, the canonical
+committed payload became a literal repeated twelve times across five step
+modules, so closing one more field's domain would mean finding and editing
+every copy. `steps/payloads.rs` now holds the canonical payload per kind plus
+`with_field`/`without_field`, and a scenario states only what it varies.
+
+**Nothing knew how a scenario reaches the application.** `capture` and
+`triage` had each grown a copy of "build the router from the world's pool,
+POST, record the outcome", and the copies had already drifted: one timed the
+round trip and discarded the body, the other kept the body and discarded the
+timing — so a step could assert only what its own module happened to record.
+`steps/app_client.rs` returns status, body and elapsed together.
+
+DRY: 3.26% → 2.62%, back under the 3% threshold it had crossed.
+
+**On the complexity gate, deliberately not "fixed".** Three violations remain,
+all pure regex dispatch chains: `steps/capture.rs::dispatch` (14),
+`steps/triage.rs::dispatch` (17), `steps/mod.rs::dispatch` (9). Every arm is a
+one-line delegation, so by T9's own rule — *a function over 8 is carrying
+logic that is not the match; extract that, do not flatten the match* — there
+is nothing to extract. The only way to move the number is a
+`(Regex, handler)` table, and because the handlers are `async` with differing
+arities, a uniform table in Rust needs a boxed-future wrapper function per
+step: roughly forty wrappers to replace forty one-line branches, which is
+exactly the "indirection that is strictly worse to read" T9 refuses. **Do not
+flatten these into a registry to make the number go down.** If they are ever
+worth changing it should be for a cohesion reason — splitting a step module by
+Gherkin phase — not for the metric.
+
+The distinction is visible in this slice: `steps/triage.rs::when_triaged` also
+scored 9 and *did* come off the list, because it was genuinely doing two
+things (driving HTTP, and recording onto `World`) and separating them was
+worth doing on its own merits. The number moved as a side effect of an
+improvement, which is the only reason it should ever move.
+
+**Property coverage doubled, 6 → 12**, all in
+`crates/scheduler-core/tests/task_properties.rs`: every value inside a closed
+domain round-trips; anything outside one is rejected as invalid naming that
+field; a deadline naming no real instant is rejected (T3); empty and absent
+produce the *identical* rejection (T18, asserted as an equality between the
+two outcomes rather than against a fixed expectation, so it survives a change
+to either); a missing field is reported before an invalid one; and equivalent
+textual spellings of one instant store one deadline. The last three were
+checked against deliberate breakages of `require()`, of the check ordering in
+`committed_from`, and confirmed to fail — a property that cannot fail is not
+coverage.

@@ -10,6 +10,7 @@
 //! already matched generically by [`super::triage::dispatch`], tried before
 //! this module — nothing here duplicates them.
 
+use super::payloads;
 use super::triage::{task_row, then_rejection_reports_invalid, when_triaged};
 use super::*;
 use serde_json::json;
@@ -41,13 +42,13 @@ pub async fn dispatch(
     example: &BTreeMap<String, String>,
 ) -> Option<Result<(), String>> {
     if let Some(caps) = WHEN_TRIAGED_WITH_DEADLINE.captures(text) {
-        return Some(dispatch_with_deadline(world, example, &caps).await);
+        return Some(dispatch_committed_field(world, example, &caps, "deadline").await);
     }
     if let Some(caps) = WHEN_TRIAGED_WITH_DEADLINE_TYPE.captures(text) {
-        return Some(dispatch_with_deadline_type(world, example, &caps).await);
+        return Some(dispatch_committed_field(world, example, &caps, "deadline_type").await);
     }
     if let Some(caps) = WHEN_TRIAGED_WITH_PRIORITY.captures(text) {
-        return Some(dispatch_with_priority(world, example, &caps).await);
+        return Some(dispatch_committed_field(world, example, &caps, "priority").await);
     }
     if let Some(caps) = THEN_DEADLINE_IS_INSTANT.captures(text) {
         return Some(dispatch_deadline_is_instant(world, example, &caps).await);
@@ -56,6 +57,20 @@ pub async fn dispatch(
         return Some(then_rejection_reports_invalid(world, &caps[1]));
     }
     None
+}
+
+/// Submits an otherwise-valid committed triage carrying the example's value
+/// for `field`. Each scenario in this feature varies exactly one field, so
+/// the step text names which one and everything else stays canonical.
+async fn dispatch_committed_field(
+    world: &mut World,
+    example: &BTreeMap<String, String>,
+    caps: &regex::Captures<'_>,
+    field: &str,
+) -> Result<(), String> {
+    let value = example_value(example, &caps[1])?;
+    let payload = payloads::with_field(payloads::committed(), field, json!(value));
+    when_triaged(world, payload).await
 }
 
 async fn dispatch_deadline_is_instant(
@@ -82,60 +97,6 @@ async fn then_deadline_is_instant(world: &World, expected_epoch_ms: &str) -> Res
     }
 }
 
-async fn dispatch_with_deadline(
-    world: &mut World,
-    example: &BTreeMap<String, String>,
-    caps: &regex::Captures<'_>,
-) -> Result<(), String> {
-    let deadline = example_value(example, &caps[1])?;
-    when_triaged(
-        world,
-        json!({
-            "kind": "committed",
-            "deadline": deadline,
-            "deadline_type": "hard",
-            "priority": "P1",
-        }),
-    )
-    .await
-}
-
-async fn dispatch_with_deadline_type(
-    world: &mut World,
-    example: &BTreeMap<String, String>,
-    caps: &regex::Captures<'_>,
-) -> Result<(), String> {
-    let deadline_type = example_value(example, &caps[1])?;
-    when_triaged(
-        world,
-        json!({
-            "kind": "committed",
-            "deadline": "2026-08-20T17:00:00Z",
-            "deadline_type": deadline_type,
-            "priority": "P1",
-        }),
-    )
-    .await
-}
-
-async fn dispatch_with_priority(
-    world: &mut World,
-    example: &BTreeMap<String, String>,
-    caps: &regex::Captures<'_>,
-) -> Result<(), String> {
-    let priority = example_value(example, &caps[1])?;
-    when_triaged(
-        world,
-        json!({
-            "kind": "committed",
-            "deadline": "2026-08-20T17:00:00Z",
-            "deadline_type": "hard",
-            "priority": priority,
-        }),
-    )
-    .await
-}
-
 #[cfg(test)]
 mod tests {
     use super::super::triage::given_capture_waiting;
@@ -145,17 +106,10 @@ mod tests {
     async fn a_valid_deadline_is_stored_as_the_instant_it_names() {
         let mut world = migrated_world().await;
         given_capture_waiting(&mut world, "buy milk").await.unwrap();
-        when_triaged(
-            &mut world,
-            json!({
-                "kind": "committed",
-                "deadline": "2026-08-20T17:00:00Z",
-                "deadline_type": "hard",
-                "priority": "P1",
-            }),
-        )
-        .await
-        .unwrap();
+
+        when_triaged(&mut world, payloads::committed())
+            .await
+            .unwrap();
 
         then_deadline_is_instant(&world, "1787245200000")
             .await
@@ -167,13 +121,7 @@ mod tests {
         for (field, value) in [("deadline_type", "squishy"), ("priority", "P9")] {
             let mut world = migrated_world().await;
             given_capture_waiting(&mut world, "buy milk").await.unwrap();
-            let mut payload = json!({
-                "kind": "committed",
-                "deadline": "2026-08-20T17:00:00Z",
-                "deadline_type": "hard",
-                "priority": "P1",
-            });
-            payload[field] = json!(value);
+            let payload = payloads::with_field(payloads::committed(), field, json!(value));
 
             when_triaged(&mut world, payload).await.unwrap();
 

@@ -14,11 +14,13 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
 
+mod app_client;
 mod build;
 mod capture;
 mod committed_empty_fields;
 mod committed_field_domains;
 mod migrations;
+mod payloads;
 mod quota_triage_validation;
 mod triage;
 mod unknown_kind_rejection;

@@ -11,6 +11,7 @@
 //! [`super::triage::dispatch`], tried before this module — nothing here
 //! duplicates them.
 
+use super::payloads;
 use super::triage::{then_rejection_reports_invalid, when_triaged};
 use super::*;
 use serde_json::json;
@@ -40,7 +41,7 @@ pub async fn dispatch(
         return Some(dispatch_missing(world, example, &caps).await);
     }
     if WHEN_TRIAGED_PERIOD_EMPTY.is_match(text) {
-        return Some(when_triaged_period_empty(world).await);
+        return Some(when_triaged_with_period(world, json!("")).await);
     }
     if let Some(caps) = WHEN_TRIAGED_WITH_PERIOD.captures(text) {
         return Some(dispatch_with_period(world, example, &caps).await);
@@ -54,13 +55,15 @@ pub async fn dispatch(
     None
 }
 
-fn complete_quota_payload() -> serde_json::Value {
-    json!({
-        "kind": "quota",
-        "target_count": 3,
-        "target_minutes_each": 45,
-        "period": "week",
-    })
+async fn when_triaged_with_period(
+    world: &mut World,
+    period: serde_json::Value,
+) -> Result<(), String> {
+    when_triaged(
+        world,
+        payloads::with_field(payloads::quota(), "period", period),
+    )
+    .await
 }
 
 async fn dispatch_missing(
@@ -69,18 +72,11 @@ async fn dispatch_missing(
     caps: &regex::Captures<'_>,
 ) -> Result<(), String> {
     let missing_field = example_value(example, &caps[1])?;
-    let mut payload = complete_quota_payload();
-    payload
-        .as_object_mut()
-        .expect("quota payload is an object")
-        .remove(missing_field);
-    when_triaged(world, payload).await
-}
-
-async fn when_triaged_period_empty(world: &mut World) -> Result<(), String> {
-    let mut payload = complete_quota_payload();
-    payload["period"] = json!("");
-    when_triaged(world, payload).await
+    when_triaged(
+        world,
+        payloads::without_field(payloads::quota(), missing_field),
+    )
+    .await
 }
 
 async fn dispatch_with_period(
@@ -89,9 +85,7 @@ async fn dispatch_with_period(
     caps: &regex::Captures<'_>,
 ) -> Result<(), String> {
     let period = example_value(example, &caps[1])?;
-    let mut payload = complete_quota_payload();
-    payload["period"] = json!(period);
-    when_triaged(world, payload).await
+    when_triaged_with_period(world, json!(period)).await
 }
 
 #[cfg(test)]
@@ -105,8 +99,7 @@ mod tests {
         given_capture_waiting(&mut world, "go to the gym")
             .await
             .unwrap();
-        let mut payload = complete_quota_payload();
-        payload.as_object_mut().unwrap().remove("target_count");
+        let payload = payloads::without_field(payloads::quota(), "target_count");
 
         when_triaged(&mut world, payload).await.unwrap();
 
@@ -120,7 +113,9 @@ mod tests {
             .await
             .unwrap();
 
-        when_triaged_period_empty(&mut world).await.unwrap();
+        when_triaged_with_period(&mut world, json!(""))
+            .await
+            .unwrap();
 
         then_rejection_names(&mut world, "period").unwrap();
     }
@@ -131,10 +126,10 @@ mod tests {
         given_capture_waiting(&mut world, "go to the gym")
             .await
             .unwrap();
-        let mut payload = complete_quota_payload();
-        payload["period"] = json!("fortnight");
 
-        when_triaged(&mut world, payload).await.unwrap();
+        when_triaged_with_period(&mut world, json!("fortnight"))
+            .await
+            .unwrap();
 
         then_rejection_reports_invalid(&mut world, "period").unwrap();
     }

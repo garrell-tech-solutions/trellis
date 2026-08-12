@@ -59,6 +59,94 @@ fn has_quota_target(attributes: &TaskAttributes) -> bool {
         || attributes.period.is_some()
 }
 
+/// The closed domains, restated here on purpose. The core parses these
+/// strings but does not enumerate them, so writing the membership out is what
+/// lets a property check the domain from outside rather than against itself.
+const DEADLINE_TYPES: [&str; 2] = ["hard", "soft"];
+const PRIORITIES: [&str; 4] = ["P1", "P2", "P3", "P4"];
+const PERIODS: [&str; 2] = ["week", "month"];
+
+const VALID_DEADLINE: &str = "2026-08-20T17:00:00Z";
+
+/// A required string field, paired with the submission it belongs to and the
+/// way that submission carries it.
+///
+/// A table rather than a `match` arm per field: a property that varies "some
+/// required field" then names each field once, and adding a field to the core
+/// means adding one row here instead of an arm in every helper.
+#[derive(Debug, Clone, Copy)]
+struct RequiredField {
+    field: Field,
+    /// The closed set of values this field accepts, where it has one.
+    /// `deadline` has none — it names an instant, not a member of a set.
+    domain: Option<&'static [&'static str]>,
+    base: fn() -> TriageFields,
+    set: fn(&mut TriageFields, Option<String>),
+}
+
+const REQUIRED_STRING_FIELDS: [RequiredField; 4] = [
+    RequiredField {
+        field: Field::Deadline,
+        domain: None,
+        base: valid_committed,
+        set: |fields, value| fields.deadline = value,
+    },
+    RequiredField {
+        field: Field::DeadlineType,
+        domain: Some(&DEADLINE_TYPES),
+        base: valid_committed,
+        set: |fields, value| fields.deadline_type = value,
+    },
+    RequiredField {
+        field: Field::Priority,
+        domain: Some(&PRIORITIES),
+        base: valid_committed,
+        set: |fields, value| fields.priority = value,
+    },
+    RequiredField {
+        field: Field::Period,
+        domain: Some(&PERIODS),
+        base: valid_quota,
+        set: |fields, value| fields.period = value,
+    },
+];
+
+impl RequiredField {
+    /// An otherwise-valid submission carrying `value` for this field.
+    fn submission(self, value: Option<String>) -> TriageFields {
+        let mut fields = (self.base)();
+        (self.set)(&mut fields, value);
+        fields
+    }
+}
+
+fn closed_domain_fields() -> Vec<RequiredField> {
+    REQUIRED_STRING_FIELDS
+        .into_iter()
+        .filter(|entry| entry.domain.is_some())
+        .collect()
+}
+
+fn valid_committed() -> TriageFields {
+    TriageFields {
+        kind: Some(COMMITTED.to_string()),
+        deadline: Some(VALID_DEADLINE.to_string()),
+        deadline_type: Some("hard".to_string()),
+        priority: Some("P1".to_string()),
+        ..TriageFields::default()
+    }
+}
+
+fn valid_quota() -> TriageFields {
+    TriageFields {
+        kind: Some(QUOTA.to_string()),
+        target_count: Some(3),
+        target_minutes_each: Some(45),
+        period: Some("week".to_string()),
+        ..TriageFields::default()
+    }
+}
+
 /// A handful of well-formed deadlines and the instant each names, since
 /// deadline validity (T3) is exercised by the unit tests — this generator
 /// only needs enough variety to keep the round-trip property honest.
@@ -218,5 +306,132 @@ proptest! {
             TaskKind::from_fields(&fields),
             Err(TriageRejection::UnknownKind(Some(name)))
         );
+    }
+
+    /// Every value inside a closed domain survives triage unchanged. Paired
+    /// with the rejection property below, the two pin each domain's exact
+    /// membership from outside the core: everything listed is accepted and
+    /// stored verbatim, everything else is refused.
+    #[test]
+    #[ignore]
+    fn every_value_inside_a_closed_domain_round_trips(
+        fields in any_fields(),
+        deadline_type in prop::sample::select(&DEADLINE_TYPES[..]),
+        priority in prop::sample::select(&PRIORITIES[..]),
+        period in prop::sample::select(&PERIODS[..]),
+    ) {
+        let committed = TaskKind::from_fields(&TriageFields {
+            deadline: Some(VALID_DEADLINE.to_string()),
+            deadline_type: Some(deadline_type.to_string()),
+            priority: Some(priority.to_string()),
+            ..with_kind(fields.clone(), COMMITTED)
+        })
+        .unwrap()
+        .attributes();
+        prop_assert_eq!(committed.deadline_type, Some(deadline_type));
+        prop_assert_eq!(committed.priority, Some(priority));
+
+        let quota = TaskKind::from_fields(&TriageFields {
+            target_count: Some(3),
+            target_minutes_each: Some(45),
+            period: Some(period.to_string()),
+            ..with_kind(fields, QUOTA)
+        })
+        .unwrap()
+        .attributes();
+        prop_assert_eq!(quota.period, Some(period));
+    }
+
+    /// A present value outside its domain is rejected as invalid — naming
+    /// that field, not some other one.
+    #[test]
+    #[ignore]
+    fn a_value_outside_a_closed_domain_is_rejected_as_invalid(
+        value in ".{1,40}",
+        entry in prop::sample::select(closed_domain_fields()),
+    ) {
+        let domain = entry.domain.expect("only closed-domain fields are selected");
+        prop_assume!(!domain.contains(&value.as_str()));
+
+        prop_assert_eq!(
+            TaskKind::from_fields(&entry.submission(Some(value))),
+            Err(TriageRejection::InvalidField(entry.field))
+        );
+    }
+
+    /// A deadline that does not name a real instant is rejected as invalid
+    /// (T3), however plausible its shape.
+    #[test]
+    #[ignore]
+    fn a_deadline_that_names_no_instant_is_rejected_as_invalid(text in ".{1,40}") {
+        prop_assume!(text.parse::<jiff::Timestamp>().is_err());
+
+        prop_assert_eq!(
+            TaskKind::from_fields(&REQUIRED_STRING_FIELDS[0].submission(Some(text))),
+            Err(TriageRejection::InvalidField(Field::Deadline))
+        );
+    }
+
+    /// T18: absent and empty report identically. Written as a comparison
+    /// rather than as an expected value, so it stays true if the rejection
+    /// for an absent field ever changes — the point is that the two agree.
+    #[test]
+    #[ignore]
+    fn an_empty_required_field_is_rejected_exactly_like_an_absent_one(
+        entry in prop::sample::select(REQUIRED_STRING_FIELDS.to_vec()),
+    ) {
+        let absent = TaskKind::from_fields(&entry.submission(None));
+        let empty = TaskKind::from_fields(&entry.submission(Some(String::new())));
+
+        prop_assert_eq!(absent, empty);
+    }
+
+    /// Required-before-valid: a submission that both omits one field and
+    /// botches another names the omission. Reporting the invalid value first
+    /// would send the caller to fix a field while a required one is still
+    /// missing, so the next attempt fails again.
+    #[test]
+    #[ignore]
+    fn a_missing_required_field_is_reported_before_an_invalid_one(garbage in ".{1,20}") {
+        prop_assume!(!PRIORITIES.contains(&garbage.as_str()));
+
+        let fields = TriageFields {
+            kind: Some(COMMITTED.to_string()),
+            deadline: None,
+            deadline_type: Some("hard".to_string()),
+            priority: Some(garbage),
+            ..TriageFields::default()
+        };
+
+        prop_assert_eq!(
+            TaskKind::from_fields(&fields),
+            Err(TriageRejection::MissingField(Field::Deadline))
+        );
+    }
+
+    /// Equivalent spellings of one instant store one deadline. The stored
+    /// value is the instant, so timezone offset and sub-second precision are
+    /// details of the text, not of the task.
+    #[test]
+    #[ignore]
+    fn equivalent_textual_forms_of_an_instant_store_the_same_deadline(
+        first in valid_deadline(),
+        second in valid_deadline(),
+    ) {
+        prop_assume!(first.1 == second.1);
+
+        let deadline_of = |text: &str| {
+            TaskKind::from_fields(&TriageFields {
+                kind: Some(COMMITTED.to_string()),
+                deadline: Some(text.to_string()),
+                deadline_type: Some("hard".to_string()),
+                priority: Some("P1".to_string()),
+                ..TriageFields::default()
+            })
+            .map(|kind| kind.attributes().deadline)
+        };
+
+        prop_assert_eq!(deadline_of(first.0), Ok(Some(first.1)));
+        prop_assert_eq!(deadline_of(first.0), deadline_of(second.0));
     }
 }

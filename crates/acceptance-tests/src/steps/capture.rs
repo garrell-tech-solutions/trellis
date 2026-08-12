@@ -1,7 +1,5 @@
+use super::app_client;
 use super::*;
-use axum::body::Body;
-use axum::http::Request;
-use tower::ServiceExt;
 
 static GIVEN_EMPTY_TABLE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"^the trellis server is running with an empty captures table$").unwrap()
@@ -71,25 +69,11 @@ pub async fn when_capture_request_sent(
     raw_text: &str,
     source: &str,
 ) -> Result<(), String> {
-    let pool = world.pool()?.clone();
-    let app = trellis_server::app::build_app(pool);
-    let body = serde_json::json!({ "raw_text": raw_text, "source": source }).to_string();
+    let body = serde_json::json!({ "raw_text": raw_text, "source": source });
+    let response = app_client::post_json(world, "/captures", &body).await?;
 
-    let start = std::time::Instant::now();
-    let response = app
-        .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri("/captures")
-                .header("content-type", "application/json")
-                .body(Body::from(body))
-                .map_err(|e| format!("build request: {e}"))?,
-        )
-        .await
-        .map_err(|e| format!("send request: {e}"))?;
-
-    world.last_elapsed = Some(start.elapsed());
-    world.last_status = Some(response.status().as_u16());
+    world.last_elapsed = Some(response.elapsed);
+    world.last_status = Some(response.status);
     Ok(())
 }
 

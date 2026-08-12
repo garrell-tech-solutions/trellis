@@ -11,6 +11,7 @@
 //! [`super::triage::dispatch`], tried before this module — nothing here
 //! duplicates them.
 
+use super::payloads;
 use super::triage::when_triaged;
 use super::*;
 use serde_json::json;
@@ -34,13 +35,7 @@ async fn dispatch_triaged_empty(
     caps: &regex::Captures<'_>,
 ) -> Result<(), String> {
     let empty_field = example_value(example, &caps[1])?;
-    let mut payload = json!({
-        "kind": "committed",
-        "deadline": "2026-08-20T17:00:00Z",
-        "deadline_type": "hard",
-        "priority": "P1",
-    });
-    payload[empty_field] = json!("");
+    let payload = payloads::with_field(payloads::committed(), empty_field, json!(""));
     when_triaged(world, payload).await
 }
 
@@ -55,12 +50,7 @@ mod tests {
         given_capture_waiting(&mut world, "call the dentist")
             .await
             .unwrap();
-        let payload = json!({
-            "kind": "committed",
-            "deadline": "2026-08-20T17:00:00Z",
-            "deadline_type": "hard",
-            "priority": "",
-        });
+        let payload = payloads::with_field(payloads::committed(), "priority", json!(""));
 
         when_triaged(&mut world, payload).await.unwrap();
 

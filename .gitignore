@@ -39,6 +39,9 @@ crates/acceptance-tests/tests/metadata/
 # OS / editor
 .DS_Store
 
+# Python bytecode cache (scripts/analyzers/*.py helpers)
+__pycache__/
+
 # Secrets and local config
 .env
 .claude/

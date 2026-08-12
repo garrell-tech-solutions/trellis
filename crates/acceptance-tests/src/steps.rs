@@ -49,6 +49,46 @@ fn new_temp_db_path(file_name: &str) -> Result<(tempfile::TempDir, PathBuf), Str
     Ok((dir, db_path))
 }
 
+#[cfg(test)]
+mod helper_tests {
+    use super::*;
+
+    fn example(pairs: &[(&str, &str)]) -> BTreeMap<String, String> {
+        pairs
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect()
+    }
+
+    #[test]
+    fn example_value_returns_the_named_placeholder() {
+        let ex = example(&[("raw_text", "buy milk")]);
+        assert_eq!(example_value(&ex, "raw_text"), Ok("buy milk"));
+    }
+
+    #[test]
+    fn example_value_errors_when_the_placeholder_is_missing() {
+        let ex = example(&[("raw_text", "buy milk")]);
+        assert!(example_value(&ex, "source").is_err());
+    }
+
+    #[test]
+    fn example_pair_returns_both_named_placeholders_in_order() {
+        let ex = example(&[("raw_text", "buy milk"), ("source", "web")]);
+        let re = Regex::new(r#""<(\w+)>" and "<(\w+)>""#).unwrap();
+        let caps = re.captures(r#""<raw_text>" and "<source>""#).unwrap();
+        assert_eq!(example_pair(&ex, &caps), Ok(("buy milk", "web")));
+    }
+
+    #[test]
+    fn example_pair_errors_when_a_placeholder_is_missing() {
+        let ex = example(&[("raw_text", "buy milk")]);
+        let re = Regex::new(r#""<(\w+)>" and "<(\w+)>""#).unwrap();
+        let caps = re.captures(r#""<raw_text>" and "<source>""#).unwrap();
+        assert!(example_pair(&ex, &caps).is_err());
+    }
+}
+
 pub async fn dispatch(
     world: &mut World,
     step: &Step,
@@ -218,6 +258,89 @@ mod capture {
             ))
         }
     }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn then_response_status_is_matches_the_expected_code() {
+            let mut world = World::new();
+            world.last_status = Some(201);
+            assert_eq!(then_response_status_is(&mut world, 201), Ok(()));
+        }
+
+        #[test]
+        fn then_response_status_is_errors_on_a_mismatched_code() {
+            let mut world = World::new();
+            world.last_status = Some(500);
+            assert!(then_response_status_is(&mut world, 201).is_err());
+        }
+
+        #[test]
+        fn then_response_status_is_errors_when_no_response_was_recorded() {
+            let mut world = World::new();
+            assert!(then_response_status_is(&mut world, 201).is_err());
+        }
+
+        #[test]
+        fn then_response_within_budget_accepts_a_faster_response() {
+            let mut world = World::new();
+            world.last_elapsed = Some(std::time::Duration::from_millis(10));
+            assert_eq!(then_response_within_budget(&mut world, 50), Ok(()));
+        }
+
+        #[test]
+        fn then_response_within_budget_rejects_a_response_at_exactly_the_budget() {
+            let mut world = World::new();
+            world.last_elapsed = Some(std::time::Duration::from_millis(50));
+            assert!(
+                then_response_within_budget(&mut world, 50).is_err(),
+                "the budget is an exclusive upper bound"
+            );
+        }
+
+        #[test]
+        fn then_response_within_budget_rejects_a_slower_response() {
+            let mut world = World::new();
+            world.last_elapsed = Some(std::time::Duration::from_millis(100));
+            assert!(then_response_within_budget(&mut world, 50).is_err());
+        }
+
+        async fn migrated_world() -> World {
+            let (dir, db_path) = new_temp_db_path("acceptance.db").unwrap();
+            let pool = trellis_server::db::connect(&db_path).await.unwrap();
+            trellis_server::db::run_migrations(&pool).await.unwrap();
+            let mut world = World::new();
+            world.tmp_dir = Some(dir);
+            world.db_path = Some(db_path);
+            world.pool = Some(pool);
+            world
+        }
+
+        #[tokio::test]
+        async fn then_row_exists_errors_when_no_matching_row_is_present() {
+            let mut world = migrated_world().await;
+            assert!(then_row_exists(&mut world, "buy milk", "web")
+                .await
+                .is_err());
+        }
+
+        #[tokio::test]
+        async fn then_row_exists_succeeds_once_the_row_is_inserted() {
+            let mut world = migrated_world().await;
+            when_capture_request_sent(&mut world, "buy milk", "web")
+                .await
+                .unwrap();
+            assert_eq!(then_row_exists(&mut world, "buy milk", "web").await, Ok(()));
+            assert!(
+                then_row_exists(&mut world, "call the dentist", "telegram")
+                    .await
+                    .is_err(),
+                "should not match an unrelated raw_text/source pair"
+            );
+        }
+    }
 }
 
 mod migrations {
@@ -339,6 +462,91 @@ mod migrations {
             Err(format!("schema changed: before={before:?} after={after:?}"))
         }
     }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        async fn migrated_pool() -> (tempfile::TempDir, sqlx::SqlitePool) {
+            let (dir, db_path) = new_temp_db_path("acceptance.db").unwrap();
+            let pool = trellis_server::db::connect(&db_path).await.unwrap();
+            trellis_server::db::run_migrations(&pool).await.unwrap();
+            (dir, pool)
+        }
+
+        #[tokio::test]
+        async fn table_names_lists_the_migrated_tables() {
+            let (_dir, pool) = migrated_pool().await;
+            let names = table_names(&pool).await.unwrap();
+            assert!(
+                names.iter().any(|n| n == "captures"),
+                "expected a captures table, got {names:?}"
+            );
+        }
+
+        #[test]
+        fn then_migration_exits_successfully_passes_on_a_recorded_success() {
+            let mut world = World::new();
+            world.migration_result = Some(Ok(()));
+            assert_eq!(then_migration_exits_successfully(&mut world), Ok(()));
+        }
+
+        #[test]
+        fn then_migration_exits_successfully_errors_on_a_recorded_failure() {
+            let mut world = World::new();
+            world.migration_result = Some(Err("boom".to_string()));
+            assert!(then_migration_exits_successfully(&mut world).is_err());
+        }
+
+        #[test]
+        fn then_migration_exits_successfully_errors_when_never_run() {
+            let mut world = World::new();
+            assert!(then_migration_exits_successfully(&mut world).is_err());
+        }
+
+        #[tokio::test]
+        async fn then_journal_mode_is_matches_case_insensitively() {
+            let (_dir, pool) = migrated_pool().await;
+            let mut world = World::new();
+            world.pool = Some(pool);
+            assert_eq!(then_journal_mode_is(&mut world, "WAL").await, Ok(()));
+        }
+
+        #[tokio::test]
+        async fn then_journal_mode_is_errors_on_a_mismatched_mode() {
+            let (_dir, pool) = migrated_pool().await;
+            let mut world = World::new();
+            world.pool = Some(pool);
+            assert!(then_journal_mode_is(&mut world, "delete").await.is_err());
+        }
+
+        #[tokio::test]
+        async fn then_schema_is_unchanged_passes_when_the_snapshot_matches() {
+            let (_dir, pool) = migrated_pool().await;
+            let snapshot = table_names(&pool).await.unwrap();
+            let mut world = World::new();
+            world.pool = Some(pool);
+            world.schema_snapshot = Some(snapshot);
+            assert_eq!(then_schema_is_unchanged(&mut world).await, Ok(()));
+        }
+
+        #[tokio::test]
+        async fn then_schema_is_unchanged_errors_when_the_snapshot_differs() {
+            let (_dir, pool) = migrated_pool().await;
+            let mut world = World::new();
+            world.pool = Some(pool);
+            world.schema_snapshot = Some(vec!["not_a_real_table".to_string()]);
+            assert!(then_schema_is_unchanged(&mut world).await.is_err());
+        }
+
+        #[tokio::test]
+        async fn then_schema_is_unchanged_errors_without_a_prior_snapshot() {
+            let (_dir, pool) = migrated_pool().await;
+            let mut world = World::new();
+            world.pool = Some(pool);
+            assert!(then_schema_is_unchanged(&mut world).await.is_err());
+        }
+    }
 }
 
 mod build {
@@ -369,7 +577,7 @@ mod build {
         example: &BTreeMap<String, String>,
     ) -> Option<Result<(), String>> {
         if GIVEN_WORKSPACE_CHECKED_OUT.is_match(text) {
-            return Some(given_workspace_checked_out());
+            return Some(given_workspace_checked_out(&workspace_root()));
         }
         if WHEN_RELEASE_BUILT.is_match(text) {
             return Some(when_release_binary_built_for_musl(world));
@@ -393,8 +601,7 @@ mod build {
         None
     }
 
-    pub fn given_workspace_checked_out() -> Result<(), String> {
-        let root = workspace_root();
+    pub fn given_workspace_checked_out(root: &Path) -> Result<(), String> {
         if root.join("Cargo.toml").is_file() {
             Ok(())
         } else {
@@ -466,6 +673,10 @@ mod build {
         }
     }
 
+    fn description_indicates_static_binary(description: &str) -> bool {
+        description.contains("statically linked") || description.contains("static-pie linked")
+    }
+
     pub fn then_binary_has_no_dynamic_dependencies(world: &mut World) -> Result<(), String> {
         let binaries = release_binaries(world)?;
         let binary = binaries
@@ -476,7 +687,7 @@ mod build {
             .output()
             .map_err(|e| format!("spawn file: {e}"))?;
         let description = String::from_utf8_lossy(&output.stdout);
-        if description.contains("statically linked") || description.contains("static-pie linked") {
+        if description_indicates_static_binary(&description) {
             Ok(())
         } else {
             Err(format!(
@@ -519,6 +730,107 @@ mod build {
             ))
         } else {
             Ok(())
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn given_workspace_checked_out_passes_for_a_directory_with_a_cargo_toml() {
+            let dir = tempfile::tempdir().unwrap();
+            std::fs::write(dir.path().join("Cargo.toml"), "[workspace]\n").unwrap();
+            assert_eq!(given_workspace_checked_out(dir.path()), Ok(()));
+        }
+
+        #[test]
+        fn given_workspace_checked_out_errors_without_a_cargo_toml() {
+            let dir = tempfile::tempdir().unwrap();
+            assert!(given_workspace_checked_out(dir.path()).is_err());
+        }
+
+        #[test]
+        fn then_exactly_one_release_binary_passes_for_a_single_binary() {
+            let mut world = World::new();
+            world.release_binaries = Some(vec![PathBuf::from("/tmp/trellis")]);
+            assert_eq!(then_exactly_one_release_binary(&mut world), Ok(()));
+        }
+
+        #[test]
+        fn then_exactly_one_release_binary_errors_when_none_were_produced() {
+            let mut world = World::new();
+            world.release_binaries = Some(vec![]);
+            assert!(then_exactly_one_release_binary(&mut world).is_err());
+        }
+
+        #[test]
+        fn then_exactly_one_release_binary_errors_when_several_were_produced() {
+            let mut world = World::new();
+            world.release_binaries = Some(vec![
+                PathBuf::from("/tmp/trellis"),
+                PathBuf::from("/tmp/trellis-extra"),
+            ]);
+            assert!(then_exactly_one_release_binary(&mut world).is_err());
+        }
+
+        #[test]
+        fn then_binary_has_no_dynamic_dependencies_errors_without_a_built_binary() {
+            let mut world = World::new();
+            world.release_binaries = Some(vec![]);
+            assert!(then_binary_has_no_dynamic_dependencies(&mut world).is_err());
+        }
+
+        #[test]
+        fn description_indicates_static_binary_recognizes_static_reports() {
+            assert!(description_indicates_static_binary(
+                "ELF 64-bit LSB executable, x86-64, statically linked"
+            ));
+            assert!(description_indicates_static_binary(
+                "ELF 64-bit LSB pie executable, x86-64, static-pie linked"
+            ));
+        }
+
+        #[test]
+        fn description_indicates_static_binary_rejects_dynamic_reports() {
+            assert!(!description_indicates_static_binary(
+                "ELF 64-bit LSB pie executable, x86-64, dynamically linked, interpreter /lib64/ld-linux-x86-64.so.2"
+            ));
+        }
+
+        fn tree_with_dependency() -> String {
+            "scheduler-core v0.1.0 (/workspace)\n\
+             ├── tokio v1.53.1\n\
+             └── serde v1.0.229\n"
+                .to_string()
+        }
+
+        #[test]
+        fn then_dependency_tree_excludes_errors_when_the_dependency_is_present() {
+            let mut world = World::new();
+            world.cargo_tree_output = Some(tree_with_dependency());
+            assert!(then_dependency_tree_excludes(&mut world, "tokio").is_err());
+        }
+
+        #[test]
+        fn then_dependency_tree_excludes_passes_when_the_dependency_is_absent() {
+            let mut world = World::new();
+            world.cargo_tree_output = Some(tree_with_dependency());
+            assert_eq!(then_dependency_tree_excludes(&mut world, "sqlx"), Ok(()));
+        }
+
+        #[test]
+        fn then_dependency_tree_excludes_does_not_match_a_bare_substring() {
+            let mut world = World::new();
+            world.cargo_tree_output = Some(tree_with_dependency());
+            // "tok" is a substring of "tokio" but not the whole crate name.
+            assert_eq!(then_dependency_tree_excludes(&mut world, "tok"), Ok(()));
+        }
+
+        #[test]
+        fn then_dependency_tree_excludes_errors_without_a_listed_tree() {
+            let mut world = World::new();
+            assert!(then_dependency_tree_excludes(&mut world, "tokio").is_err());
         }
     }
 }

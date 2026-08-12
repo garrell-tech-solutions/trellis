@@ -49,6 +49,18 @@ fn new_temp_db_path(file_name: &str) -> Result<(tempfile::TempDir, PathBuf), Str
     Ok((dir, db_path))
 }
 
+/// Opens a connection at `db_path` and runs migrations against it, the
+/// shared setup for any background step that needs a ready-to-use database.
+async fn connected_and_migrated(db_path: &Path) -> Result<sqlx::SqlitePool, String> {
+    let pool = trellis_server::db::connect(db_path)
+        .await
+        .map_err(|e| format!("connect: {e}"))?;
+    trellis_server::db::run_migrations(&pool)
+        .await
+        .map_err(|e| format!("run_migrations: {e}"))?;
+    Ok(pool)
+}
+
 #[cfg(test)]
 mod helper_tests {
     use super::*;
@@ -152,20 +164,18 @@ mod capture {
             return Some(when_capture_request_sent(world, raw_text, source).await);
         }
         if let Some(caps) = THEN_STATUS_IS.captures(text) {
-            return Some(
-                caps[1]
-                    .parse()
-                    .map_err(|e| format!("bad status code: {e}"))
-                    .and_then(|expected: u16| then_response_status_is(world, expected)),
-            );
+            let expected: u16 = match caps[1].parse() {
+                Ok(v) => v,
+                Err(e) => return Some(Err(format!("bad status code: {e}"))),
+            };
+            return Some(then_response_status_is(world, expected));
         }
         if let Some(caps) = THEN_WITHIN_BUDGET.captures(text) {
-            return Some(
-                caps[1]
-                    .parse()
-                    .map_err(|e| format!("bad millisecond budget: {e}"))
-                    .and_then(|budget_ms: u128| then_response_within_budget(world, budget_ms)),
-            );
+            let budget_ms: u128 = match caps[1].parse() {
+                Ok(v) => v,
+                Err(e) => return Some(Err(format!("bad millisecond budget: {e}"))),
+            };
+            return Some(then_response_within_budget(world, budget_ms));
         }
         if let Some(caps) = THEN_ROW_EXISTS.captures(text) {
             let (raw_text, source) = match example_pair(example, &caps) {
@@ -179,12 +189,7 @@ mod capture {
 
     pub async fn given_empty_captures_table(world: &mut World) -> Result<(), String> {
         let (dir, db_path) = new_temp_db_path("acceptance.db")?;
-        let pool = trellis_server::db::connect(&db_path)
-            .await
-            .map_err(|e| format!("connect: {e}"))?;
-        trellis_server::db::run_migrations(&pool)
-            .await
-            .map_err(|e| format!("run_migrations: {e}"))?;
+        let pool = connected_and_migrated(&db_path).await?;
         world.db_path = Some(db_path);
         world.pool = Some(pool);
         world.tmp_dir = Some(dir);
@@ -399,12 +404,7 @@ mod migrations {
     pub async fn given_already_migrated_database(world: &mut World) -> Result<(), String> {
         given_empty_database_file(world)?;
         let db_path = world.db_path()?.clone();
-        let pool = trellis_server::db::connect(&db_path)
-            .await
-            .map_err(|e| format!("connect: {e}"))?;
-        trellis_server::db::run_migrations(&pool)
-            .await
-            .map_err(|e| format!("run_migrations: {e}"))?;
+        let pool = connected_and_migrated(&db_path).await?;
         world.schema_snapshot = Some(table_names(&pool).await?);
         world.pool = Some(pool);
         Ok(())
@@ -576,6 +576,11 @@ mod build {
         text: &str,
         example: &BTreeMap<String, String>,
     ) -> Option<Result<(), String>> {
+        dispatch_release_binary(world, text)
+            .or_else(|| dispatch_dependency_tree(world, text, example))
+    }
+
+    fn dispatch_release_binary(world: &mut World, text: &str) -> Option<Result<(), String>> {
         if GIVEN_WORKSPACE_CHECKED_OUT.is_match(text) {
             return Some(given_workspace_checked_out(&workspace_root()));
         }
@@ -588,6 +593,14 @@ mod build {
         if THEN_NO_DYNAMIC_DEPS.is_match(text) {
             return Some(then_binary_has_no_dynamic_dependencies(world));
         }
+        None
+    }
+
+    fn dispatch_dependency_tree(
+        world: &mut World,
+        text: &str,
+        example: &BTreeMap<String, String>,
+    ) -> Option<Result<(), String>> {
         if WHEN_DEP_TREE_LISTED.is_match(text) {
             return Some(when_scheduler_core_dependency_tree_listed(world));
         }
@@ -609,17 +622,19 @@ mod build {
         }
     }
 
+    fn is_executable(path: &Path) -> bool {
+        let Ok(metadata) = path.metadata() else {
+            return false;
+        };
+        metadata.permissions().mode() & 0o111 != 0
+    }
+
     fn executable_files_in(dir: &Path) -> Result<Vec<PathBuf>, String> {
         let mut files = Vec::new();
         for entry in std::fs::read_dir(dir).map_err(|e| format!("read {}: {e}", dir.display()))? {
             let entry = entry.map_err(|e| format!("read dir entry: {e}"))?;
             let path = entry.path();
-            let is_executable_file = path.is_file()
-                && path
-                    .metadata()
-                    .map(|m| m.permissions().mode() & 0o111 != 0)
-                    .unwrap_or(false);
-            if is_executable_file {
+            if path.is_file() && is_executable(&path) {
                 files.push(path);
             }
         }

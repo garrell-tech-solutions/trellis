@@ -31,7 +31,7 @@ jobs:
     timeout-minutes: 30
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       # libsqlite3-sys compiles C against the musl target, so the release
       # build needs a musl C toolchain. The cc crate picks up musl-gcc for
@@ -42,18 +42,31 @@ jobs:
           sudo apt-get install -y --no-install-recommends musl-tools
 
       # No toolchain action: `rustup toolchain install` with no toolchain
-      # argument installs exactly the toolchain rust-toolchain.toml pins, and
-      # adds the component/target to that toolchain rather than overriding it
-      # with a RUSTUP_TOOLCHAIN of its own.
+      # argument installs exactly the toolchain rust-toolchain.toml pins,
+      # rather than overriding the pin with a RUSTUP_TOOLCHAIN of its own.
+      #
+      # The component/target adds are a separate, deliberate step. When the
+      # pinned toolchain is already present -- which it is on ubuntu-latest,
+      # since the runner images ship stable -- `rustup toolchain install`
+      # short-circuits with "using existing install" and silently ignores its
+      # own --component and --target flags. Passing them there looks correct
+      # and does nothing. `rustup {component,target} add` is idempotent and
+      # applies to the active (pinned) toolchain, so it works either way.
       - name: Install the toolchain pinned by rust-toolchain.toml
         run: |
-          rustup toolchain install \
-            --profile minimal \
-            --component clippy,rustfmt \
-            --target x86_64-unknown-linux-musl
+          rustup toolchain install --profile minimal
+          rustup component add clippy rustfmt
+          rustup target add x86_64-unknown-linux-musl
           rustup show active-toolchain
           cargo --version
           rustc --version
+
+      # Fail loudly and early if the musl std is missing, rather than 400
+      # crates later with a confusing "can't find crate for `core`".
+      - name: Verify the musl target is installed
+        run: |
+          rustup target list --installed
+          rustup target list --installed | grep -qx x86_64-unknown-linux-musl
 
       # Caches the cargo registry and target/ only. The T4 purity gate below
       # resolves from Cargo.toml and Cargo.lock via `cargo tree`, so no cached

@@ -46,13 +46,16 @@ qa_stop_server() {
 
 # Submits a capture over HTTP and prints its id. The capture endpoint's
 # response carries no identifier, so the row is located by its raw text --
-# safe because each scenario starts from a fresh, empty database.
+# safe because each scenario starts from a fresh, empty database. raw_text is
+# JSON-encoded and SQL-escaped properly, so arbitrary text (quotes, hostile
+# markup) is safe to pass.
 qa_submit_capture() {
-  local raw_text="$1"
+  local raw_text="$1" sql_escaped
   curl -s -o /dev/null -X POST "http://$ADDR/captures" \
     -H 'content-type: application/json' \
-    -d "$(printf '{"raw_text":"%s","source":"web"}' "$raw_text")"
-  sqlite3 "$DB_PATH" "SELECT id FROM captures WHERE raw_text = '$raw_text';"
+    -d "$(python3 -c 'import json,sys; print(json.dumps({"raw_text": sys.argv[1], "source": "web"}))' "$raw_text")"
+  sql_escaped="${raw_text//\'/\'\'}"
+  sqlite3 "$DB_PATH" "SELECT id FROM captures WHERE raw_text = '$sql_escaped';"
 }
 
 # POSTs a triage body for capture_id and sets STATUS and BODY.

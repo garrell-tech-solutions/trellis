@@ -25,6 +25,49 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  # Issue #32. Its own job, not a step in `gate`, for three reasons: it needs
+  # a full-history checkout that the build job has no use for; it answers in
+  # seconds and should not queue behind a ~10 minute Rust build to tell you
+  # your migration edit is unmergeable; and it is the one check here whose
+  # trigger differs from the rest.
+  #
+  # pull_request only. On push to trunk HEAD *is* origin/trunk, so
+  # `origin/trunk...HEAD` is empty by construction -- the check could never
+  # fail there, and a step that always passes reads as coverage it does not
+  # provide. It is also the wrong moment: by the time a commit is on trunk the
+  # edited migration is already published and the damage is done. The gate
+  # belongs before the merge, which is exactly where pull_request runs it.
+  # GitHub reports the job as skipped on push, not as a pass.
+  migration-immutability:
+    name: migrations are append-only
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    if: github.event_name == 'pull_request'
+
+    steps:
+      # fetch-depth: 0 is load-bearing. The default shallow, single-branch
+      # clone has neither origin/trunk nor a merge-base, and the diff below
+      # would be meaningless rather than merely wrong.
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      # checkout leaves the PR merge commit at HEAD but does not guarantee a
+      # remote-tracking ref for the base branch, so fetch it explicitly. Via
+      # env rather than inline ${{ }} so the branch name is never interpolated
+      # into the shell.
+      - name: Fetch the base branch
+        env:
+          BASE_BRANCH: ${{ github.base_ref }}
+        run: |
+          git fetch --no-tags --prune origin \
+            "+refs/heads/$BASE_BRANCH:refs/remotes/origin/$BASE_BRANCH"
+
+      - name: Migrations already on the base branch are immutable
+        env:
+          BASE_BRANCH: ${{ github.base_ref }}
+        run: ./scripts/ci/migration_immutability.sh "origin/$BASE_BRANCH"
+
   gate:
     name: fmt, clippy, test, T4 purity, musl release
     runs-on: ubuntu-latest

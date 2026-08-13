@@ -79,6 +79,7 @@ scheme.
 | T19 | `period` is a closed set: `week \| month`. | `deadline_type` and `priority` were closed in this same slice (T-series validated sum types in `scheduler-core`) for the reason D3 states — the fields the M3 scheduler branches on cannot carry undefined values. `period` is exactly that kind of field for quota scheduling at M8: "3 sessions per `fortnight`" is not a case M8's cadence math is written to handle, and typos (`"weekk"`) currently store the same way a legitimate value would. Only `week` is exercised by any M1 example; `month` is added now because closing the set later, after a real quota row exists, is the same free-now/expensive-later trade T3 already made for `deadline`. |
 | T20 | **The fact/plan line runs inside the `Block` table, by block state.** `proposed` and `published` future blocks are the **Plan layer** — disposable, engine-written, deleted wholesale and regenerated on every recompute. `in_progress`, `completed` and `missed` blocks, plus pins, are the **Constraints layer** — immutable facts, read by the engine and never written by it. The determinism property is therefore: *delete every `proposed`/`published` future block, re-run with the same facts, get byte-identical placements.* The signature is `schedule(tasks, busy, guardrails, pins, facts, prior_plan, now) -> placements`. | Resolves C2 (#3), ratified by the owner 2026-08-12. As originally written — "delete every block and regenerate" — the property was not merely wrong but **untestable**, because the move penalty makes the objective depend on previous placements and past blocks are immutable inputs. Wiping the table would destroy history and pins alongside the plan. Drawing the line inside the table rather than splitting it keeps one query surface while making the disposable set precisely definable. Two naming rules come with it, because the vocabulary was in use before it was defined: (1) **"Plan" and "Constraints" are the layer names**; "Facts" is informal shorthand for the immutable block subset, not a third layer. (2) **"Layer" is reserved for this domain split** — T15's code organisation is the **module boundary**, not layers, because a `Block` row is otherwise Plan-layer and store-layer at once and the word stops carrying information. Note T15's inline five-argument rendering of `schedule()` predates this and is an abbreviation, not a competing decision; the seven-argument form above is the contract, and #11's AC-1 already says "corrected signature per C2". |
 | T21 | **Never edit a migration that has been applied. Add a new numbered one.** Enforced in CI: migration files present on `trunk` may be added to, never modified or deleted (#32). Because SQLite has no `ALTER COLUMN`, a type change means the table-rebuild pattern — create the corrected table, `INSERT INTO new SELECT … FROM old`, drop the old, rename — inside a *new* migration. | `sqlx` records each applied migration by checksum, so editing one makes every existing database refuse to boot: `migration N was previously applied but has been modified`, with no fallback and no remediation path. The `triage-validation` slice did exactly this, changing `deadline TEXT` to `INTEGER` inside `0002_tasks.sql`; the damage was zero only because no database happened to exist at that moment. D14 removes that luck — the owner now runs the app every slice and will always have a live database. A convention is not enough here, because SQLite's missing `ALTER COLUMN` makes editing the old file the path of least resistance every single time: the correct route is roughly fifteen lines of rebuild in a new file, the wrong route is a one-word edit in an old one. The brief that authorised it reasoned "`tasks` has no production data, so this is free today" — which conflates *no production data* with *no existing database*, and is the specific mistake the CI gate exists to make unmakeable. Note `features/migrations.feature` cannot catch this: its idempotency scenario re-runs the *same* migration set, never a changed one. |
+| T22 | **Domain and title categorization folds into the existing classifier trait (M1 keyword impl, M9 LLM impl) — not a second pipeline.** The trait's output grows `domain` and `title` alongside `kind`/`deadline`/`priority`, carrying per-field confidence the same way. The keyword implementation guesses `domain` by keyword match and passes `title` through unchanged; M9's LLM implementation improves both behind the same trait. **Classification is invoked from a background worker after capture, not inside `POST /captures` and not synchronously at triage.** | Two asks arrived separately — classify a capture's task *kind*, and tag it with a *domain* and a cleaned-up *title* — and they are the same mechanism: classify raw text, cheap rules first, LLM later, fall back safely, measure against labelled data. M9 (#19) already commits to exactly that shape, so a standalone categorization worker would duplicate the trait, the fallback and the evaluation harness for a second field set. Growing the trait's output at M1 rather than at M9 is the same argument T11 made for the three-variant `kind`: retrofitting an output shape after M9 depends on it is the expensive order. **On invocation timing**, the apparent conflict between "a trait implies a synchronous call" and "a background poller" dissolves — a trait describes *swappability*, not *when it is called*, and a worker can call a synchronous `classify()` perfectly well. What is genuinely settled is *where*: `POST /captures` has a 50ms budget asserted by `capture_endpoint.feature`, which no LLM round trip fits inside; and blocking triage on a network call puts the latency in front of the user at the one moment they are waiting. So the worker fills the fields between capture and triage. Provider is **OpenRouter** behind a hand-rolled `reqwest`+`serde` client, model pinned by `OPENROUTER_MODEL` with a cheap default — swappable without a code change, consistent with T5's precedent against generated SDKs. |
 
 ## Rejected
 
@@ -104,6 +105,7 @@ scheme.
 | O3 | Weekend check-in density. | Fewer domain transitions means fewer natural check-in points; a coarser Sunday sweep may be needed. Revisit at M6. |
 | O4 | Google OAuth refresh-token expiry. | Verify against current Google docs rather than trusting prior notes; policy shifts. Either way, design the token store assuming re-auth happens and surface it loudly. |
 | O5 | Menu diversity scoring. | "One quick win, one that matters, one you've been circling" is a stated intent with no defined mechanism. Needs specification before M3.5. |
+| O6 | The capture `domain` list contradicts the domains the decisions log already names. | **Blocks the M1 classifier story.** The categorization proposal lists Work, Health, Home, Learning, Social; the log names **Fitness** (T11, "one of five domains"), **Learning** (D5's reckoning example), **Family** (D1) and **Work**. Two different sets of five. Worse, the proposal makes the capture domain list *plain extensible data* while T9 derives the complexity threshold of 8 from `Domain` being a **5-variant Rust enum** governing guardrails and capacity — so "add a domain" becomes a one-line edit on one side and a schema-shaped change on the other, and a capture can be tagged with a domain no guardrail exists for. Decide whether these are one concept or two, and fix the canonical list. |
 
 ---
 
@@ -361,3 +363,35 @@ quietly patched because the previous slice's log entry contained a claim that
 was simply false — "verified identical before and after" when the count had
 gone 1 → 3 — and the habit worth building is that measurable assertions in this
 file get measured.
+
+### 2026-08-13 — Capture categorization folded into the classifier trait
+
+A brainstorming session designed LLM auto-categorization for captures, then
+found mid-design that it overlapped M9. Reconciled as **T22**: one trait, two
+implementations, output grown to carry `domain` and `title`. Source:
+`docs/plans/2026-08-13-capture-categorization-handoff.md`.
+
+Two corrections to that proposal, applied here rather than inherited:
+
+- **The invocation-timing question it left open is partly a false conflict.**
+  It framed "trait implies synchronous" against "background poller" as a
+  design fork. A trait describes swappability, not call timing; a worker can
+  call a synchronous `classify()`. The real constraint is *where*, and that is
+  already settled by evidence — `capture_endpoint.feature` asserts a 50ms
+  budget on `POST /captures`, which no LLM round trip fits inside, and
+  blocking triage puts the wait in front of the user at the moment they are
+  waiting. Recorded in T22 as the worker filling fields between capture and
+  triage.
+- **The provisional domain list contradicts this log**, and that is *not*
+  settled — raised as **O6**. The proposal lists Work, Health, Home, Learning,
+  Social. This file already names Fitness (T11), Learning (D5), Family (D1)
+  and Work. Two different sets of five, and nobody noticed because the domain
+  set has never been written down in one place. Which is the same root cause
+  as the missing invariants: `docs/design/brief.md` does not exist, so the
+  vocabulary lives in whichever entry happened to mention it.
+
+O6 also surfaces a harder question the proposal states as a settled
+constraint: capture domains as extensible plain data versus `Domain` as a
+5-variant enum that T9's complexity threshold is derived from. One concept or
+two is a real decision, and it needs making before the M1 classifier story is
+specified.

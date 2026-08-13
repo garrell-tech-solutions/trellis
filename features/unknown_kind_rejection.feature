@@ -4,6 +4,7 @@
 
 # unknown-kind-rejection-named-01: triaging with a kind outside pool, committed and quota is rejected and creates nothing
 # unknown-kind-rejection-absent-02: triaging without naming a kind is rejected and creates nothing
+# unknown-kind-rejection-wrong-type-03: a kind submitted as the wrong JSON type is rejected and echoes exactly what was submitted
 Feature: Triage rejects a kind outside pool, committed and quota
 
   Background:
@@ -27,5 +28,13 @@ Feature: Triage rejects a kind outside pool, committed and quota
     When the capture is triaged with no kind named
     Then the triage is rejected
     And the rejection reports an unknown kind
+    And the task list is still empty
+    And the capture is still waiting in the untriaged queue
+
+  # unknown-kind-rejection-wrong-type-03: a kind submitted as the wrong JSON type is rejected and echoes exactly what was submitted
+  Scenario: A kind submitted as the wrong JSON type is rejected and echoes exactly what was submitted
+    When the capture is triaged with kind submitted as the number 7
+    Then the triage is rejected
+    And the rejection reports the unknown kind as the number 7
     And the task list is still empty
     And the capture is still waiting in the untriaged queue

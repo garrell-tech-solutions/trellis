@@ -5,6 +5,8 @@
 # quota-triage-validation-missing-field-01: quota triage is rejected when a required target field is absent
 # quota-triage-validation-empty-period-02: quota triage is rejected when period is left empty, the same way as when it is absent
 # quota-triage-validation-invalid-period-03: quota triage is rejected when period is outside week and month
+# quota-triage-validation-nonpositive-target-count-04: quota triage is rejected when target_count is not positive
+# quota-triage-validation-nonpositive-target-minutes-05: quota triage is rejected when target_minutes_each is not positive
 Feature: Quota triage requires target count, target minutes each and period
 
   Background:
@@ -44,3 +46,29 @@ Feature: Quota triage requires target count, target minutes each and period
       | bad_period |
       | fortnight  |
       | Week       |
+
+  # quota-triage-validation-nonpositive-target-count-04: quota triage is rejected when target_count is not positive
+  Scenario: A non-positive target_count is rejected
+    When the capture is triaged as a quota task with a target_count of "<bad_target_count>"
+    Then the triage is rejected
+    And the rejection reports "target_count" as invalid
+    And the task list is still empty
+    And the capture is still waiting in the untriaged queue
+
+    Examples:
+      | bad_target_count |
+      | 0                 |
+      | -1                |
+
+  # quota-triage-validation-nonpositive-target-minutes-05: quota triage is rejected when target_minutes_each is not positive
+  Scenario: A non-positive target_minutes_each is rejected
+    When the capture is triaged as a quota task with a target_minutes_each of "<bad_target_minutes_each>"
+    Then the triage is rejected
+    And the rejection reports "target_minutes_each" as invalid
+    And the task list is still empty
+    And the capture is still waiting in the untriaged queue
+
+    Examples:
+      | bad_target_minutes_each |
+      | 0                        |
+      | -5                       |

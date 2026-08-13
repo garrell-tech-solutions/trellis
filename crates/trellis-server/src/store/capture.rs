@@ -2,6 +2,19 @@
 
 use sqlx::SqlitePool;
 
+/// A capture as the inbox view needs it: just enough to render a row.
+#[derive(Debug, Clone, PartialEq, Eq, sqlx::FromRow)]
+pub struct UntriagedCapture {
+    pub raw_text: String,
+}
+
+/// Untriaged captures, newest first — the inbox's contents.
+pub async fn list_untriaged(pool: &SqlitePool) -> Result<Vec<UntriagedCapture>, sqlx::Error> {
+    sqlx::query_as("SELECT raw_text FROM captures WHERE triaged_at IS NULL ORDER BY id DESC")
+        .fetch_all(pool)
+        .await
+}
+
 pub async fn insert(
     pool: &SqlitePool,
     raw_text: &str,
@@ -113,5 +126,42 @@ mod tests {
             .unwrap();
 
         assert!(insert(&pool, "buy milk", "web", 0).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn list_untriaged_is_empty_against_a_fresh_database() {
+        let (_dir, pool) = test_pool().await;
+
+        assert_eq!(list_untriaged(&pool).await.unwrap(), Vec::new());
+    }
+
+    #[tokio::test]
+    async fn list_untriaged_lists_captures_newest_first() {
+        let (_dir, pool) = test_pool().await;
+        insert_capture(&pool, "call the dentist").await;
+        insert_capture(&pool, "buy milk").await;
+
+        let captures = list_untriaged(&pool).await.unwrap();
+
+        assert_eq!(
+            captures
+                .iter()
+                .map(|c| c.raw_text.as_str())
+                .collect::<Vec<_>>(),
+            vec!["buy milk", "call the dentist"]
+        );
+    }
+
+    #[tokio::test]
+    async fn list_untriaged_excludes_a_triaged_capture() {
+        let (_dir, pool) = test_pool().await;
+        insert_capture(&pool, "buy milk").await;
+        let triaged = insert_capture(&pool, "call the dentist").await;
+        mark_triaged(&pool, triaged, 9999).await.unwrap();
+
+        let captures = list_untriaged(&pool).await.unwrap();
+
+        assert_eq!(captures.len(), 1);
+        assert_eq!(captures[0].raw_text, "buy milk");
     }
 }

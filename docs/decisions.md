@@ -151,13 +151,13 @@ O4 → #40 · O5 → #41 · O6 → #36. Issue #1 is titled `OQ2`; same question.
 | T-unknown-kind-rejected | `kind` is validated against the three variants at the boundary. A submission naming anything else is rejected with `422 {"unknown_kind": <submitted>}`. | T-three-task-kinds committed to a three-variant sum type, but the M1 implementation read `kind` as `payload.get("kind").and_then(as_str).unwrap_or("")` and stored whatever string arrived, so `{"kind":"banana"}` wrote `banana` into a column whose domain is three values. That is the failure mode T-three-task-kinds named — not the `if committed {} else {}` shape it predicted, but a weaker one, with no discrimination at all. Since `tasks.kind` carries no `CHECK` constraint, the only thing standing between a typo and durable out-of-domain data was the caller. Rejecting is a **behaviour change on input nothing specifies**: no feature, QA procedure or unit test covered an unrecognised kind, and the old permissiveness was an artifact of `unwrap_or("")` rather than a decision. Rejected alternative: keep a fourth catch-all variant to preserve the old behaviour exactly — that reintroduces the stringly-typed hole inside the very type introduced to close it, and makes every future `match` carry an arm that means "we do not know what this is". |
 | T-quota-targets-required | Quota triage requires `target_count`, `target_minutes_each` and `period`, rejected the same way `committed`'s three fields are. | T-three-task-kinds made the *columns* nullable for a schema reason — one `tasks` table shared by three kinds, most columns unused per row. That is a storage fact, not a triage-time permission. A quota row with no target can never be scheduled at M8 (nothing to place) and can never appear in D-quota-no-rollover's reckoning (`count(done)/target_count` has no denominator) — the same "wall protecting an empty room" failure T-three-task-kinds named for Fitness-as-pool, relocated to quota-with-no-target instead of pool. Requiring the fields at triage costs nothing today (no M1 surface depends on omitting them) and closes the hole before a real quota row can be created. |
 | T-empty-equals-absent | An empty string and an absent key report identically — both use the existing `{"missing_field": <name>}` shape. | `require()` treated `Some("")` as present, which is the empty-string half of the hole this slice closes; the other half is deciding what the closed case reports. Distinguishing "you sent nothing" from "you sent an empty string" is a distinction a client rarely intends — an unfilled HTML form field and an absent field are the same submitter mistake. One shape, one code path in `require()`, rather than a second rejection variant carrying no information the caller can act on differently. |
-| T-period-closed-set | `period` is a closed set: `week \| month`. | `deadline_type` and `priority` were closed in this same slice (T-series validated sum types in `scheduler-core`) for the reason D-guardrails-never-yield states — the fields the M3 scheduler branches on cannot carry undefined values. `period` is exactly that kind of field for quota scheduling at M8: "3 sessions per `fortnight`" is not a case M8's cadence math is written to handle, and typos (`"weekk"`) currently store the same way a legitimate value would. Only `week` is exercised by any M1 example; `month` is added now because closing the set later, after a real quota row exists, is the same free-now/expensive-later trade T-jiff-epoch-millis already made for `deadline`. |
+| T-period-closed-set | `period` is a closed set: `week \| month`. | `deadline_type` and `priority` were closed in this same slice (both became validated sum types in `scheduler-core`) for the reason D-guardrails-never-yield states — the fields the M3 scheduler branches on cannot carry undefined values. `period` is exactly that kind of field for quota scheduling at M8: "3 sessions per `fortnight`" is not a case M8's cadence math is written to handle, and typos (`"weekk"`) currently store the same way a legitimate value would. Only `week` is exercised by any M1 example; `month` is added now because closing the set later, after a real quota row exists, is the same free-now/expensive-later trade T-jiff-epoch-millis already made for `deadline`. |
 | T-fact-plan-line | **The fact/plan line runs inside the `Block` table, by block state.** `proposed` and `published` future blocks are the **Plan layer** — disposable, engine-written, deleted wholesale and regenerated on every recompute. `in_progress`, `completed` and `missed` blocks, plus pins, are the **Constraints layer** — immutable facts, read by the engine and never written by it. The determinism property is therefore: *delete every `proposed`/`published` future block, re-run with the same facts, get byte-identical placements.* The signature is `schedule(tasks, busy, guardrails, pins, facts, prior_plan, now) -> placements`. | Resolves C2 (#3), ratified by the owner 2026-08-12. As originally written — "delete every block and regenerate" — the property was not merely wrong but **untestable**, because the move penalty makes the objective depend on previous placements and past blocks are immutable inputs. Wiping the table would destroy history and pins alongside the plan. Drawing the line inside the table rather than splitting it keeps one query surface while making the disposable set precisely definable. Two naming rules come with it, because the vocabulary was in use before it was defined: (1) **"Plan" and "Constraints" are the layer names**; "Facts" is informal shorthand for the immutable block subset, not a third layer. (2) **"Layer" is reserved for this domain split** — T-module-boundary's code organisation is the **module boundary**, not layers, because a `Block` row is otherwise Plan-layer and store-layer at once and the word stops carrying information. Note T-module-boundary's inline five-argument rendering of `schedule()` predates this and is an abbreviation, not a competing decision; the seven-argument form above is the contract, and #11's AC-1 already says "corrected signature per C2". |
 | T-migrations-append-only | **Never edit a migration that has been applied. Add a new numbered one.** Enforced in CI: migration files present on `trunk` may be added to, never modified or deleted (#32). Because SQLite has no `ALTER COLUMN`, a type change means the table-rebuild pattern — create the corrected table, `INSERT INTO new SELECT … FROM old`, drop the old, rename — inside a *new* migration. | `sqlx` records each applied migration by checksum, so editing one makes every existing database refuse to boot: `migration N was previously applied but has been modified`, with no fallback and no remediation path. The `triage-validation` slice did exactly this, changing `deadline TEXT` to `INTEGER` inside `0002_tasks.sql`; the damage was zero only because no database happened to exist at that moment. D-visible-slices removes that luck — the owner now runs the app every slice and will always have a live database. A convention is not enough here, because SQLite's missing `ALTER COLUMN` makes editing the old file the path of least resistance every single time: the correct route is roughly fifteen lines of rebuild in a new file, the wrong route is a one-word edit in an old one. The brief that authorised it reasoned "`tasks` has no production data, so this is free today" — which conflates *no production data* with *no existing database*, and is the specific mistake the CI gate exists to make unmakeable. Note `features/migrations.feature` cannot catch this: its idempotency scenario re-runs the *same* migration set, never a changed one. |
 | T-classifier-covers-domain | **Domain and title categorization folds into the existing classifier trait (M1 keyword impl, M9 LLM impl) — not a second pipeline.** The trait's output grows `domain` and `title` alongside `kind`/`deadline`/`priority`, carrying per-field confidence the same way. The keyword implementation guesses `domain` by keyword match and passes `title` through unchanged; M9's LLM implementation improves both behind the same trait. **Classification is invoked from a background worker after capture, not inside `POST /captures` and not synchronously at triage.** | Two asks arrived separately — classify a capture's task *kind*, and tag it with a *domain* and a cleaned-up *title* — and they are the same mechanism: classify raw text, cheap rules first, LLM later, fall back safely, measure against labelled data. M9 (#19) already commits to exactly that shape, so a standalone categorization worker would duplicate the trait, the fallback and the evaluation harness for a second field set. Growing the trait's output at M1 rather than at M9 is the same argument T-three-task-kinds made for the three-variant `kind`: retrofitting an output shape after M9 depends on it is the expensive order. **On invocation timing**, the apparent conflict between "a trait implies a synchronous call" and "a background poller" dissolves — a trait describes *swappability*, not *when it is called*, and a worker can call a synchronous `classify()` perfectly well. What is genuinely settled is *where*: `POST /captures` has a 50ms budget asserted by `capture_endpoint.feature`, which no LLM round trip fits inside; and blocking triage on a network call puts the latency in front of the user at the one moment they are waiting. So the worker fills the fields between capture and triage. Provider is **OpenRouter** behind a hand-rolled `reqwest`+`serde` client, model pinned by `OPENROUTER_MODEL` with a cheap default — swappable without a code change, consistent with T-handrolled-gcal-client's precedent against generated SDKs. |
 | T-templates-take-view-models | **Templates render view models, never store row types.** `http::view` holds what a page shows; `store` holds what a query returned. Handlers map between them. | The inbox slice had `inbox.html` and `capture_row.html` rendering `store::capture::UntriagedCapture` directly — a `sqlx::FromRow` struct, documented as "a capture as the inbox view needs it", which is persistence described in terms of a page. The tell was in `create_capture`: to return the new row's markup it **hand-built an `UntriagedCapture`** for a capture it had just written and never read back, because the template demanded that type. A struct being fabricated to satisfy a renderer is no longer a row. Left alone, every later view inherits the pattern and the templates end up bound to the schema — and the coupling bites in both directions, since `store` would grow a view-shaped type per page. The two structs carry the same single field today and the mapping is one line; that is precisely why this is the cheap moment to draw the line, before the triage screen needs a row id to aim an action at and the calendar needs formatted times that are not columns. This applies T-module-boundary's module boundary to the delivery side — it is not a new boundary, and "layer" stays reserved for the Plan/Constraints domain split (T-fact-plan-line). |
 
-**Renumbered on merge:** this branch's own history numbered these T-quota-targets-required–T-migrations-append-only (assuming T-quota-targets-required was free); `trunk` had already assigned T-quota-targets-required–T-classifier-covers-domain to other decisions in the meantime (T-fact-plan-line–T-classifier-covers-domain above). The table above uses `trunk`'s numbers throughout; **source comments and QA prose on this branch that cite the old T-quota-targets-required–T-migrations-append-only numbers for quota/empty-field/period/templates are now stale** and were not corrected as part of this merge — see the PR description.
+**Renumbered on merge, then superseded.** This branch allocated numeric IDs that `trunk` had already given to other decisions, and its source comments were left citing the stale numbers. Both problems are gone: decisions are keyed by slug now, and the citations were migrated with a CI gate behind them. Kept as the record of why.
 
 ## Rejected
 
@@ -200,8 +200,8 @@ under D-silence-means-done; auto-close undo is unimplementable without storing p
 
 ### 2026-08-12 — M1 schema decisions settled
 
-#1, C1, C4 and N1 settled in session, unblocking M1. Recorded as T-three-task-kinds–T-archived-at-only and
-D-quota-no-rollover. C2, C3, C5 and the remaining U-series points stay open.
+#1, C1, C4 and N1 settled in session, unblocking M1. Recorded as `T-three-task-kinds`, `T-pins-in-constraints`, `T-auto-close-event`,
+`T-archived-at-only` and `D-quota-no-rollover`. C2, C3, C5 and the remaining U-series points stay open.
 
 **M1's blocker list is now empty**, but not because all four were answered in
 M1's favour — two of them turned out to belong downstream:
@@ -314,17 +314,18 @@ for a criterion whose terms are undefined.
 ### 2026-08-12 — triage-validation open questions settled
 
 Issue #29's three open questions settled with the user before specification.
-Recorded as T-empty-equals-absent–T-fact-plan-line (renumbered from an initial T-quota-targets-required–T-period-closed-set to avoid colliding
-with T-quota-targets-required above, settled independently the same day).
+Recorded as `T-quota-targets-required`, `T-empty-equals-absent` and
+`T-period-closed-set`. (They carried numeric IDs at the time, and were
+renumbered once on merge to dodge a collision — see "Former numbering".)
 
-- **Quota target required at triage (T-empty-equals-absent).** T-three-task-kinds's nullable columns were a
+- **Quota target required at triage (`T-quota-targets-required`).** T-three-task-kinds's nullable columns were a
   schema-sharing fact, not a triage-time permission; leaving target fields
   optional at triage would have let a quota row exist that M8 can never
   schedule and D-quota-no-rollover's reckoning can never report on.
-- **Empty and absent report identically (T-period-closed-set).** Both remain
+- **Empty and absent report identically (`T-empty-equals-absent`).** Both remain
   `{"missing_field": <name>}`. This also settles the empty-string half of the
   defect issue #29 raised against `require()` — the fix is one path, not two.
-- **`period` closed to `week | month` (T-fact-plan-line).** Matches how `deadline_type` and
+- **`period` closed to `week | month` (`T-period-closed-set`).** Matches how `deadline_type` and
   `priority` are closed in the same slice, for the same D-guardrails-never-yield reason: M8's cadence
   math cannot branch on an unvalidated string.
 
@@ -395,11 +396,13 @@ coverage.
 ### 2026-08-13 — Decision-ID collision on merge
 
 `triage-validation` and `trunk` independently allocated **T-quota-targets-required**. The slice
-branched from `a0889b4` before trunk's T-quota-targets-required existed, so both took what was
+branched from `a0889b4` before trunk's entry existed, so both took what was
 correctly the next free number at the time; neither side erred.
 
-Resolved by renumbering **trunk's** T-quota-targets-required (the fact/plan layer model, C2/#3) to
-**T-fact-plan-line**, leaving the slice's T-quota-targets-required–T-period-closed-set untouched. That direction was chosen purely
+Resolved by renumbering **trunk's** decision — the fact/plan layer model, C2/#3,
+now `T-fact-plan-line` — and leaving the slice's three (now
+`T-quota-targets-required`, `T-empty-equals-absent`, `T-period-closed-set`)
+untouched. That direction was chosen purely
 on blast radius: the slice's numbers are cited in nine places in `crates/`
 (`scheduler-core/src/task.rs`, `task_properties.rs`, two step modules), while
 trunk's had three references, all in documentation. Renumbering the cheaper side
@@ -410,6 +413,9 @@ so any two concurrent branches will collide again the moment both add a
 decision. Options if it recurs — allocate IDs only at merge time, prefix them
 per branch, or drop sequential numbering for dated slugs. Not worth solving
 until it costs more than this did.
+
+*It recurred within hours, and cost more. Sequential numbering was dropped the
+same day — see "Decisions are keyed by slug" below.*
 
 ### 2026-08-13 — Migration discipline, and two corrections
 
@@ -469,10 +475,9 @@ specified.
 The slice that finally made Trellis openable in a browser also introduced the
 first template, and with it the first chance to get the delivery side of T-module-boundary's
 module boundary wrong. It very nearly did. Recorded as **T-templates-take-view-models** — this branch's
-own history numbered it T-migrations-append-only, assuming T-quota-targets-required was free at the time it forked; see
-"Decision-ID collision on merge" above for why `trunk`'s numbers win and this
-branch's source comments citing T-quota-targets-required–T-migrations-append-only for quota/empty-field/period/templates
-are stale.
+own history gave it a number `trunk` had already spent, and its source comments
+cited the stale numbering; see "Decision-ID collision on merge" above. Both are
+moot now that decisions are keyed by slug and a CI gate checks the citations.
 
 **What the templates were rendering.** `InboxTemplate` held
 `Vec<store::capture::UntriagedCapture>` and `capture_row.html` read

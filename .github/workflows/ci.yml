@@ -25,7 +25,11 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  # Issue #32. Its own job, not a step in `gate`, for three reasons: it needs
+  # decisions.md T21 / issue #32: migrations are append-only, because sqlx
+  # checksums every applied migration and an edited one makes existing
+  # databases refuse to boot.
+  #
+  # Its own job, not a step in `gate`, for three reasons: it needs
   # a full-history checkout that the build job has no use for; it answers in
   # seconds and should not queue behind a ~10 minute Rust build to tell you
   # your migration edit is unmergeable; and it is the one check here whose

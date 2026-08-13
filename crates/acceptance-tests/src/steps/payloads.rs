@@ -11,7 +11,8 @@
 
 use serde_json::{json, Value};
 
-/// A deadline that parses (T3) and is inside every domain the core checks.
+/// A deadline that parses (T-jiff-epoch-millis) and is inside every domain
+/// the core checks.
 pub const VALID_DEADLINE: &str = "2026-08-20T17:00:00Z";
 
 pub fn pool() -> Value {

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Executable QA procedure: qa/scheduler_core_purity.md (covers
 # features/scheduler_core_purity.feature). This is a release-gate check
-# (decisions.md T4).
+# (decisions.md T-core-no-tokio).
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"

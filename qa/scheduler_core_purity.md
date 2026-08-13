@@ -2,8 +2,8 @@
 
 Covers: `features/scheduler_core_purity.feature`
 
-This is a release-gate check (decisions.md T4): it must be run in CI from M0
-onward, and a failure blocks every later milestone.
+This is a release-gate check (decisions.md T-core-no-tokio): it must be run in
+CI from M0 onward, and a failure blocks every later milestone.
 
 ## Procedure — repeat once per forbidden dependency
 

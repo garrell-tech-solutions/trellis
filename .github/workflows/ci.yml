@@ -25,7 +25,8 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  # decisions.md T21 / issue #32: migrations are append-only, because sqlx
+  # decisions.md T-migrations-append-only / issue #32: migrations are
+  # append-only, because sqlx
   # checksums every applied migration and an edited one makes existing
   # databases refuse to boot.
   #
@@ -72,6 +73,29 @@ jobs:
           BASE_BRANCH: ${{ github.base_ref }}
         run: ./scripts/ci/migration_immutability.sh "origin/$BASE_BRANCH"
 
+  # docs/decisions.md keys every settled decision by a content-derived slug,
+  # and source comments cite those slugs. This job fails the build if a
+  # citation names a decision the log does not contain.
+  #
+  # It is here rather than in `gate` for the same reasons the job above is:
+  # it needs no Rust toolchain, and a broken citation should be reported in
+  # seconds rather than after a ~10 minute build. Unlike that job it runs on
+  # push as well as pull_request -- it asserts a property of the tree, not of
+  # a diff, so it is meaningful on trunk and would catch a slug orphaned by a
+  # later edit to the decisions log itself.
+  decision-slugs:
+    name: decision citations resolve
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      # The default shallow checkout is enough: this reads the working tree,
+      # not the history.
+      - uses: actions/checkout@v5
+
+      - name: Every cited decision slug exists in docs/decisions.md
+        run: ./scripts/ci/decision_slugs.sh
+
   gate:
     name: fmt, clippy, test, T4 purity, musl release
     runs-on: ubuntu-latest
@@ -115,8 +139,9 @@ jobs:
           rustup target list --installed
           rustup target list --installed | grep -qx x86_64-unknown-linux-musl
 
-      # Caches the cargo registry and target/ only. The T4 purity gate below
-      # resolves from Cargo.toml and Cargo.lock via `cargo tree`, so no cached
+      # Caches the cargo registry and target/ only. The purity gate below
+      # (T-core-no-tokio) resolves from Cargo.toml and Cargo.lock via
+      # `cargo tree`, so no cached
       # build artifact can make it pass when it should fail.
       - uses: Swatinem/rust-cache@v2
 
@@ -129,11 +154,11 @@ jobs:
       - name: Test
         run: cargo test --workspace
 
-      # decisions.md T4 / issue #8 acceptance criterion 3: scheduler-core must
-      # not depend on tokio or sqlx. Release gate for every milestone from M0
-      # onward. Runs even when an earlier step failed, so a red test suite can
-      # never mask a purity regression.
-      - name: T4 release gate -- scheduler-core purity
+      # decisions.md T-core-no-tokio / issue #8 acceptance criterion 3:
+      # scheduler-core must not depend on tokio or sqlx. Release gate for
+      # every milestone from M0 onward. Runs even when an earlier step failed,
+      # so a red test suite can never mask a purity regression.
+      - name: Purity release gate -- scheduler-core depends on no runtime
         if: ${{ !cancelled() }}
         run: ./scripts/qa/scheduler_core_purity.sh
 

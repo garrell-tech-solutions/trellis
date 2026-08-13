@@ -2,7 +2,8 @@
 //!
 //! This is high-level policy and is deliberately free of HTTP, JSON, SQL and
 //! async. A triage decision can be made — and tested — with nothing but this
-//! module, which is the property T4's "no tokio" rule exists to protect.
+//! module, which is the property T-core-no-tokio's "no tokio" rule exists to
+//! protect.
 
 /// The stored discriminant for each kind. These three strings are the durable
 /// contract shared by the `tasks.kind` column and every delivery mechanism.
@@ -53,8 +54,8 @@ impl Field {
     }
 }
 
-/// `deadline_type`'s closed domain (D3: the M3 scheduler branches on this
-/// field, so it cannot carry an undefined value).
+/// `deadline_type`'s closed domain (D-guardrails-never-yield: the M3
+/// scheduler branches on this field, so it cannot carry an undefined value).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DeadlineType {
     Hard,
@@ -108,8 +109,8 @@ impl Priority {
     }
 }
 
-/// `period`'s closed domain (T20): the same M8 cadence-math reason as
-/// [`DeadlineType`] and [`Priority`].
+/// `period`'s closed domain (T-period-closed-set): the same M8 cadence-math
+/// reason as [`DeadlineType`] and [`Priority`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Period {
     Week,
@@ -133,9 +134,9 @@ impl Period {
     }
 }
 
-/// Parses a deadline to UTC epoch milliseconds (T3). Rejects anything that
-/// does not name a real instant — a syntactically plausible but invalid
-/// timestamp (`2026-13-45T99:99:99Z`) fails the same as free text.
+/// Parses a deadline to UTC epoch milliseconds (T-jiff-epoch-millis). Rejects
+/// anything that does not name a real instant — a syntactically plausible but
+/// invalid timestamp (`2026-13-45T99:99:99Z`) fails the same as free text.
 fn parse_deadline_ms(value: &str) -> Option<i64> {
     value
         .parse::<jiff::Timestamp>()
@@ -146,8 +147,9 @@ fn parse_deadline_ms(value: &str) -> Option<i64> {
 /// Why a set of triage fields does not describe a task.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TriageRejection {
-    /// A required field was absent, or submitted as an empty string (T19:
-    /// the two report identically — a client rarely intends the distinction).
+    /// A required field was absent, or submitted as an empty string
+    /// (T-empty-equals-absent: the two report identically — a client rarely
+    /// intends the distinction).
     MissingField(Field),
     /// A field was present but its value is outside the field's domain.
     InvalidField(Field),
@@ -156,10 +158,10 @@ pub enum TriageRejection {
     UnknownKind(Option<String>),
 }
 
-/// T11: task kind is a three-variant sum type. Each variant carries exactly
-/// the fields that kind means, so "a pool task has no deadline" and "a
-/// committed task has no quota target" are facts about the type rather than
-/// assertions about one caller's payload.
+/// T-three-task-kinds: task kind is a three-variant sum type. Each variant
+/// carries exactly the fields that kind means, so "a pool task has no
+/// deadline" and "a committed task has no quota target" are facts about the
+/// type rather than assertions about one caller's payload.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TaskKind {
     Pool,
@@ -168,10 +170,11 @@ pub enum TaskKind {
         deadline_type: DeadlineType,
         priority: Priority,
     },
-    /// T18: a quota task cannot be scheduled at M8 or reported on at the
-    /// reckoning without a target, so all three fields are required at
-    /// triage even though the columns stay nullable (T11) for schema
-    /// reasons — one `tasks` table shared by three kinds.
+    /// T-quota-targets-required: a quota task cannot be scheduled at M8 or
+    /// reported on at the reckoning without a target, so all three fields are
+    /// required at triage even though the columns stay nullable
+    /// (T-three-task-kinds) for schema reasons — one `tasks` table shared by
+    /// three kinds.
     Quota {
         target_count: i64,
         target_minutes_each: i64,
@@ -195,8 +198,9 @@ pub struct TaskAttributes {
     pub period: Option<&'static str>,
 }
 
-/// Requires a string field to be both present and non-empty (T19: absent and
-/// empty are the same submitter mistake, so they report identically).
+/// Requires a string field to be both present and non-empty
+/// (T-empty-equals-absent: absent and empty are the same submitter mistake,
+/// so they report identically).
 fn require(field: Field, value: &Option<String>) -> Result<String, TriageRejection> {
     match value {
         Some(v) if !v.is_empty() => Ok(v.clone()),

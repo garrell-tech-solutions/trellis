@@ -33,7 +33,7 @@ that are `curl`-only and do not repeat the by-hand check.
 ### Expected Observable Outcomes
 - All four demo steps from the handoff brief hold literally. If any one of
   them requires an extra step, a different URL, or manual JavaScript
-  intervention, the slice is not done — this is what D14 means.
+  intervention, the slice is not done — this is what D-visible-slices means.
 
 ## Setup — repeat before each procedure below
 

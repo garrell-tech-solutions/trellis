@@ -58,5 +58,5 @@ For each row:
 
 This procedure depends only on the triage endpoint's rejection contract and on
 durable state remaining unchanged on rejection. This is existing, shipped
-behaviour (T16); this procedure gives it QA coverage it did not previously
-have, without changing it.
+behaviour (T-unknown-kind-rejected); this procedure gives it QA coverage it
+did not previously have, without changing it.

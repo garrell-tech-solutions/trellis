@@ -26,9 +26,9 @@ trap qa_stop_server EXIT
 setup_scenario() { qa_setup_scenario "$BIN" "$1" "$TMP_DIR" "call the dentist"; }
 
 # --- Procedure: deadline round-trip ---
-# deadline is stored as epoch milliseconds (T3); every row below names the
-# same instant in a different textual form, so all three must store the same
-# value.
+# deadline is stored as epoch milliseconds (T-jiff-epoch-millis); every row
+# below names the same instant in a different textual form, so all three must
+# store the same value.
 run_deadline_round_trip() {
   local submitted_deadline="$1" expected_epoch_ms="$2"
   local name="round-trip-$(echo "$submitted_deadline" | tr -cs 'A-Za-z0-9' '-')"

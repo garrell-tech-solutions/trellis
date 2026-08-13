@@ -148,8 +148,9 @@ fn valid_quota() -> TriageFields {
 }
 
 /// A handful of well-formed deadlines and the instant each names, since
-/// deadline validity (T3) is exercised by the unit tests — this generator
-/// only needs enough variety to keep the round-trip property honest.
+/// deadline validity (T-jiff-epoch-millis) is exercised by the unit tests —
+/// this generator only needs enough variety to keep the round-trip property
+/// honest.
 fn valid_deadline() -> impl Strategy<Value = (&'static str, i64)> {
     prop::sample::select(vec![
         ("2026-08-20T17:00:00Z", 1787245200000i64),
@@ -204,8 +205,9 @@ proptest! {
     }
 
     /// A quota task reports back exactly the target it was given, and never a
-    /// deadline. T17 requires all three target fields at triage, so unlike
-    /// the pool case this generates only valid, complete targets.
+    /// deadline. T-quota-targets-required requires all three target fields at
+    /// triage, so unlike the pool case this generates only valid, complete
+    /// targets.
     #[test]
     #[ignore]
     fn a_quota_task_round_trips_its_target_and_carries_no_deadline(
@@ -360,7 +362,7 @@ proptest! {
     }
 
     /// A deadline that does not name a real instant is rejected as invalid
-    /// (T3), however plausible its shape.
+    /// (T-jiff-epoch-millis), however plausible its shape.
     #[test]
     #[ignore]
     fn a_deadline_that_names_no_instant_is_rejected_as_invalid(text in ".{1,40}") {
@@ -372,9 +374,10 @@ proptest! {
         );
     }
 
-    /// T18: absent and empty report identically. Written as a comparison
-    /// rather than as an expected value, so it stays true if the rejection
-    /// for an absent field ever changes — the point is that the two agree.
+    /// T-empty-equals-absent: absent and empty report identically. Written as
+    /// a comparison rather than as an expected value, so it stays true if the
+    /// rejection for an absent field ever changes — the point is that the two
+    /// agree.
     #[test]
     #[ignore]
     fn an_empty_required_field_is_rejected_exactly_like_an_absent_one(

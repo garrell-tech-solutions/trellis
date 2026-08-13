@@ -184,7 +184,71 @@ fn then_lists_no_captures(world: &mut World) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
+    use super::super::triage::given_capture_waiting;
     use super::*;
+
+    #[tokio::test]
+    async fn the_inbox_shows_the_empty_state_message_when_there_is_nothing_to_triage() {
+        let mut world = migrated_world().await;
+
+        when_inbox_viewed(&mut world).await.unwrap();
+
+        then_html_body_contains(&mut world, "Nothing to triage").unwrap();
+    }
+
+    #[tokio::test]
+    async fn the_inbox_lists_a_waiting_capture() {
+        let mut world = migrated_world().await;
+        given_capture_waiting(&mut world, "buy milk").await.unwrap();
+
+        when_inbox_viewed(&mut world).await.unwrap();
+
+        then_html_body_contains(&mut world, "buy milk").unwrap();
+    }
+
+    #[test]
+    fn then_not_redirect_passes_for_a_non_redirect_status() {
+        let mut world = World::new();
+        world.last_status = Some(200);
+        assert_eq!(then_not_redirect(&mut world), Ok(()));
+    }
+
+    #[test]
+    fn then_not_redirect_errors_for_a_redirect_status() {
+        let mut world = World::new();
+        world.last_status = Some(302);
+        assert!(then_not_redirect(&mut world).is_err());
+    }
+
+    #[test]
+    fn then_not_redirect_errors_when_no_response_was_recorded() {
+        let mut world = World::new();
+        assert!(then_not_redirect(&mut world).is_err());
+    }
+
+    #[test]
+    fn then_lists_before_passes_when_the_first_name_appears_first() {
+        let mut world = World::new();
+        world.last_html_body = Some("<li>buy milk</li><li>call the dentist</li>".to_string());
+        assert_eq!(
+            then_lists_before(&mut world, "buy milk", "call the dentist"),
+            Ok(())
+        );
+    }
+
+    #[test]
+    fn then_lists_before_errors_when_the_order_is_reversed() {
+        let mut world = World::new();
+        world.last_html_body = Some("<li>buy milk</li><li>call the dentist</li>".to_string());
+        assert!(then_lists_before(&mut world, "call the dentist", "buy milk").is_err());
+    }
+
+    #[test]
+    fn then_lists_before_errors_when_a_name_is_missing() {
+        let mut world = World::new();
+        world.last_html_body = Some("<li>buy milk</li>".to_string());
+        assert!(then_lists_before(&mut world, "buy milk", "call the dentist").is_err());
+    }
 
     #[test]
     fn urlencode_leaves_alphanumerics_untouched() {

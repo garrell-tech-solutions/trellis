@@ -7,6 +7,7 @@
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
+source "$SCRIPT_DIR/lib.sh"
 cd "$ROOT_DIR"
 
 TMP_DIR="./tmp/qa-task-kinds"
@@ -19,75 +20,9 @@ BIN="$ROOT_DIR/target/debug/trellis"
 
 FAILURES=0
 SERVER_PID=""
-cleanup() { [[ -n "$SERVER_PID" ]] && kill "$SERVER_PID" 2>/dev/null || true; }
-trap cleanup EXIT
+trap qa_stop_server EXIT
 
-free_port() {
-  python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1]); s.close()'
-}
-
-wait_ready() {
-  local port="$1"
-  for _ in $(seq 1 50); do
-    if (exec 3<>"/dev/tcp/127.0.0.1/$port") 2>/dev/null; then
-      exec 3<&- 3>&-
-      return 0
-    fi
-    sleep 0.1
-  done
-  return 1
-}
-
-# Setup shared by every scenario below: fresh db, running server, one
-# untriaged capture "buy milk". Sets DB_PATH, ADDR and CAPTURE_ID.
-setup_scenario() {
-  local name="$1" port
-  DB_PATH="$TMP_DIR/$name.sqlite"
-  port="$(free_port)"
-  ADDR="127.0.0.1:$port"
-
-  "$BIN" serve --db "$DB_PATH" --addr "$ADDR" >"$TMP_DIR/$name.log" 2>&1 &
-  SERVER_PID=$!
-
-  if ! wait_ready "$port"; then
-    echo "FAIL: [$name] server never became reachable at $ADDR" >&2
-    cat "$TMP_DIR/$name.log" >&2
-    FAILURES=1
-    return 1
-  fi
-
-  local task_count
-  task_count="$(sqlite3 "$DB_PATH" 'SELECT COUNT(*) FROM tasks;')"
-  if [[ "$task_count" != "0" ]]; then
-    echo "FAIL: [$name] expected an empty task list before triage, found $task_count" >&2
-    FAILURES=1
-  fi
-
-  curl -s -o /dev/null -X POST "http://$ADDR/captures" \
-    -H 'content-type: application/json' \
-    -d '{"raw_text":"buy milk","source":"web"}'
-
-  CAPTURE_ID="$(sqlite3 "$DB_PATH" "SELECT id FROM captures WHERE raw_text = 'buy milk';")"
-  if [[ -z "$CAPTURE_ID" ]]; then
-    echo "FAIL: [$name] no capture row found for \"buy milk\"" >&2
-    FAILURES=1
-    return 1
-  fi
-}
-
-teardown_scenario() {
-  kill "$SERVER_PID" 2>/dev/null || true
-  wait "$SERVER_PID" 2>/dev/null || true
-  SERVER_PID=""
-}
-
-triage_status() {
-  local body="$1" result
-  result="$(curl -s -o /dev/null -w '%{http_code}' -X POST "http://$ADDR/captures/$CAPTURE_ID/triage" \
-    -H 'content-type: application/json' \
-    -d "$body")"
-  echo "$result"
-}
+setup_scenario() { qa_setup_scenario "$BIN" "$1" "$TMP_DIR" "buy milk"; }
 
 # Prints the resulting task row for CAPTURE_ID as
 # kind|deadline|deadline_type|priority|target_count|target_minutes_each|period,
@@ -101,7 +36,7 @@ task_row() {
 
 assert_one_task() {
   local name="$1" count
-  count="$(sqlite3 "$DB_PATH" 'SELECT COUNT(*) FROM tasks;')"
+  count="$(qa_task_count)"
   if [[ "$count" != "1" ]]; then
     echo "FAIL: [$name] expected exactly one task, found $count" >&2
     FAILURES=1
@@ -110,10 +45,10 @@ assert_one_task() {
 }
 
 assert_status_created() {
-  local name="$1" body="$2" status
-  status="$(triage_status "$body")"
-  if [[ "$status" != "201" ]]; then
-    echo "FAIL: [$name] triage returned status $status, expected 201" >&2
+  local name="$1" body="$2"
+  qa_triage "$CAPTURE_ID" "$body"
+  if [[ "$STATUS" != "201" ]]; then
+    echo "FAIL: [$name] triage returned status $STATUS, expected 201" >&2
     FAILURES=1
   fi
 }
@@ -131,11 +66,14 @@ if setup_scenario "pool"; then
     }
   fi
 fi
-teardown_scenario
+qa_stop_server
 
 # --- Scenario: committed ---
+# deadline is stored as epoch milliseconds (T3); expected_deadline_ms is the
+# instant the submitted deadline text names, computed the same way the
+# triage boundary parses a submission.
 run_committed_example() {
-  local deadline="$1" deadline_type="$2" priority="$3"
+  local deadline="$1" deadline_type="$2" priority="$3" expected_deadline_ms="$4"
   local name="committed-$deadline_type"
   setup_scenario "$name" || return
   local body
@@ -145,8 +83,8 @@ run_committed_example() {
   if assert_one_task "$name"; then
     IFS='|' read -r kind row_deadline row_deadline_type row_priority target_count target_minutes_each period < <(task_row)
     [[ "$kind" == "committed" ]] || { echo "FAIL: [$name] expected kind committed, got \"$kind\"" >&2; FAILURES=1; }
-    if [[ "$row_deadline" != "$deadline" || "$row_deadline_type" != "$deadline_type" || "$row_priority" != "$priority" ]]; then
-      echo "FAIL: [$name] expected deadline=$deadline deadline_type=$deadline_type priority=$priority, got deadline=$row_deadline deadline_type=$row_deadline_type priority=$row_priority" >&2
+    if [[ "$row_deadline" != "$expected_deadline_ms" || "$row_deadline_type" != "$deadline_type" || "$row_priority" != "$priority" ]]; then
+      echo "FAIL: [$name] expected deadline=$expected_deadline_ms deadline_type=$deadline_type priority=$priority, got deadline=$row_deadline deadline_type=$row_deadline_type priority=$row_priority" >&2
       FAILURES=1
     fi
     [[ -z "$target_count$target_minutes_each$period" ]] || {
@@ -154,10 +92,10 @@ run_committed_example() {
       FAILURES=1
     }
   fi
-  teardown_scenario
+  qa_stop_server
 }
-run_committed_example "2026-08-20T17:00:00Z" "hard" "P1"
-run_committed_example "2026-08-31T09:00:00Z" "soft" "P3"
+run_committed_example "2026-08-20T17:00:00Z" "hard" "P1" "1787245200000"
+run_committed_example "2026-08-31T09:00:00Z" "soft" "P3" "1788166800000"
 
 # --- Scenario: quota ---
 run_quota_example() {
@@ -177,7 +115,7 @@ run_quota_example() {
     fi
     [[ -z "$deadline" ]] || { echo "FAIL: [$name] expected no deadline, got \"$deadline\"" >&2; FAILURES=1; }
   fi
-  teardown_scenario
+  qa_stop_server
 }
 run_quota_example "3" "45"
 run_quota_example "1" "90"

@@ -3,6 +3,9 @@
 use scheduler_core::task::TaskKind;
 use sqlx::SqlitePool;
 
+#[cfg(test)]
+use scheduler_core::task::{DeadlineType, Period, Priority};
+
 pub async fn insert(
     pool: &SqlitePool,
     capture_id: i64,
@@ -36,7 +39,7 @@ mod tests {
 
     type StoredTask = (
         String,
-        Option<String>,
+        Option<i64>,
         Option<String>,
         Option<String>,
         Option<i64>,
@@ -56,17 +59,17 @@ mod tests {
 
     fn committed() -> TaskKind {
         TaskKind::Committed {
-            deadline: "2026-08-20T17:00:00Z".to_string(),
-            deadline_type: "hard".to_string(),
-            priority: "P1".to_string(),
+            deadline: 1787245200000,
+            deadline_type: DeadlineType::Hard,
+            priority: Priority::P1,
         }
     }
 
     fn quota() -> TaskKind {
         TaskKind::Quota {
-            target_count: Some(3),
-            target_minutes_each: Some(45),
-            period: Some("week".to_string()),
+            target_count: 3,
+            target_minutes_each: 45,
+            period: Period::Week,
         }
     }
 
@@ -103,7 +106,7 @@ mod tests {
             stored_task(&pool).await,
             (
                 "committed".to_string(),
-                Some("2026-08-20T17:00:00Z".to_string()),
+                Some(1787245200000),
                 Some("hard".to_string()),
                 Some("P1".to_string()),
                 None,

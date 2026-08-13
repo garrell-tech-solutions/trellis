@@ -8,7 +8,9 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 STATUS=0
 for script in "$SCRIPT_DIR"/*.sh; do
-  [[ "$(basename "$script")" == "run.sh" ]] && continue
+  case "$(basename "$script")" in
+    run.sh|lib.sh) continue ;;
+  esac
   echo "=== $(basename "$script") ===" >&2
   if ! "$script"; then
     STATUS=1

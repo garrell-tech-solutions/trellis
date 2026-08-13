@@ -105,7 +105,7 @@ These are live and they will cost you time.
    fmt, clippy, `cargo test --workspace`, the T4 purity gate, and the musl
    release build. It does **not** run the acceptance suite — see gotcha 1.
 6. **Merge conflict warning:** `docs/decisions.md` was modified on `trunk` after
-   your current worktree state (D14, T17, and an ID-prefix legend). If you have
+   your current worktree state (D14, T20, and an ID-prefix legend). If you have
    local edits to that file from the `triage-validation` slice, expect a
    conflict and resolve it by keeping both — the file is append-only.
 7. Base branch is **`trunk`**. Use `./tmp/` for scratch, not `/tmp`.

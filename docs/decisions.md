@@ -74,7 +74,10 @@ scheme.
 | T14 | `archived_at` is the single archive signal. `status: dropped` is removed. | Resolves N1. Two fields for one state, in a system where D7 makes archiving the *default* outcome reached implicitly from several paths — decay pass, three-strike, and simply closing the review (U7) — means every path gets two chances to set one and forget the other. The resulting half-archived task is alive on whichever surface filters the field that was missed: a task returning from the dead, in a product whose entire value is that the user trusts what it shows. M8's all-surfaces proptest is the test designed to catch this, and it can only assert a clean invariant against one field. `archived_at` also carries strictly more information — the reckoning's "47 archived this quarter, 31 Learning" needs a timestamp, which `status: dropped` cannot supply. |
 | T15 | Three layers, dependencies pointing inward: `scheduler-core` holds the rules; `trellis-server::http` translates requests into core inputs; `trellis-server::store` translates core types into rows. Adapters name core types; the core names neither. | The rules had been living inside the axum handlers, expressed as `serde_json::Value` probes and `StatusCode` returns — the function that wrote a task row took a *transport* type as a parameter and returned an *HTTP* type as its error. That leaves no seam to test a rule at: answering "is this triage valid?" required a running server and a SQLite pool. It also made T2's "a Postgres swap stays mechanical" untrue, since the queries were spread across handler modules instead of confined to one layer. The split is what makes `scheduler-core` non-empty for the first time, and gives T4's no-tokio rule something to protect. `store/mod.rs` carries a unit test asserting that no store module names `axum` or `StatusCode`: a layering rule nothing checks is a comment. |
 | T16 | `kind` is validated against the three variants at the boundary. A submission naming anything else is rejected with `422 {"unknown_kind": <submitted>}`. | T11 committed to a three-variant sum type, but the M1 implementation read `kind` as `payload.get("kind").and_then(as_str).unwrap_or("")` and stored whatever string arrived, so `{"kind":"banana"}` wrote `banana` into a column whose domain is three values. That is the failure mode T11 named — not the `if committed {} else {}` shape it predicted, but a weaker one, with no discrimination at all. Since `tasks.kind` carries no `CHECK` constraint, the only thing standing between a typo and durable out-of-domain data was the caller. Rejecting is a **behaviour change on input nothing specifies**: no feature, QA procedure or unit test covered an unrecognised kind, and the old permissiveness was an artifact of `unwrap_or("")` rather than a decision. Rejected alternative: keep a fourth catch-all variant to preserve the old behaviour exactly — that reintroduces the stringly-typed hole inside the very type introduced to close it, and makes every future `match` carry an arm that means "we do not know what this is". |
-| T17 | **The fact/plan line runs inside the `Block` table, by block state.** `proposed` and `published` future blocks are the **Plan layer** — disposable, engine-written, deleted wholesale and regenerated on every recompute. `in_progress`, `completed` and `missed` blocks, plus pins, are the **Constraints layer** — immutable facts, read by the engine and never written by it. The determinism property is therefore: *delete every `proposed`/`published` future block, re-run with the same facts, get byte-identical placements.* The signature is `schedule(tasks, busy, guardrails, pins, facts, prior_plan, now) -> placements`. | Resolves C2 (#3), ratified by the owner 2026-08-12. As originally written — "delete every block and regenerate" — the property was not merely wrong but **untestable**, because the move penalty makes the objective depend on previous placements and past blocks are immutable inputs. Wiping the table would destroy history and pins alongside the plan. Drawing the line inside the table rather than splitting it keeps one query surface while making the disposable set precisely definable. Two naming rules come with it, because the vocabulary was in use before it was defined: (1) **"Plan" and "Constraints" are the layer names**; "Facts" is informal shorthand for the immutable block subset, not a third layer. (2) **"Layer" is reserved for this domain split** — T15's code organisation is the **module boundary**, not layers, because a `Block` row is otherwise Plan-layer and store-layer at once and the word stops carrying information. Note T15's inline five-argument rendering of `schedule()` predates this and is an abbreviation, not a competing decision; the seven-argument form above is the contract, and #11's AC-1 already says "corrected signature per C2". |
+| T17 | Quota triage requires `target_count`, `target_minutes_each` and `period`, rejected the same way `committed`'s three fields are. | T11 made the *columns* nullable for a schema reason — one `tasks` table shared by three kinds, most columns unused per row. That is a storage fact, not a triage-time permission. A quota row with no target can never be scheduled at M8 (nothing to place) and can never appear in D13's reckoning (`count(done)/target_count` has no denominator) — the same "wall protecting an empty room" failure T11 named for Fitness-as-pool, relocated to quota-with-no-target instead of pool. Requiring the fields at triage costs nothing today (no M1 surface depends on omitting them) and closes the hole before a real quota row can be created. |
+| T18 | An empty string and an absent key report identically — both use the existing `{"missing_field": <name>}` shape. | `require()` treated `Some("")` as present, which is the empty-string half of the hole this slice closes; the other half is deciding what the closed case reports. Distinguishing "you sent nothing" from "you sent an empty string" is a distinction a client rarely intends — an unfilled HTML form field and an absent field are the same submitter mistake. One shape, one code path in `require()`, rather than a second rejection variant carrying no information the caller can act on differently. |
+| T19 | `period` is a closed set: `week \| month`. | `deadline_type` and `priority` were closed in this same slice (T-series validated sum types in `scheduler-core`) for the reason D3 states — the fields the M3 scheduler branches on cannot carry undefined values. `period` is exactly that kind of field for quota scheduling at M8: "3 sessions per `fortnight`" is not a case M8's cadence math is written to handle, and typos (`"weekk"`) currently store the same way a legitimate value would. Only `week` is exercised by any M1 example; `month` is added now because closing the set later, after a real quota row exists, is the same free-now/expensive-later trade T3 already made for `deadline`. |
+| T20 | **The fact/plan line runs inside the `Block` table, by block state.** `proposed` and `published` future blocks are the **Plan layer** — disposable, engine-written, deleted wholesale and regenerated on every recompute. `in_progress`, `completed` and `missed` blocks, plus pins, are the **Constraints layer** — immutable facts, read by the engine and never written by it. The determinism property is therefore: *delete every `proposed`/`published` future block, re-run with the same facts, get byte-identical placements.* The signature is `schedule(tasks, busy, guardrails, pins, facts, prior_plan, now) -> placements`. | Resolves C2 (#3), ratified by the owner 2026-08-12. As originally written — "delete every block and regenerate" — the property was not merely wrong but **untestable**, because the move penalty makes the objective depend on previous placements and past blocks are immutable inputs. Wiping the table would destroy history and pins alongside the plan. Drawing the line inside the table rather than splitting it keeps one query surface while making the disposable set precisely definable. Two naming rules come with it, because the vocabulary was in use before it was defined: (1) **"Plan" and "Constraints" are the layer names**; "Facts" is informal shorthand for the immutable block subset, not a third layer. (2) **"Layer" is reserved for this domain split** — T15's code organisation is the **module boundary**, not layers, because a `Block` row is otherwise Plan-layer and store-layer at once and the word stops carrying information. Note T15's inline five-argument rendering of `schedule()` predates this and is an abbreviation, not a competing decision; the seven-argument form above is the contract, and #11's AC-1 already says "corrected signature per C2". |
 
 ## Rejected
 
@@ -216,7 +219,7 @@ templates. There is no GET route. Trellis cannot be opened in a browser at all;
 the only way to observe it is `curl`. Under the previous milestone cut that
 remained true until roughly M6.
 
-**T17 settles the layer vocabulary** (C2, #3). Worth recording why it sat open
+**T20 settles the layer vocabulary** (C2, #3). Worth recording why it sat open
 so long: T12 was *settled* while standing on C2's *unratified* proposal, and
 M3's acceptance criteria (#11) were written in vocabulary that nothing in the
 repo defined. Every agent reading "Plan layer" was inferring it.
@@ -237,3 +240,94 @@ described anywhere in the repo or the tracker:
 non-overlap; conservation under splitting; hard deadlines hold. Until they are
 written down M3 cannot be specified, because the specifier cannot write Gherkin
 for a criterion whose terms are undefined.
+
+### 2026-08-12 — triage-validation open questions settled
+
+Issue #29's three open questions settled with the user before specification.
+Recorded as T17–T19.
+
+- **Quota target required at triage (T17).** T11's nullable columns were a
+  schema-sharing fact, not a triage-time permission; leaving target fields
+  optional at triage would have let a quota row exist that M8 can never
+  schedule and D13's reckoning can never report on.
+- **Empty and absent report identically (T18).** Both remain
+  `{"missing_field": <name>}`. This also settles the empty-string half of the
+  defect issue #29 raised against `require()` — the fix is one path, not two.
+- **`period` closed to `week | month` (T19).** Matches how `deadline_type` and
+  `priority` are closed in the same slice, for the same D3 reason: M8's cadence
+  math cannot branch on an unvalidated string.
+
+### 2026-08-12 — triage-validation harness seams and the complexity gate
+
+The triage-validation slice landed the closed domains in `scheduler-core`,
+which is where T15 says they belong — the layering held with no correction
+needed. The architectural work this round was in the acceptance harness, which
+had grown two missing seams.
+
+**The definition of a valid submission had no home.** Closing four field
+domains meant every "…is rejected because X is wrong" scenario needed a
+payload valid in every respect *except* X. Written inline, the canonical
+committed payload became a literal repeated twelve times across five step
+modules, so closing one more field's domain would mean finding and editing
+every copy. `steps/payloads.rs` now holds the canonical payload per kind plus
+`with_field`/`without_field`, and a scenario states only what it varies.
+
+**Nothing knew how a scenario reaches the application.** `capture` and
+`triage` had each grown a copy of "build the router from the world's pool,
+POST, record the outcome", and the copies had already drifted: one timed the
+round trip and discarded the body, the other kept the body and discarded the
+timing — so a step could assert only what its own module happened to record.
+`steps/app_client.rs` returns status, body and elapsed together.
+
+DRY: 3.26% → 2.62%, back under the 3% threshold it had crossed.
+
+**On the complexity gate, deliberately not "fixed".** Three violations remain,
+all pure regex dispatch chains: `steps/capture.rs::dispatch` (14),
+`steps/triage.rs::dispatch` (17), `steps/mod.rs::dispatch` (9). Every arm is a
+one-line delegation, so by T9's own rule — *a function over 8 is carrying
+logic that is not the match; extract that, do not flatten the match* — there
+is nothing to extract. The only way to move the number is a
+`(Regex, handler)` table, and because the handlers are `async` with differing
+arities, a uniform table in Rust needs a boxed-future wrapper function per
+step: roughly forty wrappers to replace forty one-line branches, which is
+exactly the "indirection that is strictly worse to read" T9 refuses. **Do not
+flatten these into a registry to make the number go down.** If they are ever
+worth changing it should be for a cohesion reason — splitting a step module by
+Gherkin phase — not for the metric.
+
+The distinction is visible in this slice: `steps/triage.rs::when_triaged` also
+scored 9 and *did* come off the list, because it was genuinely doing two
+things (driving HTTP, and recording onto `World`) and separating them was
+worth doing on its own merits. The number moved as a side effect of an
+improvement, which is the only reason it should ever move.
+
+**Property coverage doubled, 6 → 12**, all in
+`crates/scheduler-core/tests/task_properties.rs`: every value inside a closed
+domain round-trips; anything outside one is rejected as invalid naming that
+field; a deadline naming no real instant is rejected (T3); empty and absent
+produce the *identical* rejection (T18, asserted as an equality between the
+two outcomes rather than against a fixed expectation, so it survives a change
+to either); a missing field is reported before an invalid one; and equivalent
+textual spellings of one instant store one deadline. The last three were
+checked against deliberate breakages of `require()`, of the check ordering in
+`committed_from`, and confirmed to fail — a property that cannot fail is not
+coverage.
+
+### 2026-08-13 — Decision-ID collision on merge
+
+`triage-validation` and `trunk` independently allocated **T17**. The slice
+branched from `a0889b4` before trunk's T17 existed, so both took what was
+correctly the next free number at the time; neither side erred.
+
+Resolved by renumbering **trunk's** T17 (the fact/plan layer model, C2/#3) to
+**T20**, leaving the slice's T17–T19 untouched. That direction was chosen purely
+on blast radius: the slice's numbers are cited in nine places in `crates/`
+(`scheduler-core/src/task.rs`, `task_properties.rs`, two step modules), while
+trunk's had three references, all in documentation. Renumbering the cheaper side
+kept a merge fix out of product code.
+
+**The underlying problem is unfixed:** the log has no ID allocation mechanism,
+so any two concurrent branches will collide again the moment both add a
+decision. Options if it recurs — allocate IDs only at merge time, prefix them
+per branch, or drop sequential numbering for dated slugs. Not worth solving
+until it costs more than this did.

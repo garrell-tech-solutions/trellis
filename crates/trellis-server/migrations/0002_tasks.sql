@@ -8,7 +8,7 @@ CREATE TABLE tasks (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     capture_id INTEGER NOT NULL REFERENCES captures(id),
     kind TEXT NOT NULL CHECK (kind IN ('pool', 'committed', 'quota')),
-    deadline INTEGER,
+    deadline TEXT,
     deadline_type TEXT CHECK (deadline_type IS NULL OR deadline_type IN ('hard', 'soft')),
     priority TEXT CHECK (priority IS NULL OR priority IN ('P1', 'P2', 'P3', 'P4')),
     target_count INTEGER,

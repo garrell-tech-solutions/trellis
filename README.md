@@ -23,6 +23,45 @@ cargo build
 cargo test
 ```
 
+Note `cargo test` runs the unit tests only. The Gherkin acceptance suite is
+generated from `features/*.feature` and does not exist in a fresh checkout, so
+`cargo test` reports green without having compiled a single acceptance test —
+see "Running the acceptance suite" below.
+
+## Running it
+
+```sh
+cargo run -p trellis-server -- serve --db trellis.db
+```
+
+Then open **<http://localhost:8080>**.
+
+Migrations run automatically on startup, so a path that does not exist yet is
+created and migrated — no separate setup step. To apply migrations without
+starting the server, use `migrate` instead of `serve`.
+
+```
+usage: trellis <migrate|serve> --db <path> [--addr <host:port>]
+```
+
+`--addr` defaults to `127.0.0.1:8080`. The database is a single SQLite file in
+WAL mode; delete it to start clean.
+
+### What you can do today
+
+The inbox is live: capture text in the quick-add box and it appears in the list
+below without a page reload, and survives a restart. Triage — sorting a capture
+into a committed, pool or quota task — currently has no controls on the page;
+it is reachable only over HTTP:
+
+```sh
+curl -X POST localhost:8080/captures/1/triage \
+  -H 'Content-Type: application/json' \
+  -d '{"kind":"pool"}'
+```
+
+Every slice from here on is meant to add something visible on that page.
+
 ## Project layout
 
 - `crates/scheduler-core` — the pure scheduling algorithm. No I/O, no

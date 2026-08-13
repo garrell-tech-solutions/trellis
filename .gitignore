@@ -36,6 +36,18 @@ crates/acceptance-tests/tests/metadata/
 #  option (not recommended) you can uncomment the following to ignore the entire idea folder.
 #.idea/
 
+# Local SQLite databases. `trellis serve --db trellis.db` and every ad hoc
+# poke at the schema leave one of these in the working tree; none of them
+# belong in the repo (issue #32).
+*.db
+*.db-wal
+*.db-shm
+*.sqlite*
+
+# Scratch. The constitution mandates ./tmp/ for temporary files, so every
+# worktree grows one (issue #27).
+tmp/
+
 # OS / editor
 .DS_Store
 

@@ -108,7 +108,7 @@ impl Priority {
     }
 }
 
-/// `period`'s closed domain (T19): the same M8 cadence-math reason as
+/// `period`'s closed domain (T20): the same M8 cadence-math reason as
 /// [`DeadlineType`] and [`Priority`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Period {
@@ -146,7 +146,7 @@ fn parse_deadline_ms(value: &str) -> Option<i64> {
 /// Why a set of triage fields does not describe a task.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TriageRejection {
-    /// A required field was absent, or submitted as an empty string (T18:
+    /// A required field was absent, or submitted as an empty string (T19:
     /// the two report identically — a client rarely intends the distinction).
     MissingField(Field),
     /// A field was present but its value is outside the field's domain.
@@ -168,7 +168,7 @@ pub enum TaskKind {
         deadline_type: DeadlineType,
         priority: Priority,
     },
-    /// T17: a quota task cannot be scheduled at M8 or reported on at the
+    /// T18: a quota task cannot be scheduled at M8 or reported on at the
     /// reckoning without a target, so all three fields are required at
     /// triage even though the columns stay nullable (T11) for schema
     /// reasons — one `tasks` table shared by three kinds.
@@ -195,7 +195,7 @@ pub struct TaskAttributes {
     pub period: Option<&'static str>,
 }
 
-/// Requires a string field to be both present and non-empty (T18: absent and
+/// Requires a string field to be both present and non-empty (T19: absent and
 /// empty are the same submitter mistake, so they report identically).
 fn require(field: Field, value: &Option<String>) -> Result<String, TriageRejection> {
     match value {

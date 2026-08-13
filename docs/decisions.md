@@ -80,6 +80,9 @@ scheme.
 | T20 | **The fact/plan line runs inside the `Block` table, by block state.** `proposed` and `published` future blocks are the **Plan layer** — disposable, engine-written, deleted wholesale and regenerated on every recompute. `in_progress`, `completed` and `missed` blocks, plus pins, are the **Constraints layer** — immutable facts, read by the engine and never written by it. The determinism property is therefore: *delete every `proposed`/`published` future block, re-run with the same facts, get byte-identical placements.* The signature is `schedule(tasks, busy, guardrails, pins, facts, prior_plan, now) -> placements`. | Resolves C2 (#3), ratified by the owner 2026-08-12. As originally written — "delete every block and regenerate" — the property was not merely wrong but **untestable**, because the move penalty makes the objective depend on previous placements and past blocks are immutable inputs. Wiping the table would destroy history and pins alongside the plan. Drawing the line inside the table rather than splitting it keeps one query surface while making the disposable set precisely definable. Two naming rules come with it, because the vocabulary was in use before it was defined: (1) **"Plan" and "Constraints" are the layer names**; "Facts" is informal shorthand for the immutable block subset, not a third layer. (2) **"Layer" is reserved for this domain split** — T15's code organisation is the **module boundary**, not layers, because a `Block` row is otherwise Plan-layer and store-layer at once and the word stops carrying information. Note T15's inline five-argument rendering of `schedule()` predates this and is an abbreviation, not a competing decision; the seven-argument form above is the contract, and #11's AC-1 already says "corrected signature per C2". |
 | T21 | **Never edit a migration that has been applied. Add a new numbered one.** Enforced in CI: migration files present on `trunk` may be added to, never modified or deleted (#32). Because SQLite has no `ALTER COLUMN`, a type change means the table-rebuild pattern — create the corrected table, `INSERT INTO new SELECT … FROM old`, drop the old, rename — inside a *new* migration. | `sqlx` records each applied migration by checksum, so editing one makes every existing database refuse to boot: `migration N was previously applied but has been modified`, with no fallback and no remediation path. The `triage-validation` slice did exactly this, changing `deadline TEXT` to `INTEGER` inside `0002_tasks.sql`; the damage was zero only because no database happened to exist at that moment. D14 removes that luck — the owner now runs the app every slice and will always have a live database. A convention is not enough here, because SQLite's missing `ALTER COLUMN` makes editing the old file the path of least resistance every single time: the correct route is roughly fifteen lines of rebuild in a new file, the wrong route is a one-word edit in an old one. The brief that authorised it reasoned "`tasks` has no production data, so this is free today" — which conflates *no production data* with *no existing database*, and is the specific mistake the CI gate exists to make unmakeable. Note `features/migrations.feature` cannot catch this: its idempotency scenario re-runs the *same* migration set, never a changed one. |
 | T22 | **Domain and title categorization folds into the existing classifier trait (M1 keyword impl, M9 LLM impl) — not a second pipeline.** The trait's output grows `domain` and `title` alongside `kind`/`deadline`/`priority`, carrying per-field confidence the same way. The keyword implementation guesses `domain` by keyword match and passes `title` through unchanged; M9's LLM implementation improves both behind the same trait. **Classification is invoked from a background worker after capture, not inside `POST /captures` and not synchronously at triage.** | Two asks arrived separately — classify a capture's task *kind*, and tag it with a *domain* and a cleaned-up *title* — and they are the same mechanism: classify raw text, cheap rules first, LLM later, fall back safely, measure against labelled data. M9 (#19) already commits to exactly that shape, so a standalone categorization worker would duplicate the trait, the fallback and the evaluation harness for a second field set. Growing the trait's output at M1 rather than at M9 is the same argument T11 made for the three-variant `kind`: retrofitting an output shape after M9 depends on it is the expensive order. **On invocation timing**, the apparent conflict between "a trait implies a synchronous call" and "a background poller" dissolves — a trait describes *swappability*, not *when it is called*, and a worker can call a synchronous `classify()` perfectly well. What is genuinely settled is *where*: `POST /captures` has a 50ms budget asserted by `capture_endpoint.feature`, which no LLM round trip fits inside; and blocking triage on a network call puts the latency in front of the user at the one moment they are waiting. So the worker fills the fields between capture and triage. Provider is **OpenRouter** behind a hand-rolled `reqwest`+`serde` client, model pinned by `OPENROUTER_MODEL` with a cheap default — swappable without a code change, consistent with T5's precedent against generated SDKs. |
+| T23 | **Templates render view models, never store row types.** `http::view` holds what a page shows; `store` holds what a query returned. Handlers map between them. | The inbox slice had `inbox.html` and `capture_row.html` rendering `store::capture::UntriagedCapture` directly — a `sqlx::FromRow` struct, documented as "a capture as the inbox view needs it", which is persistence described in terms of a page. The tell was in `create_capture`: to return the new row's markup it **hand-built an `UntriagedCapture`** for a capture it had just written and never read back, because the template demanded that type. A struct being fabricated to satisfy a renderer is no longer a row. Left alone, every later view inherits the pattern and the templates end up bound to the schema — and the coupling bites in both directions, since `store` would grow a view-shaped type per page. The two structs carry the same single field today and the mapping is one line; that is precisely why this is the cheap moment to draw the line, before the triage screen needs a row id to aim an action at and the calendar needs formatted times that are not columns. This applies T15's module boundary to the delivery side — it is not a new boundary, and "layer" stays reserved for the Plan/Constraints domain split (T20). |
+
+**Renumbered on merge:** this branch's own history numbered these T17–T21 (assuming T17 was free); `trunk` had already assigned T17–T22 to other decisions in the meantime (T20–T22 above). The table above uses `trunk`'s numbers throughout; **source comments and QA prose on this branch that cite the old T17–T21 numbers for quota/empty-field/period/templates are now stale** and were not corrected as part of this merge — see the PR description.
 
 ## Rejected
 
@@ -247,16 +250,17 @@ for a criterion whose terms are undefined.
 ### 2026-08-12 — triage-validation open questions settled
 
 Issue #29's three open questions settled with the user before specification.
-Recorded as T17–T19.
+Recorded as T18–T20 (renumbered from an initial T17–T19 to avoid colliding
+with T17 above, settled independently the same day).
 
-- **Quota target required at triage (T17).** T11's nullable columns were a
+- **Quota target required at triage (T18).** T11's nullable columns were a
   schema-sharing fact, not a triage-time permission; leaving target fields
   optional at triage would have let a quota row exist that M8 can never
   schedule and D13's reckoning can never report on.
-- **Empty and absent report identically (T18).** Both remain
+- **Empty and absent report identically (T19).** Both remain
   `{"missing_field": <name>}`. This also settles the empty-string half of the
   defect issue #29 raised against `require()` — the fix is one path, not two.
-- **`period` closed to `week | month` (T19).** Matches how `deadline_type` and
+- **`period` closed to `week | month` (T20).** Matches how `deadline_type` and
   `priority` are closed in the same slice, for the same D3 reason: M8's cadence
   math cannot branch on an unvalidated string.
 
@@ -395,3 +399,50 @@ constraint: capture domains as extensible plain data versus `Domain` as a
 5-variant enum that T9's complexity threshold is derived from. One concept or
 two is a real decision, and it needs making before the M1 classifier story is
 specified.
+
+### 2026-08-13 — inbox-view: the first page, and where its data comes from
+
+The slice that finally made Trellis openable in a browser also introduced the
+first template, and with it the first chance to get the delivery side of T15's
+module boundary wrong. It very nearly did. Recorded as **T23** — this branch's
+own history numbered it T21, assuming T17 was free at the time it forked; see
+"Decision-ID collision on merge" above for why `trunk`'s numbers win and this
+branch's source comments citing T17–T21 for quota/empty-field/period/templates
+are stale.
+
+**What the templates were rendering.** `InboxTemplate` held
+`Vec<store::capture::UntriagedCapture>` and `capture_row.html` read
+`capture.raw_text` — so the HTML was bound to a `sqlx::FromRow` struct and, by
+extension, to the columns `list_untriaged` happens to select. The store type's
+own doc comment gave the direction away: "a capture as the inbox view needs
+it". Persistence was being described in terms of a page.
+
+The decisive evidence was in `create_capture`, not the inbox. To hand the
+quick-add box back the new row's markup, it constructed an `UntriagedCapture`
+by hand from the submitted text — a database row shape, for a capture it had
+just written and deliberately not read back, existing only because the
+template's type demanded it. A struct being fabricated to satisfy a renderer
+has stopped being a row.
+
+`http::view` now holds the view models. It depends on nothing, so a page's
+data can be built and rendered without a database; handlers do the mapping,
+one line each. `UntriagedCapture` keeps its name and goes back to describing
+the query.
+
+This is small on purpose — one field, one line of mapping. The point is not
+the size of today's duplication but the direction of tomorrow's: this is the
+first of many pages, and the alternative precedent is templates bound to the
+schema by M6.
+
+**Property coverage** gained the inbox's projection invariant
+(`store::capture`, `#[ignore]`d per convention): for any queue and any triaged
+subset of it, `list_untriaged` returns *exactly* the untriaged captures in
+*exactly* newest-first order. The three example tests sample two captures and
+one triaged one; the property pins both halves of the query. Checked by
+breaking `ORDER BY id DESC` to `ASC` and by dropping the `WHERE` — each fails
+the property, neither fails every example test.
+
+**Complexity is unchanged at 4 violations**, all still the regex dispatch
+chains covered by the 2026-08-12 entry; `steps/inbox_view.rs::dispatch` is the
+new one and is the same shape. The reasoning there stands: nothing to extract,
+and a table would cost ~40 boxed-future wrappers. DRY sits at 2.0%.

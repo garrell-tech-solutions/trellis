@@ -1,6 +1,6 @@
 //! Step handlers for `features/quota_triage_validation.feature`: quota
-//! triage requires `target_count`, `target_minutes_each` and `period` (T17),
-//! and `period` is closed to `week | month` (T19).
+//! triage requires `target_count`, `target_minutes_each` and `period` (T18),
+//! and `period` is closed to `week | month` (T20).
 //!
 //! Kept as its own module rather than added to `triage::dispatch`, which is
 //! already over the project's complexity threshold (see the triage-validation

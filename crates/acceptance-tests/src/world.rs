@@ -13,6 +13,7 @@ pub struct World {
     pub last_status: Option<u16>,
     pub last_elapsed: Option<Duration>,
     pub last_response_body: Option<serde_json::Value>,
+    pub last_html_body: Option<String>,
 
     pub last_capture_id: Option<i64>,
 

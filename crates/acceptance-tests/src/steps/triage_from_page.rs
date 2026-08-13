@@ -341,4 +341,41 @@ mod tests {
         world.last_html_body = Some(r#"<ul id="captures"></ul>"#.to_string());
         assert!(then_offers_all_kinds(&mut world, "buy milk").is_err());
     }
+
+    fn world_with_select(field_name: &str, options: &[&str]) -> World {
+        let opts: String = options
+            .iter()
+            .map(|v| format!(r#"<option value="{v}">{v}</option>"#))
+            .collect();
+        let mut world = World::new();
+        world.last_html_body = Some(format!(
+            r#"<ul id="captures"><select name="{field_name}">{opts}</select></ul>"#
+        ));
+        world
+    }
+
+    #[test]
+    fn then_select_offers_exactly_passes_when_the_options_match_in_order() {
+        let mut world = world_with_select("deadline_type", &["hard", "soft"]);
+        assert_eq!(
+            then_select_offers_exactly(&mut world, "deadline_type", &["hard", "soft"]),
+            Ok(())
+        );
+    }
+
+    #[test]
+    fn then_select_offers_exactly_errors_when_an_option_is_missing() {
+        let mut world = world_with_select("deadline_type", &["hard"]);
+        assert!(
+            then_select_offers_exactly(&mut world, "deadline_type", &["hard", "soft"]).is_err()
+        );
+    }
+
+    #[test]
+    fn then_select_offers_exactly_errors_when_an_extra_option_is_present() {
+        let mut world = world_with_select("priority", &["P1", "P2", "P3", "P4", "P5"]);
+        assert!(
+            then_select_offers_exactly(&mut world, "priority", &["P1", "P2", "P3", "P4"]).is_err()
+        );
+    }
 }

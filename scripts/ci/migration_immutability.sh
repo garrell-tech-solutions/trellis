@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# CI gate for decisions.md T21 (issue #32): migration files that already exist
-# on the base branch are immutable. A branch may ADD migrations; it may never
-# modify or delete one that is already on trunk.
+# CI gate for decisions.md T-migrations-append-only (issue #32): migration
+# files that already exist on the base branch are immutable. A branch may ADD
+# migrations; it may never modify or delete one that is already on trunk.
 #
 # This is not a qa/*.md procedure -- it asserts a property of the git history,
 # not of the running program -- so it lives under scripts/ci/ rather than
@@ -95,6 +95,6 @@ WHAT TO DO INSTEAD
 
   Editing the earlier migration is the path of least resistance and it is the
   one change that cannot be undone on another machine. See docs/decisions.md
-  T21 and issue #32.
+  T-migrations-append-only and issue #32.
 EOF
 exit 1

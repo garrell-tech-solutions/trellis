@@ -1,4 +1,5 @@
-//! `GET /`: the untriaged capture queue (D14's first slice, issue #30).
+//! `GET /`: the untriaged capture queue (D-visible-slices' first slice,
+//! issue #30).
 
 use crate::http::view::CaptureRow;
 use crate::http::{render_template, write_failed};

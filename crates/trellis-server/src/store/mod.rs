@@ -3,9 +3,9 @@
 //! Everything here speaks `scheduler_core` types and `sqlx::Error`. It must
 //! not know that an HTTP server exists — mapping a failed write onto a status
 //! code is the delivery layer's job, and a store that returns `StatusCode`
-//! cannot be reused by any other delivery mechanism (T2's "a Postgres swap
-//! stays mechanical" has the same shape: keep the queries in one layer that
-//! nothing above it reaches around).
+//! cannot be reused by any other delivery mechanism (T-sqlite-sqlx's
+//! "a Postgres swap stays mechanical" has the same shape: keep the queries in
+//! one layer that nothing above it reaches around).
 
 pub mod capture;
 pub mod task;

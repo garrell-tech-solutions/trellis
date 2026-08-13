@@ -1,6 +1,7 @@
-//! Step handlers for `features/unknown_kind_rejection.feature`: T16's
-//! `422 {"unknown_kind": <submitted>}` behaviour, shipped since M1's triage
-//! slice but never covered by Gherkin or a QA procedure until now.
+//! Step handlers for `features/unknown_kind_rejection.feature`:
+//! T-unknown-kind-rejected's `422 {"unknown_kind": <submitted>}` behaviour,
+//! shipped since M1's triage slice but never covered by Gherkin or a QA
+//! procedure until now.
 //!
 //! Kept as its own module rather than added to `triage::dispatch`, which is
 //! already over the project's complexity threshold (see the triage-validation

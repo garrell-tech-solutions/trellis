@@ -1,5 +1,5 @@
 //! Step handlers for `features/inbox_view.feature`: the untriaged capture
-//! queue rendered at `GET /` (D14's first slice, issue #30).
+//! queue rendered at `GET /` (D-visible-slices' first slice, issue #30).
 //!
 //! Kept as its own module rather than added to `triage::dispatch`, which is
 //! already over the project's complexity threshold (see the triage-validation

@@ -69,9 +69,9 @@ fi
 qa_stop_server
 
 # --- Scenario: committed ---
-# deadline is stored as epoch milliseconds (T3); expected_deadline_ms is the
-# instant the submitted deadline text names, computed the same way the
-# triage boundary parses a submission.
+# deadline is stored as epoch milliseconds (T-jiff-epoch-millis);
+# expected_deadline_ms is the instant the submitted deadline text names,
+# computed the same way the triage boundary parses a submission.
 run_committed_example() {
   local deadline="$1" deadline_type="$2" priority="$3" expected_deadline_ms="$4"
   local name="committed-$deadline_type"

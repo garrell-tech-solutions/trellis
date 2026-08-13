@@ -1,6 +1,6 @@
 //! Step handler for `features/committed_triage_validation.feature`'s
-//! "left empty" scenario (T19: an empty required field is rejected the same
-//! way as an absent one).
+//! "left empty" scenario (T-empty-equals-absent: an empty required field is
+//! rejected the same way as an absent one).
 //!
 //! Kept as its own module rather than added to `triage::dispatch`, which is
 //! already over the project's complexity threshold (see the triage-validation

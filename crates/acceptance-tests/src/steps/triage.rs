@@ -308,10 +308,10 @@ pub async fn then_task_has_no_quota_target(world: &World) -> Result<(), String> 
     }
 }
 
-/// `deadline` is stored as epoch milliseconds (T3); the Gherkin example gives
-/// the deadline as text, so the expectation is parsed the same way the
-/// triage boundary parses a submission, and compared as the instant it
-/// names rather than as text.
+/// `deadline` is stored as epoch milliseconds (T-jiff-epoch-millis); the
+/// Gherkin example gives the deadline as text, so the expectation is parsed
+/// the same way the triage boundary parses a submission, and compared as the
+/// instant it names rather than as text.
 pub async fn then_task_has_deadline(
     world: &World,
     expected_type: &str,

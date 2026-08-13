@@ -1,7 +1,7 @@
-//! `GET /`: the untriaged capture queue (D-visible-slices' first slice,
-//! issue #30).
+//! `GET /`: the untriaged capture queue and task list (D-visible-slices'
+//! first two slices, issues #30 and #33).
 
-use crate::http::view::CaptureRow;
+use crate::http::view::{CaptureRow, TaskRow};
 use crate::http::{render_template, write_failed};
 use crate::store;
 use askama::Template;
@@ -14,18 +14,59 @@ use sqlx::SqlitePool;
 #[template(path = "inbox.html")]
 struct InboxTemplate {
     captures: Vec<CaptureRow>,
+    tasks: Vec<TaskRow>,
+}
+
+/// The `#lists` fragment on its own — what a page-originated triage response
+/// swaps in. Kept separate from [`InboxTemplate`] (rather than making the
+/// full page template itself the triage response) because a triage response
+/// is not a page: it has no `<head>`, no quick-add form, nothing but the two
+/// lists htmx is replacing.
+#[derive(Template)]
+#[template(path = "lists.html")]
+pub(crate) struct ListsTemplate {
+    pub(crate) captures: Vec<CaptureRow>,
+    pub(crate) tasks: Vec<TaskRow>,
 }
 
 pub async fn show_inbox(State(pool): State<SqlitePool>) -> Result<Response, StatusCode> {
-    let captures = store::capture::list_untriaged(&pool)
-        .await
-        .map_err(write_failed)?
+    let (captures, tasks) = build_lists(&pool, None).await.map_err(write_failed)?;
+    Ok(render_template(
+        StatusCode::OK,
+        &InboxTemplate { captures, tasks },
+    ))
+}
+
+/// Fetches the current inbox and task list, attaching `error` to whichever
+/// capture's triage attempt just failed (if any). Shared by [`show_inbox`]
+/// and the triage handler's page-originated response: "the page and
+/// `POST /captures/{id}/triage` are one code path" extends to what gets
+/// rendered afterward, not just to how the write itself happens.
+pub(crate) async fn build_lists(
+    pool: &SqlitePool,
+    error: Option<(i64, String)>,
+) -> Result<(Vec<CaptureRow>, Vec<TaskRow>), sqlx::Error> {
+    let captures = store::capture::list_untriaged(pool)
+        .await?
         .into_iter()
         .map(|capture| CaptureRow {
+            id: capture.id,
+            error: error
+                .as_ref()
+                .filter(|(id, _)| *id == capture.id)
+                .map(|(_, message)| message.clone()),
             text: capture.raw_text,
         })
         .collect();
-    Ok(render_template(StatusCode::OK, &InboxTemplate { captures }))
+    let tasks = store::task::list_all(pool)
+        .await?
+        .into_iter()
+        .map(|task| TaskRow {
+            kind: task.kind,
+            text: task.raw_text,
+        })
+        .collect();
+    Ok((captures, tasks))
 }
 
 #[cfg(test)]

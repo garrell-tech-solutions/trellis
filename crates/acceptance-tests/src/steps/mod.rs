@@ -19,11 +19,13 @@ mod build;
 mod capture;
 mod committed_empty_fields;
 mod committed_field_domains;
+mod html;
 mod inbox_view;
 mod migrations;
 mod payloads;
 mod quota_triage_validation;
 mod triage;
+mod triage_from_page;
 mod unknown_kind_rejection;
 
 fn example_value<'a>(example: &'a BTreeMap<String, String>, name: &str) -> Result<&'a str, String> {
@@ -124,6 +126,9 @@ pub async fn dispatch(
         return outcome;
     }
     if let Some(outcome) = inbox_view::dispatch(world, text).await {
+        return outcome;
+    }
+    if let Some(outcome) = triage_from_page::dispatch(world, text).await {
         return outcome;
     }
     if let Some(outcome) = migrations::dispatch(world, text).await {

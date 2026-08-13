@@ -76,13 +76,15 @@ pub async fn create_capture(
     State(pool): State<SqlitePool>,
     CaptureInput { payload, from_form }: CaptureInput,
 ) -> Result<Response, StatusCode> {
-    store::capture::insert(&pool, &payload.raw_text, &payload.source, now_ms())
+    let id = store::capture::insert(&pool, &payload.raw_text, &payload.source, now_ms())
         .await
         .map_err(write_failed)?;
 
     if from_form {
         let capture = CaptureRow {
+            id,
             text: payload.raw_text,
+            error: None,
         };
         Ok(render_template(
             StatusCode::CREATED,

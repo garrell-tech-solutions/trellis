@@ -1,12 +1,24 @@
 //! `POST /captures/{id}/triage`.
+//!
+//! One code path for both callers, the same shape as `http::capture`: the
+//! JSON API and the page's own triage controls (triage-from-page, issue #33)
+//! both end at this handler and the same `scheduler_core`/`store` calls, so a
+//! task created either way is the same row. Content type is the only thing
+//! that differs — a form post (the page) gets back the `#lists` fragment to
+//! swap in, carrying a rejection message on the failing row when triage was
+//! refused; a JSON request (the existing API) gets back exactly what it
+//! always has, unchanged.
 
 use crate::clock::now_ms;
-use crate::http::write_failed;
+use crate::http::inbox::{build_lists, ListsTemplate};
+use crate::http::{render_template, write_failed};
 use crate::store;
-use axum::extract::{Path, State};
-use axum::http::StatusCode;
-use axum::Json;
+use axum::extract::{FromRequest, Path, Request, State};
+use axum::http::{header, StatusCode};
+use axum::response::{IntoResponse, Response};
+use axum::{Form, Json};
 use scheduler_core::task::{TaskKind, TriageFields, TriageRejection};
+use serde::Deserialize;
 use serde_json::{json, Value};
 use sqlx::SqlitePool;
 
@@ -18,7 +30,7 @@ fn string_field(payload: &Value, name: &str) -> Option<String> {
 }
 
 /// Translates the JSON body into the core's triage input. This function is
-/// the whole of the transport's involvement: nothing it calls sees
+/// the whole of the JSON transport's involvement: nothing it calls sees
 /// `serde_json`.
 fn triage_fields(payload: &Value) -> TriageFields {
     TriageFields {
@@ -32,37 +44,164 @@ fn triage_fields(payload: &Value) -> TriageFields {
     }
 }
 
+/// The page's triage controls submit as a plain HTML form: url-encoded,
+/// every field optional, since which fields matter depends on `kind`. Mirrors
+/// `scheduler_core::task::TriageFields` rather than being that type directly
+/// — the core must not depend on `serde` (T-module-boundary).
+#[derive(Deserialize, Default)]
+pub struct TriageFormRequest {
+    kind: Option<String>,
+    deadline: Option<String>,
+    deadline_type: Option<String>,
+    priority: Option<String>,
+    target_count: Option<i64>,
+    target_minutes_each: Option<i64>,
+    period: Option<String>,
+}
+
+impl From<TriageFormRequest> for TriageFields {
+    fn from(form: TriageFormRequest) -> Self {
+        TriageFields {
+            kind: form.kind,
+            deadline: form.deadline,
+            deadline_type: form.deadline_type,
+            priority: form.priority,
+            target_count: form.target_count,
+            target_minutes_each: form.target_minutes_each,
+            period: form.period,
+        }
+    }
+}
+
+/// Either transport this endpoint accepts. JSON keeps the raw `Value`: a
+/// wrong-typed `kind` (e.g. `7`) must still be echoed back by the rejection
+/// (T-unknown-kind-rejected), which a strongly-typed `Option<String>` field
+/// cannot represent — it would fail to deserialize at all. A form field has
+/// no such case; every value a browser form submits is already a string.
+pub enum TriageInput {
+    Json(Value),
+    Form(TriageFormRequest),
+}
+
+impl<S: Send + Sync> FromRequest<S> for TriageInput {
+    type Rejection = StatusCode;
+
+    async fn from_request(req: Request, state: &S) -> Result<Self, Self::Rejection> {
+        if content_type_is_json(&req) {
+            let Json(payload) = Json::<Value>::from_request(req, state)
+                .await
+                .map_err(|_| StatusCode::BAD_REQUEST)?;
+            Ok(Self::Json(payload))
+        } else {
+            let Form(form) = Form::<TriageFormRequest>::from_request(req, state)
+                .await
+                .map_err(|_| StatusCode::BAD_REQUEST)?;
+            Ok(Self::Form(form))
+        }
+    }
+}
+
+fn content_type_is_json(req: &Request) -> bool {
+    req.headers()
+        .get(header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .is_some_and(|v| v.starts_with("application/json"))
+}
+
 /// The rejection contract: a client error whose body names what was wrong.
 /// A rejection that does not say what was wrong is a failure even with the
 /// right status code.
-fn rejected(rejection: TriageRejection) -> (StatusCode, Json<Value>) {
+///
+/// `kind_submitted` is read independently of `TriageRejection::UnknownKind`'s
+/// own payload: for JSON, the core only ever sees `kind` after
+/// `string_field` has already turned a wrong-typed value into `None`, so by
+/// the time a rejection reaches here that value is gone. Reading it
+/// separately is what lets `{"kind": 7}` echo back `7` instead of `null`
+/// (T-unknown-kind-rejected: report what was submitted).
+fn rejected(rejection: TriageRejection, kind_submitted: &Value) -> (StatusCode, Json<Value>) {
     let body = match rejection {
         TriageRejection::MissingField(field) => json!({ "missing_field": field.name() }),
         TriageRejection::InvalidField(field) => json!({ "invalid_field": field.name() }),
-        TriageRejection::UnknownKind(submitted) => json!({ "unknown_kind": submitted }),
+        TriageRejection::UnknownKind(_) => json!({ "unknown_kind": kind_submitted }),
     };
     (StatusCode::UNPROCESSABLE_ENTITY, Json(body))
+}
+
+/// A one-line summary of a rejection for the page's per-row error slot. Not
+/// the API's rejection contract (that stays `rejected`'s job) — this is
+/// prose for a human reading the form they just submitted.
+fn rejection_message(rejection: &TriageRejection, kind_submitted: &Value) -> String {
+    match rejection {
+        TriageRejection::MissingField(field) => format!("{} is required", field.name()),
+        TriageRejection::InvalidField(field) => format!("{} is invalid", field.name()),
+        TriageRejection::UnknownKind(_) => format!("unrecognised kind: {kind_submitted}"),
+    }
+}
+
+async fn write_task(pool: &SqlitePool, capture_id: i64, kind: &TaskKind) -> Result<(), StatusCode> {
+    let created_at_ms = now_ms();
+    store::task::insert(pool, capture_id, kind, created_at_ms)
+        .await
+        .map_err(write_failed)?;
+    store::capture::mark_triaged(pool, capture_id, created_at_ms)
+        .await
+        .map_err(write_failed)?;
+    Ok(())
+}
+
+/// The page-originated response: whatever happened, re-render `#lists` from
+/// current state. On success that reflects the write; on rejection nothing
+/// changed, but the failing capture's row carries the rejection message.
+async fn page_response(
+    pool: &SqlitePool,
+    capture_id: i64,
+    outcome: Result<TaskKind, TriageRejection>,
+    kind_submitted: &Value,
+) -> Result<Response, StatusCode> {
+    let (status, error) = match &outcome {
+        Ok(_) => (StatusCode::CREATED, None),
+        Err(rejection) => (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            Some((capture_id, rejection_message(rejection, kind_submitted))),
+        ),
+    };
+    if let Ok(kind) = &outcome {
+        write_task(pool, capture_id, kind).await?;
+    }
+    let (captures, tasks) = build_lists(pool, error).await.map_err(write_failed)?;
+    Ok(render_template(status, &ListsTemplate { captures, tasks }))
 }
 
 pub async fn create_triage(
     State(pool): State<SqlitePool>,
     Path(capture_id): Path<i64>,
-    Json(payload): Json<Value>,
-) -> Result<(StatusCode, Json<Value>), StatusCode> {
-    let kind = match TaskKind::from_fields(&triage_fields(&payload)) {
-        Ok(kind) => kind,
-        Err(rejection) => return Ok(rejected(rejection)),
+    input: TriageInput,
+) -> Result<Response, StatusCode> {
+    let from_page = matches!(input, TriageInput::Form(_));
+    let (fields, kind_submitted): (TriageFields, Value) = match input {
+        TriageInput::Json(payload) => {
+            let kind_submitted = payload.get("kind").cloned().unwrap_or(Value::Null);
+            (triage_fields(&payload), kind_submitted)
+        }
+        TriageInput::Form(form) => {
+            let kind_submitted = json!(form.kind);
+            (form.into(), kind_submitted)
+        }
     };
 
-    let created_at_ms = now_ms();
-    store::task::insert(&pool, capture_id, &kind, created_at_ms)
-        .await
-        .map_err(write_failed)?;
-    store::capture::mark_triaged(&pool, capture_id, created_at_ms)
-        .await
-        .map_err(write_failed)?;
+    let outcome = TaskKind::from_fields(&fields);
 
-    Ok((StatusCode::CREATED, Json(json!({}))))
+    if from_page {
+        return page_response(&pool, capture_id, outcome, &kind_submitted).await;
+    }
+
+    match outcome {
+        Ok(kind) => {
+            write_task(&pool, capture_id, &kind).await?;
+            Ok((StatusCode::CREATED, Json(json!({}))).into_response())
+        }
+        Err(rejection) => Ok(rejected(rejection, &kind_submitted).into_response()),
+    }
 }
 
 #[cfg(test)]
@@ -482,6 +621,21 @@ mod tests {
         );
     }
 
+    /// Folded in from the PR #31 review: `string_field` drops a wrong-typed
+    /// `kind` before the core ever sees it, so the rejection used to report
+    /// `{"unknown_kind": null}` for `{"kind": 7}` — losing exactly the value
+    /// T-unknown-kind-rejected says the caller should see echoed back.
+    #[tokio::test]
+    async fn triaging_with_kind_submitted_as_the_wrong_json_type_echoes_what_was_submitted() {
+        let (_dir, pool) = test_pool().await;
+        let capture_id = insert_untriaged_capture(&pool, "buy milk").await;
+
+        let response = triage_response(&pool, capture_id, json!({ "kind": 7 })).await;
+
+        assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+        assert_eq!(response_json(response).await, json!({ "unknown_kind": 7 }));
+    }
+
     #[test]
     fn triage_fields_reads_every_field_the_core_asks_for() {
         let payload = json!({
@@ -521,15 +675,27 @@ mod tests {
 
     #[test]
     fn a_missing_field_rejection_names_the_field() {
-        let (status, Json(body)) = rejected(TriageRejection::MissingField(Field::Priority));
+        let (status, Json(body)) =
+            rejected(TriageRejection::MissingField(Field::Priority), &Value::Null);
         assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
         assert_eq!(body, json!({ "missing_field": "priority" }));
     }
 
     #[test]
     fn an_invalid_field_rejection_names_the_field() {
-        let (status, Json(body)) = rejected(TriageRejection::InvalidField(Field::Deadline));
+        let (status, Json(body)) =
+            rejected(TriageRejection::InvalidField(Field::Deadline), &Value::Null);
         assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
         assert_eq!(body, json!({ "invalid_field": "deadline" }));
+    }
+
+    #[test]
+    fn an_unknown_kind_rejection_echoes_the_value_it_is_given() {
+        let (status, Json(body)) = rejected(
+            TriageRejection::UnknownKind(None),
+            &json!({ "not": "a string" }),
+        );
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+        assert_eq!(body, json!({ "unknown_kind": { "not": "a string" } }));
     }
 }

@@ -207,13 +207,14 @@ proptest! {
     /// A quota task reports back exactly the target it was given, and never a
     /// deadline. T-quota-targets-required requires all three target fields at
     /// triage, so unlike the pool case this generates only valid, complete
-    /// targets.
+    /// targets — and a target must be positive (folded in from the PR #31
+    /// review), so the generator only draws positive counts.
     #[test]
     #[ignore]
     fn a_quota_task_round_trips_its_target_and_carries_no_deadline(
         fields in any_fields(),
-        target_count in any::<i64>(),
-        target_minutes_each in any::<i64>(),
+        target_count in 1i64..=1_000_000,
+        target_minutes_each in 1i64..=1_000_000,
         period in prop::sample::select(vec!["week", "month"]),
     ) {
         let fields = TriageFields {
@@ -358,6 +359,30 @@ proptest! {
         prop_assert_eq!(
             TaskKind::from_fields(&entry.submission(Some(value))),
             Err(TriageRejection::InvalidField(entry.field))
+        );
+    }
+
+    /// A non-positive quota target is rejected as invalid, whichever of the
+    /// two count fields carries it — the reckoning's `count(done)/target`
+    /// has no meaning at zero or below (folded in from the PR #31 review).
+    #[test]
+    #[ignore]
+    fn a_non_positive_quota_target_is_rejected_as_invalid(
+        bad_value in i64::MIN..=0,
+        vary_target_count in any::<bool>(),
+    ) {
+        let mut fields = valid_quota();
+        let expected_field = if vary_target_count {
+            fields.target_count = Some(bad_value);
+            Field::TargetCount
+        } else {
+            fields.target_minutes_each = Some(bad_value);
+            Field::TargetMinutesEach
+        };
+
+        prop_assert_eq!(
+            TaskKind::from_fields(&fields),
+            Err(TriageRejection::InvalidField(expected_field))
         );
     }
 

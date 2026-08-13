@@ -10,6 +10,7 @@ pub mod assets;
 pub mod capture;
 pub mod inbox;
 pub mod triage;
+pub mod view;
 
 use askama::Template;
 use axum::http::StatusCode;

@@ -2,7 +2,8 @@
 
 use sqlx::SqlitePool;
 
-/// A capture as the inbox view needs it: just enough to render a row.
+/// A row of [`list_untriaged`]. Which columns that query selects is this
+/// module's business; what a page does with them is not (see `http::view`).
 #[derive(Debug, Clone, PartialEq, Eq, sqlx::FromRow)]
 pub struct UntriagedCapture {
     pub raw_text: String,
@@ -47,6 +48,7 @@ pub async fn mark_triaged(
 mod tests {
     use super::*;
     use crate::test_support::test_pool;
+    use proptest::prelude::*;
 
     async fn insert_capture(pool: &SqlitePool, raw_text: &str) -> i64 {
         sqlx::query_scalar(
@@ -163,5 +165,46 @@ mod tests {
 
         assert_eq!(captures.len(), 1);
         assert_eq!(captures[0].raw_text, "buy milk");
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig { cases: 32, ..ProptestConfig::default() })]
+
+        /// The listing is a *partition*: exactly the untriaged captures, in
+        /// exactly newest-first order. The example tests above sample two
+        /// captures and one triaged one; this pins both halves — the `WHERE`
+        /// and the `ORDER BY` — against any queue and any triaged subset of
+        /// it, which is the shape the inbox actually meets.
+        #[test]
+        #[ignore]
+        fn list_untriaged_returns_exactly_the_untriaged_captures_newest_first(
+            queue in prop::collection::vec((".{0,40}", any::<bool>()), 0..12),
+        ) {
+            let rt = tokio::runtime::Runtime::new().unwrap();
+            let (expected, listed) = rt.block_on(async {
+                let (_dir, pool) = test_pool().await;
+
+                let mut expected: Vec<String> = Vec::new();
+                for (raw_text, triaged) in &queue {
+                    let id = insert_capture(&pool, raw_text).await;
+                    if *triaged {
+                        mark_triaged(&pool, id, 9999).await.unwrap();
+                    } else {
+                        expected.push(raw_text.clone());
+                    }
+                }
+                expected.reverse();
+
+                let listed: Vec<String> = list_untriaged(&pool)
+                    .await
+                    .unwrap()
+                    .into_iter()
+                    .map(|capture| capture.raw_text)
+                    .collect();
+                (expected, listed)
+            });
+
+            prop_assert_eq!(expected, listed);
+        }
     }
 }

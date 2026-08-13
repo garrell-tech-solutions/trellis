@@ -9,6 +9,7 @@
 //! existing API) gets back exactly what it always has, unchanged.
 
 use crate::clock::now_ms;
+use crate::http::view::CaptureRow;
 use crate::http::{render_template, write_failed};
 use crate::store;
 use askama::Template;
@@ -68,7 +69,7 @@ fn content_type_is_json(req: &Request) -> bool {
 #[derive(Template)]
 #[template(path = "capture_row.html")]
 struct CaptureRowTemplate<'a> {
-    capture: &'a store::capture::UntriagedCapture,
+    capture: &'a CaptureRow,
 }
 
 pub async fn create_capture(
@@ -80,8 +81,8 @@ pub async fn create_capture(
         .map_err(write_failed)?;
 
     if from_form {
-        let capture = store::capture::UntriagedCapture {
-            raw_text: payload.raw_text,
+        let capture = CaptureRow {
+            text: payload.raw_text,
         };
         Ok(render_template(
             StatusCode::CREATED,

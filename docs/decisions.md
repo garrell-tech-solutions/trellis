@@ -78,6 +78,7 @@ scheme.
 | T18 | Quota triage requires `target_count`, `target_minutes_each` and `period`, rejected the same way `committed`'s three fields are. | T11 made the *columns* nullable for a schema reason — one `tasks` table shared by three kinds, most columns unused per row. That is a storage fact, not a triage-time permission. A quota row with no target can never be scheduled at M8 (nothing to place) and can never appear in D13's reckoning (`count(done)/target_count` has no denominator) — the same "wall protecting an empty room" failure T11 named for Fitness-as-pool, relocated to quota-with-no-target instead of pool. Requiring the fields at triage costs nothing today (no M1 surface depends on omitting them) and closes the hole before a real quota row can be created. |
 | T19 | An empty string and an absent key report identically — both use the existing `{"missing_field": <name>}` shape. | `require()` treated `Some("")` as present, which is the empty-string half of the hole this slice closes; the other half is deciding what the closed case reports. Distinguishing "you sent nothing" from "you sent an empty string" is a distinction a client rarely intends — an unfilled HTML form field and an absent field are the same submitter mistake. One shape, one code path in `require()`, rather than a second rejection variant carrying no information the caller can act on differently. |
 | T20 | `period` is a closed set: `week \| month`. | `deadline_type` and `priority` were closed in this same slice (T-series validated sum types in `scheduler-core`) for the reason D3 states — the fields the M3 scheduler branches on cannot carry undefined values. `period` is exactly that kind of field for quota scheduling at M8: "3 sessions per `fortnight`" is not a case M8's cadence math is written to handle, and typos (`"weekk"`) currently store the same way a legitimate value would. Only `week` is exercised by any M1 example; `month` is added now because closing the set later, after a real quota row exists, is the same free-now/expensive-later trade T3 already made for `deadline`. |
+| T21 | **Templates render view models, never store row types.** `http::view` holds what a page shows; `store` holds what a query returned. Handlers map between them. | The inbox slice had `inbox.html` and `capture_row.html` rendering `store::capture::UntriagedCapture` directly — a `sqlx::FromRow` struct, documented as "a capture as the inbox view needs it", which is persistence described in terms of a page. The tell was in `create_capture`: to return the new row's markup it **hand-built an `UntriagedCapture`** for a capture it had just written and never read back, because the template demanded that type. A struct being fabricated to satisfy a renderer is no longer a row. Left alone, every later view inherits the pattern and the templates end up bound to the schema — and the coupling bites in both directions, since `store` would grow a view-shaped type per page. The two structs carry the same single field today and the mapping is one line; that is precisely why this is the cheap moment to draw the line, before the triage screen needs a row id to aim an action at and the calendar needs formatted times that are not columns. This applies T15's module boundary to the delivery side — it is not a new boundary, and per T17 "layer" stays reserved for the Plan/Constraints domain split. |
 
 ## Rejected
 
@@ -313,3 +314,46 @@ textual spellings of one instant store one deadline. The last three were
 checked against deliberate breakages of `require()`, of the check ordering in
 `committed_from`, and confirmed to fail — a property that cannot fail is not
 coverage.
+
+### 2026-08-13 — inbox-view: the first page, and where its data comes from
+
+The slice that finally made Trellis openable in a browser also introduced the
+first template, and with it the first chance to get the delivery side of T15's
+module boundary wrong. It very nearly did. Recorded as T21.
+
+**What the templates were rendering.** `InboxTemplate` held
+`Vec<store::capture::UntriagedCapture>` and `capture_row.html` read
+`capture.raw_text` — so the HTML was bound to a `sqlx::FromRow` struct and, by
+extension, to the columns `list_untriaged` happens to select. The store type's
+own doc comment gave the direction away: "a capture as the inbox view needs
+it". Persistence was being described in terms of a page.
+
+The decisive evidence was in `create_capture`, not the inbox. To hand the
+quick-add box back the new row's markup, it constructed an `UntriagedCapture`
+by hand from the submitted text — a database row shape, for a capture it had
+just written and deliberately not read back, existing only because the
+template's type demanded it. A struct being fabricated to satisfy a renderer
+has stopped being a row.
+
+`http::view` now holds the view models. It depends on nothing, so a page's
+data can be built and rendered without a database; handlers do the mapping,
+one line each. `UntriagedCapture` keeps its name and goes back to describing
+the query.
+
+This is small on purpose — one field, one line of mapping. The point is not
+the size of today's duplication but the direction of tomorrow's: this is the
+first of many pages, and the alternative precedent is templates bound to the
+schema by M6.
+
+**Property coverage** gained the inbox's projection invariant
+(`store::capture`, `#[ignore]`d per convention): for any queue and any triaged
+subset of it, `list_untriaged` returns *exactly* the untriaged captures in
+*exactly* newest-first order. The three example tests sample two captures and
+one triaged one; the property pins both halves of the query. Checked by
+breaking `ORDER BY id DESC` to `ASC` and by dropping the `WHERE` — each fails
+the property, neither fails every example test.
+
+**Complexity is unchanged at 4 violations**, all still the regex dispatch
+chains covered by the 2026-08-12 entry; `steps/inbox_view.rs::dispatch` is the
+new one and is the same shape. The reasoning there stands: nothing to extract,
+and a table would cost ~40 boxed-future wrappers. DRY sits at 2.0%.

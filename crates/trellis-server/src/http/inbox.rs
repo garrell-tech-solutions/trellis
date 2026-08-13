@@ -1,5 +1,6 @@
 //! `GET /`: the untriaged capture queue (D14's first slice, issue #30).
 
+use crate::http::view::CaptureRow;
 use crate::http::{render_template, write_failed};
 use crate::store;
 use askama::Template;
@@ -11,13 +12,18 @@ use sqlx::SqlitePool;
 #[derive(Template)]
 #[template(path = "inbox.html")]
 struct InboxTemplate {
-    captures: Vec<store::capture::UntriagedCapture>,
+    captures: Vec<CaptureRow>,
 }
 
 pub async fn show_inbox(State(pool): State<SqlitePool>) -> Result<Response, StatusCode> {
     let captures = store::capture::list_untriaged(&pool)
         .await
-        .map_err(write_failed)?;
+        .map_err(write_failed)?
+        .into_iter()
+        .map(|capture| CaptureRow {
+            text: capture.raw_text,
+        })
+        .collect();
     Ok(render_template(StatusCode::OK, &InboxTemplate { captures }))
 }
 

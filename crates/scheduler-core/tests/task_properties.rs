@@ -307,7 +307,7 @@ proptest! {
 
         prop_assert_eq!(
             TaskKind::from_fields(&fields),
-            Err(TriageRejection::UnknownKind(Some(name)))
+            Err(TriageRejection::UnknownKind)
         );
     }
 

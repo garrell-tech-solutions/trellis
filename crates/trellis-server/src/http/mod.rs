@@ -9,6 +9,7 @@
 pub mod assets;
 pub mod capture;
 pub mod inbox;
+pub mod lists;
 pub mod triage;
 pub mod view;
 

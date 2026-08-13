@@ -154,8 +154,15 @@ pub enum TriageRejection {
     /// A field was present but its value is outside the field's domain.
     InvalidField(Field),
     /// `kind` was absent, or named something that is not one of the three.
-    /// Carries what was submitted, so the rejection can say so.
-    UnknownKind(Option<String>),
+    ///
+    /// Carries nothing. It once carried the submitted `kind`, but no adapter
+    /// could use it: the delivery module already holds what arrived, in the
+    /// transport's own types, and that is strictly the better copy — a JSON
+    /// `{"kind": 7}` reaches the core as `None`, because reading it as a
+    /// string is what turned it into one. Reporting what was submitted is
+    /// the adapter's job precisely because the adapter is the only place it
+    /// still exists.
+    UnknownKind,
 }
 
 /// T-three-task-kinds: task kind is a three-variant sum type. Each variant
@@ -229,7 +236,7 @@ impl TaskKind {
             Some(POOL) => Ok(Self::Pool),
             Some(COMMITTED) => Self::committed_from(fields),
             Some(QUOTA) => Self::quota_from(fields),
-            _ => Err(TriageRejection::UnknownKind(fields.kind.clone())),
+            _ => Err(TriageRejection::UnknownKind),
         }
     }
 
@@ -679,7 +686,7 @@ mod tests {
     fn an_unrecognised_kind_is_rejected_and_reports_what_was_submitted() {
         assert_eq!(
             TaskKind::from_fields(&kind_named("someday")),
-            Err(TriageRejection::UnknownKind(Some("someday".to_string())))
+            Err(TriageRejection::UnknownKind)
         );
     }
 
@@ -687,7 +694,7 @@ mod tests {
     fn an_absent_kind_is_rejected_with_nothing_to_report() {
         assert_eq!(
             TaskKind::from_fields(&TriageFields::default()),
-            Err(TriageRejection::UnknownKind(None))
+            Err(TriageRejection::UnknownKind)
         );
     }
 }

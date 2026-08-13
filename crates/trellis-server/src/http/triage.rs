@@ -10,7 +10,7 @@
 //! always has, unchanged.
 
 use crate::clock::now_ms;
-use crate::http::inbox::{build_lists, ListsTemplate};
+use crate::http::lists::{build_lists, ListsTemplate};
 use crate::http::{render_template, write_failed};
 use crate::store;
 use axum::extract::{FromRequest, Path, Request, State};
@@ -112,17 +112,16 @@ fn content_type_is_json(req: &Request) -> bool {
 /// A rejection that does not say what was wrong is a failure even with the
 /// right status code.
 ///
-/// `kind_submitted` is read independently of `TriageRejection::UnknownKind`'s
-/// own payload: for JSON, the core only ever sees `kind` after
-/// `string_field` has already turned a wrong-typed value into `None`, so by
-/// the time a rejection reaches here that value is gone. Reading it
-/// separately is what lets `{"kind": 7}` echo back `7` instead of `null`
-/// (T-unknown-kind-rejected: report what was submitted).
+/// `kind_submitted` comes from the request rather than from the rejection:
+/// the core sees `kind` only after `string_field` has turned a wrong-typed
+/// value into `None`, so this module holds the only surviving copy of what
+/// actually arrived. That is what lets `{"kind": 7}` echo back `7` instead
+/// of `null` (T-unknown-kind-rejected: report what was submitted).
 fn rejected(rejection: TriageRejection, kind_submitted: &Value) -> (StatusCode, Json<Value>) {
     let body = match rejection {
         TriageRejection::MissingField(field) => json!({ "missing_field": field.name() }),
         TriageRejection::InvalidField(field) => json!({ "invalid_field": field.name() }),
-        TriageRejection::UnknownKind(_) => json!({ "unknown_kind": kind_submitted }),
+        TriageRejection::UnknownKind => json!({ "unknown_kind": kind_submitted }),
     };
     (StatusCode::UNPROCESSABLE_ENTITY, Json(body))
 }
@@ -134,7 +133,7 @@ fn rejection_message(rejection: &TriageRejection, kind_submitted: &Value) -> Str
     match rejection {
         TriageRejection::MissingField(field) => format!("{} is required", field.name()),
         TriageRejection::InvalidField(field) => format!("{} is invalid", field.name()),
-        TriageRejection::UnknownKind(_) => format!("unrecognised kind: {kind_submitted}"),
+        TriageRejection::UnknownKind => format!("unrecognised kind: {kind_submitted}"),
     }
 }
 
@@ -210,6 +209,7 @@ mod tests {
     use crate::test_support::test_pool;
     use axum::body::Body;
     use axum::http::Request;
+    use proptest::prelude::*;
     use scheduler_core::task::Field;
     use tower::ServiceExt;
 
@@ -691,11 +691,84 @@ mod tests {
 
     #[test]
     fn an_unknown_kind_rejection_echoes_the_value_it_is_given() {
-        let (status, Json(body)) = rejected(
-            TriageRejection::UnknownKind(None),
-            &json!({ "not": "a string" }),
-        );
+        let (status, Json(body)) =
+            rejected(TriageRejection::UnknownKind, &json!({ "not": "a string" }));
         assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
         assert_eq!(body, json!({ "unknown_kind": { "not": "a string" } }));
+    }
+
+    /// A submission expressed as JSON and as a form, field for field.
+    fn json_body(fields: &TriageFields) -> Value {
+        let mut body = serde_json::Map::new();
+        let mut put = |name: &str, value: Option<Value>| {
+            if let Some(value) = value {
+                body.insert(name.to_string(), value);
+            }
+        };
+        put("kind", fields.kind.clone().map(Value::from));
+        put("deadline", fields.deadline.clone().map(Value::from));
+        put(
+            "deadline_type",
+            fields.deadline_type.clone().map(Value::from),
+        );
+        put("priority", fields.priority.clone().map(Value::from));
+        put("target_count", fields.target_count.map(Value::from));
+        put(
+            "target_minutes_each",
+            fields.target_minutes_each.map(Value::from),
+        );
+        put("period", fields.period.clone().map(Value::from));
+        Value::Object(body)
+    }
+
+    fn form_request(fields: &TriageFields) -> TriageFormRequest {
+        TriageFormRequest {
+            kind: fields.kind.clone(),
+            deadline: fields.deadline.clone(),
+            deadline_type: fields.deadline_type.clone(),
+            priority: fields.priority.clone(),
+            target_count: fields.target_count,
+            target_minutes_each: fields.target_minutes_each,
+            period: fields.period.clone(),
+        }
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig { cases: 64, ..ProptestConfig::default() })]
+
+        /// "The page and `POST /captures/{id}/triage` are one code path, not
+        /// two" is this module's stated design, and this is the seam where it
+        /// could quietly stop being true: two hand-written, field-by-field
+        /// translations into the same core input. Adding a field to
+        /// `TriageFields` and wiring it into only one of them still compiles,
+        /// still passes every example test that does not happen to use it,
+        /// and silently makes the page and the API disagree. It fails here.
+        #[test]
+        #[ignore]
+        fn both_transports_translate_one_submission_into_the_same_core_input(
+            kind in proptest::option::of(".{0,12}"),
+            deadline in proptest::option::of(".{0,30}"),
+            deadline_type in proptest::option::of(".{0,10}"),
+            priority in proptest::option::of(".{0,6}"),
+            target_count in proptest::option::of(any::<i64>()),
+            target_minutes_each in proptest::option::of(any::<i64>()),
+            period in proptest::option::of(".{0,10}"),
+        ) {
+            let submission = TriageFields {
+                kind,
+                deadline,
+                deadline_type,
+                priority,
+                target_count,
+                target_minutes_each,
+                period,
+            };
+
+            let from_json = triage_fields(&json_body(&submission));
+            let from_form: TriageFields = form_request(&submission).into();
+
+            prop_assert_eq!(&from_json, &submission);
+            prop_assert_eq!(from_json, from_form);
+        }
     }
 }

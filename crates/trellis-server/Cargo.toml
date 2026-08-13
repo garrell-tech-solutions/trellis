@@ -8,6 +8,7 @@ name = "trellis"
 path = "src/main.rs"
 
 [dependencies]
+askama = "0.16.0"
 axum = "0.8.9"
 scheduler-core = { version = "0.1.0", path = "../scheduler-core" }
 serde = { version = "1.0.229", features = ["derive"] }

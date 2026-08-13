@@ -1,15 +1,19 @@
 //! Composition root: wires the delivery layer's handlers onto routes and
 //! hands them the pool they persist through.
 
-use axum::routing::post;
+use axum::routing::{get, post};
 use axum::Router;
 use sqlx::SqlitePool;
 
+use crate::http::assets::htmx_js;
 use crate::http::capture::create_capture;
+use crate::http::inbox::show_inbox;
 use crate::http::triage::create_triage;
 
 pub fn build_app(pool: SqlitePool) -> Router {
     Router::new()
+        .route("/", get(show_inbox))
+        .route("/static/htmx.min.js", get(htmx_js))
         .route("/captures", post(create_capture))
         .route("/captures/{id}/triage", post(create_triage))
         .with_state(pool)

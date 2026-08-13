@@ -18,6 +18,7 @@ mod build;
 mod capture;
 mod committed_empty_fields;
 mod committed_field_domains;
+mod inbox_view;
 mod migrations;
 mod quota_triage_validation;
 mod triage;
@@ -118,6 +119,9 @@ pub async fn dispatch(
         return outcome;
     }
     if let Some(outcome) = unknown_kind_rejection::dispatch(world, text, example).await {
+        return outcome;
+    }
+    if let Some(outcome) = inbox_view::dispatch(world, text).await {
         return outcome;
     }
     if let Some(outcome) = migrations::dispatch(world, text).await {

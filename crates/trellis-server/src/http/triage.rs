@@ -248,6 +248,40 @@ mod tests {
         serde_json::from_slice(&bytes).unwrap()
     }
 
+    /// The page-originated (form) transport, as opposed to `triage_response`'s
+    /// JSON. Exercises `content_type_is_json`, `TriageFormRequest::into`,
+    /// `page_response` and `rejection_message` together, none of which any
+    /// JSON-only test can reach.
+    async fn page_triage_response(
+        pool: &SqlitePool,
+        capture_id: i64,
+        fields: &[(&str, &str)],
+    ) -> axum::response::Response {
+        let body = fields
+            .iter()
+            .map(|(name, value)| format!("{name}={value}"))
+            .collect::<Vec<_>>()
+            .join("&");
+        let app = crate::app::build_app(pool.clone());
+        app.oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!("/captures/{capture_id}/triage"))
+                .header("content-type", "application/x-www-form-urlencoded")
+                .body(Body::from(body))
+                .unwrap(),
+        )
+        .await
+        .unwrap()
+    }
+
+    async fn response_html(response: axum::response::Response) -> String {
+        let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        String::from_utf8(bytes.to_vec()).unwrap()
+    }
+
     fn committed_payload_missing(field: &str) -> Value {
         let mut payload = json!({
             "kind": "committed",
@@ -634,6 +668,52 @@ mod tests {
 
         assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
         assert_eq!(response_json(response).await, json!({ "unknown_kind": 7 }));
+    }
+
+    #[tokio::test]
+    async fn triaging_as_pool_through_the_page_creates_the_task_and_carries_no_error() {
+        let (_dir, pool) = test_pool().await;
+        let capture_id = insert_untriaged_capture(&pool, "buy milk").await;
+
+        let response = page_triage_response(&pool, capture_id, &[("kind", "pool")]).await;
+
+        assert_eq!(response.status(), StatusCode::CREATED);
+        let html = response_html(response).await;
+        assert!(!html.contains("is required"));
+
+        let task_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM tasks")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(task_count, 1);
+    }
+
+    #[tokio::test]
+    async fn triaging_as_committed_through_the_page_without_a_required_field_shows_the_rejection_on_the_row(
+    ) {
+        let (_dir, pool) = test_pool().await;
+        let capture_id = insert_untriaged_capture(&pool, "call the dentist").await;
+
+        let response = page_triage_response(
+            &pool,
+            capture_id,
+            &[
+                ("kind", "committed"),
+                ("deadline_type", "hard"),
+                ("priority", "P1"),
+            ],
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+        let html = response_html(response).await;
+        assert!(html.contains("deadline is required"));
+
+        let task_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM tasks")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(task_count, 0);
     }
 
     #[test]

@@ -1,3 +1,8 @@
+# mutation-stamp: sha256=be728863e923d94455e907ac8dc0973375b17f33742cd480516dde48c323dfb1
+# acceptance-mutation-manifest-begin
+# {"version":1,"tested_at":"2026-08-13T21:28:24.238041197Z","feature_name":"Triage happens on the page, using the same validation as the API","feature_path":"features/triage_from_page.feature","background_hash":"304f93e93e2b217b49069c091950b87589f0c7e789e2d0dc3aaa8d845450cb64","implementation_hash":"sha256:b6d2b9276eb4e11dbc0f53d54b6b417868310eea7acb7947131810fe9df8b364","scenarios":[]}
+# acceptance-mutation-manifest-end
+
 # triage-from-page-offers-all-kinds-01: each untriaged capture offers all three triage kinds from the page
 # triage-from-page-pool-02: triaging as pool through the page moves the capture into the task list without a full page reload
 # triage-from-page-committed-rejected-03: triaging as committed through the page with a required field omitted is rejected the same way as the API

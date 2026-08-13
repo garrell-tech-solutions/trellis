@@ -54,3 +54,30 @@ pub(crate) async fn build_lists(
         .collect();
     Ok((captures, tasks))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_support::test_pool;
+
+    #[tokio::test]
+    async fn an_error_attaches_only_to_the_capture_that_failed_triage() {
+        let (_dir, pool) = test_pool().await;
+        let failed_id = store::capture::insert(&pool, "call the dentist", "web", 0)
+            .await
+            .unwrap();
+        let other_id = store::capture::insert(&pool, "buy milk", "web", 1)
+            .await
+            .unwrap();
+
+        let (captures, _tasks) =
+            build_lists(&pool, Some((failed_id, "deadline is required".to_string())))
+                .await
+                .unwrap();
+
+        let failed_row = captures.iter().find(|c| c.id == failed_id).unwrap();
+        let other_row = captures.iter().find(|c| c.id == other_id).unwrap();
+        assert_eq!(failed_row.error.as_deref(), Some("deadline is required"));
+        assert_eq!(other_row.error, None);
+    }
+}

@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Trellis</title>
+<script src="/static/htmx.min.js"></script>
+</head>
+<body>
+<h1>Inbox</h1>
+<form hx-post="/captures" hx-target="#captures" hx-swap="afterbegin" hx-on::after-request="this.reset()">
+<input type="text" name="raw_text" placeholder="Quick add a capture" required>
+<input type="hidden" name="source" value="web">
+<button type="submit">Add</button>
+</form>
+{% if captures.is_empty() %}
+<p>Nothing to triage. Add a capture above to get started.</p>
+{% endif %}
+<ul id="captures">
+{% for capture in captures %}
+{% include "capture_row.html" %}
+{% endfor %}
+</ul>
+</body>
+</html>

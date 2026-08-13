@@ -78,6 +78,7 @@ scheme.
 | T18 | An empty string and an absent key report identically — both use the existing `{"missing_field": <name>}` shape. | `require()` treated `Some("")` as present, which is the empty-string half of the hole this slice closes; the other half is deciding what the closed case reports. Distinguishing "you sent nothing" from "you sent an empty string" is a distinction a client rarely intends — an unfilled HTML form field and an absent field are the same submitter mistake. One shape, one code path in `require()`, rather than a second rejection variant carrying no information the caller can act on differently. |
 | T19 | `period` is a closed set: `week \| month`. | `deadline_type` and `priority` were closed in this same slice (T-series validated sum types in `scheduler-core`) for the reason D3 states — the fields the M3 scheduler branches on cannot carry undefined values. `period` is exactly that kind of field for quota scheduling at M8: "3 sessions per `fortnight`" is not a case M8's cadence math is written to handle, and typos (`"weekk"`) currently store the same way a legitimate value would. Only `week` is exercised by any M1 example; `month` is added now because closing the set later, after a real quota row exists, is the same free-now/expensive-later trade T3 already made for `deadline`. |
 | T20 | **The fact/plan line runs inside the `Block` table, by block state.** `proposed` and `published` future blocks are the **Plan layer** — disposable, engine-written, deleted wholesale and regenerated on every recompute. `in_progress`, `completed` and `missed` blocks, plus pins, are the **Constraints layer** — immutable facts, read by the engine and never written by it. The determinism property is therefore: *delete every `proposed`/`published` future block, re-run with the same facts, get byte-identical placements.* The signature is `schedule(tasks, busy, guardrails, pins, facts, prior_plan, now) -> placements`. | Resolves C2 (#3), ratified by the owner 2026-08-12. As originally written — "delete every block and regenerate" — the property was not merely wrong but **untestable**, because the move penalty makes the objective depend on previous placements and past blocks are immutable inputs. Wiping the table would destroy history and pins alongside the plan. Drawing the line inside the table rather than splitting it keeps one query surface while making the disposable set precisely definable. Two naming rules come with it, because the vocabulary was in use before it was defined: (1) **"Plan" and "Constraints" are the layer names**; "Facts" is informal shorthand for the immutable block subset, not a third layer. (2) **"Layer" is reserved for this domain split** — T15's code organisation is the **module boundary**, not layers, because a `Block` row is otherwise Plan-layer and store-layer at once and the word stops carrying information. Note T15's inline five-argument rendering of `schedule()` predates this and is an abbreviation, not a competing decision; the seven-argument form above is the contract, and #11's AC-1 already says "corrected signature per C2". |
+| T21 | **Never edit a migration that has been applied. Add a new numbered one.** Enforced in CI: migration files present on `trunk` may be added to, never modified or deleted (#32). Because SQLite has no `ALTER COLUMN`, a type change means the table-rebuild pattern — create the corrected table, `INSERT INTO new SELECT … FROM old`, drop the old, rename — inside a *new* migration. | `sqlx` records each applied migration by checksum, so editing one makes every existing database refuse to boot: `migration N was previously applied but has been modified`, with no fallback and no remediation path. The `triage-validation` slice did exactly this, changing `deadline TEXT` to `INTEGER` inside `0002_tasks.sql`; the damage was zero only because no database happened to exist at that moment. D14 removes that luck — the owner now runs the app every slice and will always have a live database. A convention is not enough here, because SQLite's missing `ALTER COLUMN` makes editing the old file the path of least resistance every single time: the correct route is roughly fifteen lines of rebuild in a new file, the wrong route is a one-word edit in an old one. The brief that authorised it reasoned "`tasks` has no production data, so this is free today" — which conflates *no production data* with *no existing database*, and is the specific mistake the CI gate exists to make unmakeable. Note `features/migrations.feature` cannot catch this: its idempotency scenario re-runs the *same* migration set, never a changed one. |
 
 ## Rejected
 
@@ -279,11 +280,19 @@ round trip and discarded the body, the other kept the body and discarded the
 timing — so a step could assert only what its own module happened to record.
 `steps/app_client.rs` returns status, body and elapsed together.
 
-DRY: 3.26% → 2.62%, back under the 3% threshold it had crossed.
+DRY: 3.26% → 2.66%, back under the 3% threshold it had crossed. *(Corrected
+2026-08-13: this line read 2.62%, a transcription slip; the architect's own
+commit message has 2.66%, which is what re-measurement confirms.)*
 
-**On the complexity gate, deliberately not "fixed".** Three violations remain,
+**On the complexity gate, deliberately not "fixed".** Three violations stand,
 all pure regex dispatch chains: `steps/capture.rs::dispatch` (14),
-`steps/triage.rs::dispatch` (17), `steps/mod.rs::dispatch` (9). Every arm is a
+`steps/triage.rs::dispatch` (17), `steps/mod.rs::dispatch` (9). *(Corrected
+2026-08-13: this read "three violations **remain**", which implies all three
+predate the slice. Two do. `steps/mod.rs::dispatch` is **introduced here** —
+5 on the base, 9 after adding four step modules to the top-level dispatcher.
+The total held at three only because `when_triaged` dropped off in the same
+change. The argument below is unaffected; the framing hid an added violation,
+which is exactly how a red gate gets waived on the next read.)* Every arm is a
 one-line delegation, so by T9's own rule — *a function over 8 is carrying
 logic that is not the match; extract that, do not flatten the match* — there
 is nothing to extract. The only way to move the number is a
@@ -331,3 +340,24 @@ so any two concurrent branches will collide again the moment both add a
 decision. Options if it recurs — allocate IDs only at merge time, prefix them
 per branch, or drop sequential numbering for dated slugs. Not worth solving
 until it costs more than this did.
+
+### 2026-08-13 — Migration discipline, and two corrections
+
+**T21** makes editing an applied migration a CI failure (#32). Recorded because
+the near-miss was invisible: `triage-validation` shipped an in-place edit to
+`0002_tasks.sql`, and it cost nothing only because no database existed at that
+moment. Under D14 that luck is gone.
+
+Two corrections to the `triage-validation` entries above, both found by
+re-measuring the claims rather than reading them:
+
+- The DRY figure read **2.62%**; it is **2.66%**. Transcription slip — the
+  architect's commit message had it right.
+- "Three violations **remain**" implied all three predate the slice. Two do;
+  `steps/mod.rs::dispatch` went 5 → 9 *in* that slice. Corrected to "stand".
+
+Neither changes an argument, and both are small. They are recorded rather than
+quietly patched because the previous slice's log entry contained a claim that
+was simply false — "verified identical before and after" when the count had
+gone 1 → 3 — and the habit worth building is that measurable assertions in this
+file get measured.

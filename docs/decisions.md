@@ -806,3 +806,56 @@ way, so none of them is comparable to what a Rust-only gate will report; the
 correcting line goes in when #50 establishes the new baseline. Noted here rather
 than quietly, per the habit this log adopted on 2026-08-13: measurable
 assertions in this file get measured.
+
+### 2026-08-14 — The complexity gate's first catch, and the merge that caused it (#55)
+
+`trunk` went red 24 seconds after PR #53 added
+`scripts/ci/complexity_baseline.sh`, when PR #54 landed the `stats_ratio` step
+module on a green check that had been measured against a tree without the gate
+in it. Both pull requests were correct alone and both were green alone.
+
+**A gate added by one pull request is not in force for a pull request branched
+before it.** #54's green check was an honest statement about the tree #54 was
+built on and said nothing about the tree it was merging into. Whichever of two
+such branches merges second has to rebase, re-measure and regenerate — the
+interaction was predicted on both PRs before either merged, and nothing in the
+merge process asked for it.
+
+**The gate caught two different things, and only one of them was a baseline
+edit.**
+
+`steps/mod.rs::dispatch` 11 → 12 is one more step module contributing one more
+one-line arm: the *"a dispatch chain gaining branches is a new step"* case the
+gate's own guidance names. The number is updated and no code changed.
+
+`steps/stats_ratio.rs::dispatch` at 17 was not that. Its ten regex arms are the
+legitimate shape the other five baselined entries share, but three of them
+unwrapped an `example_value` result before delegating, and each of those
+two-armed `match`es costs 2 — so six of the seventeen points were conditionals
+that are not the dispatch. That is `T-complexity-8` verbatim: *a function over 8
+is carrying logic that is not the match — extract that, do not flatten the
+match*. The resolution moved into two handlers (`then_page_shows_example`,
+shared by the two steps that assert the resolved example value verbatim, and
+`then_reports_in_window`, which builds its phrase the way `then_reports_counts`
+already did). Every arm is now a one-line delegation and `dispatch` measures
+**17 → 11**, which is the figure recorded in the baseline. Neither new handler
+is over the threshold (2 each), and no other score moved.
+
+Recording 17 would have made the gate's first use the precedent that a number
+nobody wants to move is a number you write down instead — on a file whose whole
+value is that its rows were defended. The distinction is the one the 2026-08-12
+entry drew with `when_triaged`: *the number moved as a side effect of an
+improvement, which is the only reason it should ever move.*
+
+**Measured:** complexity 6 over the threshold (the five dispatch chains of the
+2026-08-12 entry plus `stats_ratio`, all pinned and matching the baseline
+exactly), CRAP 0, lint 0, coverage 96.71%, DRY 2.03% → 1.96% (one clone pair
+fewer, 29 → 28), acceptance 12/12, `cargo test --workspace` 250 passing. No
+product code, no `.feature` file, no migration, no crate name and nothing under
+`swarmforge/` was touched — this is an extraction inside a test-support module
+plus a baseline file.
+
+The gate itself was re-verified rather than assumed, the way #53 was accepted: a
+new over-threshold function, one unwrap re-inlined so a pinned score moved
+11 → 13, and a baseline row renamed so it covered nothing. Each failed, each
+named the right function, and each was reverted.

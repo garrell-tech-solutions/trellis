@@ -15,7 +15,7 @@
 
 pub mod app;
 pub mod assets;
-pub(crate) mod clock;
+pub mod clock;
 pub mod db;
 pub(crate) mod response;
 

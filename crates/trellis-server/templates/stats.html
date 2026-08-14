@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Trellis — Stats</title>
+</head>
+<body>
+<h1>Stats</h1>
+<p>{{ view.committed }} committed, {{ view.pool }} pool and {{ view.quota }} quota tasks</p>
+<p>{{ view.in_window }} tasks in the window</p>
+{% if let Some(percent) = view.share_percent %}
+<p>Committed share: {{ percent }}%</p>
+{% if let Some(over_the_line) = view.over_the_line %}
+{% if over_the_line %}
+<p class="standing">over the line</p>
+{% else %}
+<p class="standing">under the line</p>
+{% endif %}
+{% endif %}
+{% else %}
+<p>It has not measured enough tasks yet to report a share.</p>
+{% endif %}
+</body>
+</html>

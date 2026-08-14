@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 fn arg_value(args: &[String], flag: &str) -> Option<String> {
@@ -21,33 +21,55 @@ fn require_db_arg(args: &[String]) -> PathBuf {
     }
 }
 
+/// Opens the database at `db_path` and brings it up to date, the one setup
+/// sequence both `migrate` and `serve` run before anything else.
+async fn connect_and_migrate(db_path: &Path) -> Result<sqlx::SqlitePool, String> {
+    let pool = trellis_server::platform::db::connect(db_path)
+        .await
+        .map_err(|err| format!("open database: {err}"))?;
+    trellis_server::platform::db::run_migrations(&pool)
+        .await
+        .map_err(|err| format!("run migrations: {err}"))?;
+    Ok(pool)
+}
+
 async fn run_migrate(args: &[String]) -> ExitCode {
     let db_path = require_db_arg(args);
-    let pool = match trellis_server::platform::db::connect(&db_path).await {
-        Ok(pool) => pool,
+    match connect_and_migrate(&db_path).await {
+        Ok(_) => ExitCode::SUCCESS,
         Err(err) => {
-            eprintln!("could not open database: {err}");
-            return ExitCode::FAILURE;
-        }
-    };
-    match trellis_server::platform::db::run_migrations(&pool).await {
-        Ok(()) => ExitCode::SUCCESS,
-        Err(err) => {
-            eprintln!("migration failed: {err}");
+            eprintln!("{err}");
             ExitCode::FAILURE
         }
+    }
+}
+
+/// Parses `--now`'s `RFC3339` value to epoch milliseconds. `None` when the
+/// flag was not given -- the server then runs on the real clock, unpinned.
+fn parse_now_arg(args: &[String]) -> Result<Option<i64>, String> {
+    match arg_value(args, "--now") {
+        None => Ok(None),
+        Some(value) => value
+            .parse::<jiff::Timestamp>()
+            .map(|ts| Some(ts.as_millisecond()))
+            .map_err(|err| format!("invalid --now {value:?}: {err}")),
+    }
+}
+
+/// Pins the process clock when `--now` was given; a no-op otherwise, leaving
+/// the server on the real clock.
+fn apply_pinned_now(pinned_now_ms: Option<i64>) {
+    if let Some(pinned_now_ms) = pinned_now_ms {
+        trellis_server::platform::clock::set_pinned_now(pinned_now_ms);
     }
 }
 
 async fn bind_server(args: &[String]) -> Result<(tokio::net::TcpListener, axum::Router), String> {
     let db_path = require_db_arg(args);
     let addr = arg_value(args, "--addr").unwrap_or_else(|| "127.0.0.1:8080".to_string());
-    let pool = trellis_server::platform::db::connect(&db_path)
-        .await
-        .map_err(|err| format!("open database: {err}"))?;
-    trellis_server::platform::db::run_migrations(&pool)
-        .await
-        .map_err(|err| format!("run migrations: {err}"))?;
+    let pinned_now_ms = parse_now_arg(args)?;
+    let pool = connect_and_migrate(&db_path).await?;
+    apply_pinned_now(pinned_now_ms);
     let app = trellis_server::platform::app::build_app(pool);
     let listener = tokio::net::TcpListener::bind(&addr)
         .await
@@ -73,7 +95,9 @@ async fn dispatch(args: &[String]) -> ExitCode {
         Some("migrate") => run_migrate(&args[2..]).await,
         Some("serve") => run_serve(&args[2..]).await,
         _ => {
-            eprintln!("usage: trellis <migrate|serve> --db <path> [--addr <host:port>]");
+            eprintln!(
+                "usage: trellis <migrate|serve> --db <path> [--addr <host:port>] [--now <RFC3339>]"
+            );
             ExitCode::from(2)
         }
     }
@@ -108,6 +132,24 @@ mod tests {
     fn require_db_arg_parses_the_db_path_when_present() {
         let args = vec!["--db".to_string(), "captures.sqlite".to_string()];
         assert_eq!(require_db_arg(&args), PathBuf::from("captures.sqlite"));
+    }
+
+    #[test]
+    fn parse_now_arg_returns_none_when_the_flag_is_absent() {
+        let args = vec!["--db".to_string(), "captures.sqlite".to_string()];
+        assert_eq!(parse_now_arg(&args), Ok(None));
+    }
+
+    #[test]
+    fn parse_now_arg_parses_an_rfc3339_value_to_epoch_milliseconds() {
+        let args = vec!["--now".to_string(), "2026-07-24T09:00:00Z".to_string()];
+        assert_eq!(parse_now_arg(&args), Ok(Some(1784883600000)));
+    }
+
+    #[test]
+    fn parse_now_arg_rejects_an_unparseable_value() {
+        let args = vec!["--now".to_string(), "not-a-timestamp".to_string()];
+        assert!(parse_now_arg(&args).is_err());
     }
 
     #[tokio::test]
@@ -187,6 +229,36 @@ mod tests {
             "/nonexistent-dir/captures.sqlite".to_string(),
             "--addr".to_string(),
             "127.0.0.1:0".to_string(),
+        ];
+        assert!(bind_server(&args).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn bind_server_succeeds_with_a_now_flag_present() {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("test.db");
+        let args = vec![
+            "--db".to_string(),
+            db_path.to_string_lossy().to_string(),
+            "--addr".to_string(),
+            "127.0.0.1:0".to_string(),
+            "--now".to_string(),
+            "2026-07-24T09:00:00Z".to_string(),
+        ];
+        assert!(bind_server(&args).await.is_ok());
+    }
+
+    #[tokio::test]
+    async fn bind_server_fails_when_now_is_not_a_valid_timestamp() {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("test.db");
+        let args = vec![
+            "--db".to_string(),
+            db_path.to_string_lossy().to_string(),
+            "--addr".to_string(),
+            "127.0.0.1:0".to_string(),
+            "--now".to_string(),
+            "not-a-timestamp".to_string(),
         ];
         assert!(bind_server(&args).await.is_err());
     }

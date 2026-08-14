@@ -26,6 +26,16 @@ static WHEN_TRIAGED_PERIOD_EMPTY: LazyLock<Regex> = LazyLock::new(|| {
 static WHEN_TRIAGED_WITH_PERIOD: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r#"^the capture is triaged as a quota task with a period of "<(\w+)>"$"#).unwrap()
 });
+static WHEN_TRIAGED_WITH_TARGET_COUNT: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r#"^the capture is triaged as a quota task with a target_count of "<(\w+)>"$"#)
+        .unwrap()
+});
+static WHEN_TRIAGED_WITH_TARGET_MINUTES_EACH: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(
+        r#"^the capture is triaged as a quota task with a target_minutes_each of "<(\w+)>"$"#,
+    )
+    .unwrap()
+});
 /// The "period left empty" scenario has no Examples table, so the field name
 /// is written directly in the step text rather than as a `<placeholder>`.
 static THEN_REJECTION_NAMES_LITERAL: LazyLock<Regex> =
@@ -46,6 +56,12 @@ pub async fn dispatch(
     }
     if let Some(caps) = WHEN_TRIAGED_WITH_PERIOD.captures(text) {
         return Some(dispatch_with_period(world, example, &caps).await);
+    }
+    if let Some(caps) = WHEN_TRIAGED_WITH_TARGET_COUNT.captures(text) {
+        return Some(dispatch_with_field(world, example, &caps, "target_count").await);
+    }
+    if let Some(caps) = WHEN_TRIAGED_WITH_TARGET_MINUTES_EACH.captures(text) {
+        return Some(dispatch_with_field(world, example, &caps, "target_minutes_each").await);
     }
     if let Some(caps) = THEN_REJECTION_NAMES_LITERAL.captures(text) {
         return Some(super::triage::then_rejection_names(world, &caps[1]));
@@ -87,6 +103,28 @@ async fn dispatch_with_period(
 ) -> Result<(), String> {
     let period = example_value(example, &caps[1])?;
     when_triaged_with_period(world, json!(period)).await
+}
+
+/// Varies one numeric quota field (`target_count`/`target_minutes_each`) to
+/// the example's value. Parsed to a JSON number, not left as text: the core
+/// only sees the field as present at all when `Value::as_i64` succeeds, so a
+/// string `"0"` would read as absent (a `missing_field` rejection) rather
+/// than present-and-invalid, which is not what these scenarios are testing.
+async fn dispatch_with_field(
+    world: &mut World,
+    example: &BTreeMap<String, String>,
+    caps: &regex::Captures<'_>,
+    field: &str,
+) -> Result<(), String> {
+    let raw = example_value(example, &caps[1])?;
+    let value: i64 = raw
+        .parse()
+        .map_err(|e| format!("bad {field} example value {raw:?}: {e}"))?;
+    when_triaged(
+        world,
+        payloads::with_field(payloads::quota(), field, json!(value)),
+    )
+    .await
 }
 
 #[cfg(test)]

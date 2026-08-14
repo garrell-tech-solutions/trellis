@@ -7,7 +7,14 @@
 //! "a capture ... is waiting"/"the capture is triaged as a pool task" steps
 //! this feature also uses are already matched generically by
 //! [`super::triage::dispatch`], tried before this module.
+//!
+//! "The inbox ..." assertions are scoped to `<ul id="captures">` via
+//! [`super::html`] rather than checked against the whole page body — once
+//! `triage_from_page` (#33) added a second list to the same page, a
+//! whole-body check for "no captures" started passing against a page that
+//! had zero captures and one task, which is not the same claim.
 
+use super::html;
 use super::*;
 use axum::body::{to_bytes, Body};
 use axum::http::Request;
@@ -54,7 +61,7 @@ pub async fn dispatch(world: &mut World, text: &str) -> Option<Result<(), String
         return Some(then_lists_before(world, &caps[1], &caps[2]));
     }
     if let Some(caps) = THEN_LISTS.captures(text) {
-        return Some(then_html_body_contains(world, &caps[1]));
+        return Some(then_captures_section_contains(world, &caps[1]));
     }
     if THEN_LISTS_NO_CAPTURES.is_match(text) {
         return Some(then_lists_no_captures(world));
@@ -63,15 +70,15 @@ pub async fn dispatch(world: &mut World, text: &str) -> Option<Result<(), String
         return Some(then_html_body_contains(world, "Nothing to triage"));
     }
     if THEN_NO_UNESCAPED_SCRIPT.is_match(text) {
-        return Some(then_html_body_excludes(world, "<script>"));
+        return Some(then_captures_section_excludes(world, "<script>"));
     }
     if let Some(caps) = THEN_CONTAINS_WORD.captures(text) {
-        return Some(then_html_body_contains(world, &caps[1]));
+        return Some(then_captures_section_contains(world, &caps[1]));
     }
     None
 }
 
-async fn html_response(world: &mut World, request: Request<Body>) -> Result<(), String> {
+pub(super) async fn html_response(world: &mut World, request: Request<Body>) -> Result<(), String> {
     let pool = world.pool()?.clone();
     let app = trellis_server::app::build_app(pool);
     let response = app
@@ -108,9 +115,9 @@ async fn when_quick_add_submits(world: &mut World, raw_text: &str) -> Result<(),
 }
 
 /// Minimal `application/x-www-form-urlencoded` percent-encoding for the
-/// handful of characters the hostile-text scenario actually submits — this
-/// step handler is not a general-purpose form encoder.
-fn urlencode(value: &str) -> String {
+/// handful of characters the acceptance suite actually submits — this step
+/// handler is not a general-purpose form encoder.
+pub(super) fn urlencode(value: &str) -> String {
     let mut out = String::with_capacity(value.len());
     for byte in value.bytes() {
         match byte {
@@ -150,11 +157,26 @@ fn then_html_body_contains(world: &mut World, expected: &str) -> Result<(), Stri
     }
 }
 
-fn then_html_body_excludes(world: &mut World, forbidden: &str) -> Result<(), String> {
-    let body = html_body(world)?;
-    if body.contains(forbidden) {
+fn captures_section(world: &World) -> Result<&str, String> {
+    html::captures_section(html_body(world)?)
+}
+
+fn then_captures_section_contains(world: &mut World, expected: &str) -> Result<(), String> {
+    let section = captures_section(world)?;
+    if section.contains(expected) {
+        Ok(())
+    } else {
         Err(format!(
-            "expected no {forbidden:?} in the response, got:\n{body}"
+            "expected {expected:?} in the inbox, got:\n{section}"
+        ))
+    }
+}
+
+fn then_captures_section_excludes(world: &mut World, forbidden: &str) -> Result<(), String> {
+    let section = captures_section(world)?;
+    if section.contains(forbidden) {
+        Err(format!(
+            "expected no {forbidden:?} in the inbox, got:\n{section}"
         ))
     } else {
         Ok(())
@@ -162,24 +184,33 @@ fn then_html_body_excludes(world: &mut World, forbidden: &str) -> Result<(), Str
 }
 
 fn then_lists_before(world: &mut World, first: &str, second: &str) -> Result<(), String> {
-    let body = html_body(world)?;
-    let first_index = body
+    let section = captures_section(world)?;
+    let first_index = section
         .find(first)
-        .ok_or_else(|| format!("expected {first:?} in the response, got:\n{body}"))?;
-    let second_index = body
+        .ok_or_else(|| format!("expected {first:?} in the inbox, got:\n{section}"))?;
+    let second_index = section
         .find(second)
-        .ok_or_else(|| format!("expected {second:?} in the response, got:\n{body}"))?;
+        .ok_or_else(|| format!("expected {second:?} in the inbox, got:\n{section}"))?;
     if first_index < second_index {
         Ok(())
     } else {
         Err(format!(
-            "expected {first:?} to list before {second:?}, got:\n{body}"
+            "expected {first:?} to list before {second:?}, got:\n{section}"
         ))
     }
 }
 
+/// Emptiness is checked by content, not by the absence of an `<li` tag — the
+/// inbox's own `<li>` grew an `id` attribute once triage-from-page needed one
+/// to aim its controls at, so `<li>` alone no longer appears even when a
+/// capture is present.
 fn then_lists_no_captures(world: &mut World) -> Result<(), String> {
-    then_html_body_excludes(world, "<li>")
+    let section = captures_section(world)?;
+    if section.trim().is_empty() {
+        Ok(())
+    } else {
+        Err(format!("expected no captures listed, got:\n{section}"))
+    }
 }
 
 #[cfg(test)]
@@ -203,7 +234,20 @@ mod tests {
 
         when_inbox_viewed(&mut world).await.unwrap();
 
-        then_html_body_contains(&mut world, "buy milk").unwrap();
+        then_captures_section_contains(&mut world, "buy milk").unwrap();
+    }
+
+    #[tokio::test]
+    async fn the_inbox_lists_no_captures_ignores_the_task_lists_own_li_elements() {
+        let mut world = migrated_world().await;
+
+        when_inbox_viewed(&mut world).await.unwrap();
+        world.last_html_body = Some(
+            r#"<ul id="captures"></ul><ul id="tasks"><li>[pool] call the dentist</li></ul>"#
+                .to_string(),
+        );
+
+        then_lists_no_captures(&mut world).unwrap();
     }
 
     #[test]
@@ -226,10 +270,15 @@ mod tests {
         assert!(then_not_redirect(&mut world).is_err());
     }
 
+    fn world_with_captures_section(html: &str) -> World {
+        let mut world = World::new();
+        world.last_html_body = Some(format!(r#"<ul id="captures">{html}</ul>"#));
+        world
+    }
+
     #[test]
     fn then_lists_before_passes_when_the_first_name_appears_first() {
-        let mut world = World::new();
-        world.last_html_body = Some("<li>buy milk</li><li>call the dentist</li>".to_string());
+        let mut world = world_with_captures_section("<li>buy milk</li><li>call the dentist</li>");
         assert_eq!(
             then_lists_before(&mut world, "buy milk", "call the dentist"),
             Ok(())
@@ -238,15 +287,13 @@ mod tests {
 
     #[test]
     fn then_lists_before_errors_when_the_order_is_reversed() {
-        let mut world = World::new();
-        world.last_html_body = Some("<li>buy milk</li><li>call the dentist</li>".to_string());
+        let mut world = world_with_captures_section("<li>buy milk</li><li>call the dentist</li>");
         assert!(then_lists_before(&mut world, "call the dentist", "buy milk").is_err());
     }
 
     #[test]
     fn then_lists_before_errors_when_a_name_is_missing() {
-        let mut world = World::new();
-        world.last_html_body = Some("<li>buy milk</li>".to_string());
+        let mut world = world_with_captures_section("<li>buy milk</li>");
         assert!(then_lists_before(&mut world, "buy milk", "call the dentist").is_err());
     }
 

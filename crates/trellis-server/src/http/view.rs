@@ -10,16 +10,24 @@
 //! template demanded that type.
 //!
 //! A row is what the database returned. A view model is what the page shows.
-//! They agree today and will stop agreeing at the next slice: a row needs its
-//! capture's id to aim a triage action at, and rendered text is not always a
-//! column — but which columns `list_untriaged` selects is still nobody's
-//! business but the store's.
+//! They no longer agree: a capture row now carries the id the triage-from-page
+//! slice aims its controls at, and an in-flight rejection's message — neither
+//! of which is a column `list_untriaged` selects.
 //!
 //! Nothing here depends on anything. Handlers do the mapping, so this module
 //! stays pure data and can be rendered without a database.
 
-/// One capture as the inbox lists it.
+/// One capture as the inbox lists it, with room for the rejection message a
+/// failed triage attempt against it leaves behind.
 pub struct CaptureRow {
+    pub id: i64,
+    pub text: String,
+    pub error: Option<String>,
+}
+
+/// One task as the task list shows it.
+pub struct TaskRow {
+    pub kind: String,
     pub text: String,
 }
 
@@ -28,10 +36,24 @@ mod tests {
     use super::*;
 
     #[test]
-    fn a_capture_row_carries_the_text_the_page_shows() {
+    fn a_capture_row_carries_its_id_text_and_error() {
         let row = CaptureRow {
+            id: 7,
+            text: "buy milk".to_string(),
+            error: Some("deadline is required".to_string()),
+        };
+        assert_eq!(row.id, 7);
+        assert_eq!(row.text, "buy milk");
+        assert_eq!(row.error.as_deref(), Some("deadline is required"));
+    }
+
+    #[test]
+    fn a_task_row_carries_its_kind_and_text() {
+        let row = TaskRow {
+            kind: "pool".to_string(),
             text: "buy milk".to_string(),
         };
+        assert_eq!(row.kind, "pool");
         assert_eq!(row.text, "buy milk");
     }
 }

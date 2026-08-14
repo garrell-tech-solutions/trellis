@@ -57,4 +57,32 @@ mod tests {
             .await
             .unwrap()
     }
+
+    /// Folded in from the PR #31 review: SQLite's INTEGER *affinity* does not
+    /// reject text, so before 0003 added this `CHECK`, `deadline='banana'`
+    /// succeeded through direct SQL even though the triage boundary already
+    /// rejected it — the column had no defence of its own.
+    #[tokio::test]
+    async fn a_non_integer_deadline_is_rejected_by_the_schema_even_via_direct_sql() {
+        let (_dir, pool) = connected_test_db().await;
+        run_migrations(&pool).await.unwrap();
+        sqlx::query(
+            "INSERT INTO captures (raw_text, source, created_at_ms) VALUES ('buy milk', 'web', 0)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let result = sqlx::query(
+            "INSERT INTO tasks (capture_id, kind, deadline, created_at_ms) \
+             VALUES (1, 'committed', 'banana', 0)",
+        )
+        .execute(&pool)
+        .await;
+
+        assert!(
+            result.is_err(),
+            "a non-integer deadline should be rejected by the schema"
+        );
+    }
 }

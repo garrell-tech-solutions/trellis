@@ -54,9 +54,24 @@ For each row:
   example, being silently treated as `pool`).
 - The tasks table is still empty.
 
+## Procedure — kind submitted as the wrong JSON type
+
+1. Triage the capture, submitting `{"kind": 7}` — a JSON number, not a string.
+2. Observe the response status and body.
+3. Query the tasks table and count its rows.
+
+### Expected Observable Outcomes
+- Triage is rejected, with the same "unknown kind" rejection shape.
+- The response body echoes back exactly what was submitted — `7`, the JSON
+  number, not `null`. A client that reads its own submission back from the
+  rejection can tell what happened; a rejection that silently reports `null`
+  looks the same as the field being absent, which it was not.
+- The tasks table is still empty.
+
 ## Independent of Implementation
 
 This procedure depends only on the triage endpoint's rejection contract and on
-durable state remaining unchanged on rejection. This is existing, shipped
-behaviour (T-unknown-kind-rejected); this procedure gives it QA coverage it
-did not previously have, without changing it.
+durable state remaining unchanged on rejection. The named-kind and absent-kind
+cases are existing, shipped behaviour (`T-unknown-kind-rejected`); this
+procedure gives them QA coverage they did not previously have. The
+wrong-JSON-type case is new behaviour closed by this slice.

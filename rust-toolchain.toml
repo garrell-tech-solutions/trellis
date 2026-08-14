@@ -1,2 +1,18 @@
+# Pinned to an exact version, not a channel -- see T-toolchain-pinned in
+# docs/decisions.md. `channel = "stable"` floats: it resolves to whatever
+# stable each machine happens to have, so CI and a developer checkout compile
+# with different rustc versions and a new clippy release lands as a red build
+# on a branch that changed nothing.
+#
+# Bumping this file is the deliberate act that adopts a new toolchain. Do it in
+# its own commit, so the clippy failures that arrive with it are attributable to
+# the bump rather than to whatever else was in flight.
 [toolchain]
-channel = "stable"
+channel = "1.97.1"
+
+# Declared here rather than added ad hoc in CI: rustup installs these together
+# with the toolchain, so a fresh clone and the CI runner end up with the same
+# set without the workflow having to remember. The musl target is what
+# features/release_binary.feature builds the static release binary against.
+components = ["clippy", "rustfmt"]
+targets = ["x86_64-unknown-linux-musl"]

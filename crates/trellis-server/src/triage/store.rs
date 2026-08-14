@@ -1,12 +1,16 @@
-//! The `tasks` table.
+//! What an accepted triage writes: the new `tasks` row, and the `triaged_at`
+//! stamp that consumes the capture it came from.
+//!
+//! Two tables, one capability — which is the packaging rule doing its job.
+//! A capture row is never deleted (`docs/design/architecture.md`); triage
+//! marks it, and [`crate::inbox`] stops listing it. Everything here speaks
+//! `scheduler_core` types and `sqlx::Error` and must not know an HTTP server
+//! exists (`T-module-boundary`, enforced by `platform::boundary`).
 
 use scheduler_core::task::TaskKind;
 use sqlx::SqlitePool;
 
-#[cfg(test)]
-use scheduler_core::task::{DeadlineType, Period, Priority};
-
-pub async fn insert(
+pub async fn insert_task(
     pool: &SqlitePool,
     capture_id: i64,
     kind: &TaskKind,
@@ -32,30 +36,33 @@ pub async fn insert(
     Ok(())
 }
 
-/// A row of [`list_all`]: a task, alongside the text of the capture it was
-/// triaged from — the task list's own contents have no text of their own to
-/// show, so the join is the store's business, not the page's.
-#[derive(Debug, Clone, PartialEq, Eq, sqlx::FromRow)]
-pub struct TaskWithCaptureText {
-    pub kind: String,
-    pub raw_text: String,
-}
-
-/// Every task, newest first.
-pub async fn list_all(pool: &SqlitePool) -> Result<Vec<TaskWithCaptureText>, sqlx::Error> {
-    sqlx::query_as(
-        "SELECT tasks.kind, captures.raw_text FROM tasks \
-         JOIN captures ON captures.id = tasks.capture_id \
-         ORDER BY tasks.id DESC",
-    )
-    .fetch_all(pool)
-    .await
+pub async fn mark_triaged(
+    pool: &SqlitePool,
+    capture_id: i64,
+    triaged_at_ms: i64,
+) -> Result<(), sqlx::Error> {
+    sqlx::query("UPDATE captures SET triaged_at = ? WHERE id = ?")
+        .bind(triaged_at_ms)
+        .bind(capture_id)
+        .execute(pool)
+        .await?;
+    Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_support::test_pool;
+    use crate::platform::test_support::test_pool;
+    use scheduler_core::task::{DeadlineType, Period, Priority};
+
+    /// Setting up "a capture exists" by calling the capture domain's own
+    /// writer rather than retyping its `INSERT` here: a fixture that spells
+    /// out another module's SQL is a second copy of that schema.
+    async fn given_a_capture(pool: &SqlitePool, raw_text: &str) -> i64 {
+        crate::capture::store::insert(pool, raw_text, "web", 0)
+            .await
+            .unwrap()
+    }
 
     type StoredTask = (
         String,
@@ -93,21 +100,14 @@ mod tests {
         }
     }
 
-    async fn insert_capture(pool: &SqlitePool) -> i64 {
-        sqlx::query_scalar(
-            "INSERT INTO captures (raw_text, source, created_at_ms) VALUES ('buy milk', 'web', 0) RETURNING id",
-        )
-        .fetch_one(pool)
-        .await
-        .unwrap()
-    }
-
     #[tokio::test]
     async fn a_pool_task_stores_its_kind_and_leaves_every_other_attribute_null() {
         let (_dir, pool) = test_pool().await;
-        let capture_id = insert_capture(&pool).await;
+        let capture_id = given_a_capture(&pool, "buy milk").await;
 
-        insert(&pool, capture_id, &TaskKind::Pool, 7).await.unwrap();
+        insert_task(&pool, capture_id, &TaskKind::Pool, 7)
+            .await
+            .unwrap();
 
         assert_eq!(
             stored_task(&pool).await,
@@ -118,9 +118,11 @@ mod tests {
     #[tokio::test]
     async fn a_committed_task_stores_its_scheduling_metadata_and_no_quota_target() {
         let (_dir, pool) = test_pool().await;
-        let capture_id = insert_capture(&pool).await;
+        let capture_id = given_a_capture(&pool, "buy milk").await;
 
-        insert(&pool, capture_id, &committed(), 7).await.unwrap();
+        insert_task(&pool, capture_id, &committed(), 7)
+            .await
+            .unwrap();
 
         assert_eq!(
             stored_task(&pool).await,
@@ -139,9 +141,9 @@ mod tests {
     #[tokio::test]
     async fn a_quota_task_stores_its_target_and_no_deadline() {
         let (_dir, pool) = test_pool().await;
-        let capture_id = insert_capture(&pool).await;
+        let capture_id = given_a_capture(&pool, "buy milk").await;
 
-        insert(&pool, capture_id, &quota(), 7).await.unwrap();
+        insert_task(&pool, capture_id, &quota(), 7).await.unwrap();
 
         assert_eq!(
             stored_task(&pool).await,
@@ -160,9 +162,9 @@ mod tests {
     #[tokio::test]
     async fn the_task_records_the_capture_it_came_from_and_when_it_was_created() {
         let (_dir, pool) = test_pool().await;
-        let capture_id = insert_capture(&pool).await;
+        let capture_id = given_a_capture(&pool, "buy milk").await;
 
-        insert(&pool, capture_id, &TaskKind::Pool, 4242)
+        insert_task(&pool, capture_id, &TaskKind::Pool, 4242)
             .await
             .unwrap();
 
@@ -174,64 +176,45 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn insert_reports_the_database_error_when_the_table_is_missing() {
+    async fn insert_task_reports_the_database_error_when_the_table_is_missing() {
         let dir = tempfile::tempdir().unwrap();
-        let pool = crate::db::connect(&dir.path().join("unmigrated.db"))
+        let pool = crate::platform::db::connect(&dir.path().join("unmigrated.db"))
             .await
             .unwrap();
 
-        assert!(insert(&pool, 1, &TaskKind::Pool, 0).await.is_err());
+        assert!(insert_task(&pool, 1, &TaskKind::Pool, 0).await.is_err());
     }
 
     #[tokio::test]
-    async fn list_all_is_empty_against_a_fresh_database() {
+    async fn mark_triaged_stamps_the_named_capture() {
         let (_dir, pool) = test_pool().await;
+        let capture_id = given_a_capture(&pool, "buy milk").await;
 
-        assert_eq!(list_all(&pool).await.unwrap(), Vec::new());
+        mark_triaged(&pool, capture_id, 9999).await.unwrap();
+
+        let triaged_at: Option<i64> =
+            sqlx::query_scalar("SELECT triaged_at FROM captures WHERE id = ?")
+                .bind(capture_id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(triaged_at, Some(9999));
     }
 
     #[tokio::test]
-    async fn list_all_reports_each_tasks_kind_and_the_text_of_the_capture_it_came_from() {
+    async fn mark_triaged_leaves_other_captures_untouched() {
         let (_dir, pool) = test_pool().await;
-        let capture_id = insert_capture(&pool).await;
+        let triaged = given_a_capture(&pool, "buy milk").await;
+        let untouched = given_a_capture(&pool, "call the dentist").await;
 
-        insert(&pool, capture_id, &TaskKind::Pool, 7).await.unwrap();
+        mark_triaged(&pool, triaged, 9999).await.unwrap();
 
-        assert_eq!(
-            list_all(&pool).await.unwrap(),
-            vec![TaskWithCaptureText {
-                kind: "pool".to_string(),
-                raw_text: "buy milk".to_string(),
-            }]
-        );
-    }
-
-    #[tokio::test]
-    async fn list_all_lists_tasks_newest_first() {
-        let (_dir, pool) = test_pool().await;
-        let first_capture = insert_capture(&pool).await;
-        let second_capture = sqlx::query_scalar(
-            "INSERT INTO captures (raw_text, source, created_at_ms) \
-             VALUES ('call the dentist', 'web', 0) RETURNING id",
-        )
-        .fetch_one(&pool)
-        .await
-        .unwrap();
-
-        insert(&pool, first_capture, &TaskKind::Pool, 1)
-            .await
-            .unwrap();
-        insert(&pool, second_capture, &TaskKind::Pool, 2)
-            .await
-            .unwrap();
-
-        let tasks = list_all(&pool).await.unwrap();
-        assert_eq!(
-            tasks
-                .iter()
-                .map(|t| t.raw_text.as_str())
-                .collect::<Vec<_>>(),
-            vec!["call the dentist", "buy milk"]
-        );
+        let triaged_at: Option<i64> =
+            sqlx::query_scalar("SELECT triaged_at FROM captures WHERE id = ?")
+                .bind(untouched)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(triaged_at, None);
     }
 }

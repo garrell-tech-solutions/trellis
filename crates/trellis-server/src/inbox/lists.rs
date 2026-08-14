@@ -1,13 +1,15 @@
 //! The `#lists` fragment: the inbox and task list as one swappable block.
 //!
 //! Two endpoints render it — `GET /` wraps it in the full page, and a
-//! page-originated triage swaps it in on its own — so it lives beside them
-//! rather than inside either. `triage` previously reached into `inbox` for
-//! it, which made the triage endpoint depend on the inbox *page* when what it
-//! actually needs is the fragment they share.
+//! page-originated triage swaps it in on its own. It lives here, beside
+//! [`super::http`] rather than inside it, for the reason it always has: the
+//! triage endpoint needs the *fragment*, not the inbox page. What the
+//! business-domain packaging settles is which capability the fragment belongs
+//! to — it is two lists of the inbox's own rows, so the inbox owns it and
+//! triage reaches in.
 
-use crate::http::view::{CaptureRow, TaskRow};
-use crate::store;
+use crate::inbox::store;
+use crate::inbox::view::{CaptureRow, TaskRow};
 use askama::Template;
 use sqlx::SqlitePool;
 
@@ -32,7 +34,7 @@ pub(crate) async fn build_lists(
     pool: &SqlitePool,
     error: Option<(i64, String)>,
 ) -> Result<(Vec<CaptureRow>, Vec<TaskRow>), sqlx::Error> {
-    let captures = store::capture::list_untriaged(pool)
+    let captures = store::list_untriaged(pool)
         .await?
         .into_iter()
         .map(|capture| CaptureRow {
@@ -44,7 +46,7 @@ pub(crate) async fn build_lists(
             text: capture.raw_text,
         })
         .collect();
-    let tasks = store::task::list_all(pool)
+    let tasks = store::list_tasks(pool)
         .await?
         .into_iter()
         .map(|task| TaskRow {
@@ -58,17 +60,16 @@ pub(crate) async fn build_lists(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_support::test_pool;
+    use crate::capture::store::insert as insert_capture;
+    use crate::platform::test_support::test_pool;
 
     #[tokio::test]
     async fn an_error_attaches_only_to_the_capture_that_failed_triage() {
         let (_dir, pool) = test_pool().await;
-        let failed_id = store::capture::insert(&pool, "call the dentist", "web", 0)
+        let failed_id = insert_capture(&pool, "call the dentist", "web", 0)
             .await
             .unwrap();
-        let other_id = store::capture::insert(&pool, "buy milk", "web", 1)
-            .await
-            .unwrap();
+        let other_id = insert_capture(&pool, "buy milk", "web", 1).await.unwrap();
 
         let (captures, _tasks) =
             build_lists(&pool, Some((failed_id, "deadline is required".to_string())))

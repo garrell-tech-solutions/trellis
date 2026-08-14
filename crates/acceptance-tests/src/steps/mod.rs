@@ -67,10 +67,10 @@ fn new_temp_db_path(file_name: &str) -> Result<(tempfile::TempDir, PathBuf), Str
 /// Opens a connection at `db_path` and runs migrations against it, the
 /// shared setup for any background step that needs a ready-to-use database.
 async fn connected_and_migrated(db_path: &Path) -> Result<sqlx::SqlitePool, String> {
-    let pool = trellis_server::db::connect(db_path)
+    let pool = trellis_server::platform::db::connect(db_path)
         .await
         .map_err(|e| format!("connect: {e}"))?;
-    trellis_server::db::run_migrations(&pool)
+    trellis_server::platform::db::run_migrations(&pool)
         .await
         .map_err(|e| format!("run_migrations: {e}"))?;
     Ok(pool)

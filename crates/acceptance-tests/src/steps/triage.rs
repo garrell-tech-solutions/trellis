@@ -380,7 +380,7 @@ pub fn then_triage_is_rejected(world: &mut World) -> Result<(), String> {
 /// Checks the JSON rejection body (the API path) when there is one; a
 /// page-originated triage has no JSON body at all — its response is the
 /// re-rendered `#lists` fragment, so the fallback checks that HTML for the
-/// same rejection prose `http::triage::rejection_message` writes into the
+/// same rejection prose `triage::http::rejection_message` writes into the
 /// failing row (`"{field} is required"`). Both paths report the same fact
 /// ("triage-from-page brief: the page and the API share one validation
 /// contract"), just through the shape each transport actually returns.

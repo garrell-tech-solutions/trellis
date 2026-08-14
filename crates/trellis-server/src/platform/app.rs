@@ -1,14 +1,19 @@
-//! Composition root: wires the delivery layer's handlers onto routes and
-//! hands them the pool they persist through.
+//! Composition root: wires each capability's handlers onto routes and hands
+//! them the pool they persist through.
+//!
+//! The one place in the crate that names every business domain at once —
+//! which is what a route table is, and why it sits in `platform` rather than
+//! inside any capability. Read top to bottom it is also the shortest
+//! statement of what this server does.
 
 use axum::routing::{get, post};
 use axum::Router;
 use sqlx::SqlitePool;
 
-use crate::http::assets::htmx_js;
-use crate::http::capture::create_capture;
-use crate::http::inbox::show_inbox;
-use crate::http::triage::create_triage;
+use crate::capture::http::create_capture;
+use crate::inbox::http::show_inbox;
+use crate::platform::assets::htmx_js;
+use crate::triage::http::create_triage;
 
 pub fn build_app(pool: SqlitePool) -> Router {
     Router::new()
@@ -22,7 +27,7 @@ pub fn build_app(pool: SqlitePool) -> Router {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_support::test_pool;
+    use crate::platform::test_support::test_pool;
     use axum::body::Body;
     use axum::http::{Request, StatusCode};
     use proptest::prelude::*;

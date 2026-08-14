@@ -1,3 +1,9 @@
+//! The database itself: opening it and migrating it.
+//!
+//! A persistence module by the same rule every capability's `store` is —
+//! `platform::boundary` checks it alongside them — but not one capability's,
+//! because a connection pool belongs to no business domain.
+
 use sqlx::migrate::MigrateError;
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions};
 use sqlx::SqlitePool;

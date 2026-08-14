@@ -1,4 +1,7 @@
-//! Static assets. HTMX is vendored (`stack.prompt`: no Node build step, no
+//! Static assets — machinery, not a capability, which is why they are here
+//! and not under the page that loads them.
+//!
+//! HTMX is vendored (`stack.prompt`: no Node build step, no
 //! CDN dependency for the page to work) and embedded into the binary at
 //! compile time, so the release build stays the single static executable
 //! `release_binary.feature` asserts.

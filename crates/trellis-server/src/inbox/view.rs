@@ -1,7 +1,7 @@
 //! What the templates render.
 //!
-//! Deliberately separate from the store's row types, even where the two
-//! currently carry the same single field. A template that renders a
+//! Deliberately separate from [`super::store`]'s row types, even where the
+//! two currently carry the same single field. A template that renders a
 //! `sqlx::FromRow` struct is bound to the query that produced it, and the
 //! binding had already started pulling the wrong way: `UntriagedCapture` was
 //! documented as "a capture as the inbox view needs it" — persistence

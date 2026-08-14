@@ -1,9 +1,9 @@
 //! `GET /`: the untriaged capture queue and task list (D-visible-slices'
 //! first two slices, issues #30 and #33).
 
-use crate::http::lists::build_lists;
-use crate::http::view::{CaptureRow, TaskRow};
-use crate::http::{render_template, write_failed};
+use crate::inbox::lists::build_lists;
+use crate::inbox::view::{CaptureRow, TaskRow};
+use crate::platform::response::{render_template, write_failed};
 use askama::Template;
 use axum::extract::State;
 use axum::http::StatusCode;
@@ -28,14 +28,14 @@ pub async fn show_inbox(State(pool): State<SqlitePool>) -> Result<Response, Stat
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_support::test_pool;
+    use crate::platform::test_support::test_pool;
     use axum::body::to_bytes;
     use axum::body::Body;
     use axum::http::Request;
     use tower::ServiceExt;
 
     async fn get_inbox(pool: &SqlitePool) -> String {
-        let app = crate::app::build_app(pool.clone());
+        let app = crate::platform::app::build_app(pool.clone());
         let response = app
             .oneshot(Request::builder().uri("/").body(Body::empty()).unwrap())
             .await

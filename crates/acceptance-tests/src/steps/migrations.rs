@@ -64,13 +64,13 @@ pub async fn when_migration_command_is_run(world: &mut World) -> Result<(), Stri
     let pool = if let Some(pool) = &world.pool {
         pool.clone()
     } else {
-        let pool = trellis_server::db::connect(&db_path)
+        let pool = trellis_server::platform::db::connect(&db_path)
             .await
             .map_err(|e| format!("connect: {e}"))?;
         world.pool = Some(pool.clone());
         pool
     };
-    let result = trellis_server::db::run_migrations(&pool)
+    let result = trellis_server::platform::db::run_migrations(&pool)
         .await
         .map_err(|e| e.to_string());
     world.migration_result = Some(result);
@@ -118,8 +118,12 @@ mod tests {
 
     async fn migrated_pool() -> (tempfile::TempDir, sqlx::SqlitePool) {
         let (dir, db_path) = new_temp_db_path("acceptance.db").unwrap();
-        let pool = trellis_server::db::connect(&db_path).await.unwrap();
-        trellis_server::db::run_migrations(&pool).await.unwrap();
+        let pool = trellis_server::platform::db::connect(&db_path)
+            .await
+            .unwrap();
+        trellis_server::platform::db::run_migrations(&pool)
+            .await
+            .unwrap();
         (dir, pool)
     }
 

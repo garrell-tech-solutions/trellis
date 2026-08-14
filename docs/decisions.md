@@ -161,6 +161,7 @@ O4 → #40 · O5 → #41 · O6 → #36. Issue #1 is titled `OQ2`; same question.
 | T-package-by-business-domain | **The code is organised by business domain — the capabilities Trellis provides — not by technical role.** A reader learns what Trellis *does* from `ls`, not what it is built with. `T-module-boundary`'s dependency rule survives unchanged; its `http/` + `store/` directory shape does not. **Vocabulary, fixed here: bare "domain" always means a life area** (`T-life-areas-are-data`); **"business domain", always both words, means this packaging axis.** | The owner's standing architectural preference — Uncle Bob's screaming architecture — which had never been written down anywhere, so `T-module-boundary` was settled without it and landed the opposite: `ls src/` said *this speaks HTTP and has a database*. Recorded now because an unrecorded preference is one an agent cannot honour, and three agents had already built against its inverse. **The rule reaches crates too.** The brief's six — `scheduler-db`, `scheduler-gcal`, `scheduler-bot`, `scheduler-web`, `scheduler-bin` — are role names (db, web, bot, bin) and are rejected as a plan; a crate earns existence when a capability needs a real boundary (a purity gate, an independent dependency set), not because a layer has a name. That closes #24, whose three options were all layer-shaped and none of which considered capability packaging. **Renaming existing crates is excluded from the first pass**, because `scheduler-core` is named twice in `swarmforge/constitution/articles/stack.prompt` — the mutation-parallelism table and the core purity gate — and no agent may edit the constitution without explicit owner direction. So the decision covers crates and the execution cannot; that split is deliberate, not an oversight. **The one real trap, and it is this decision's own shape turned on itself:** `store/mod.rs` carries two tests that glob `src/store/*.rs`, and when that directory ceases to exist they do not fail — they stop covering anything. `T-module-boundary` wrote its own warning — *"a layering rule nothing checks is a comment"* — and this is how that rule dies quietly. A replacement gate ships inside the restructure (#44), not after it. |
 | T-life-areas-are-data | **Life areas — what this log elsewhere calls domains: Work, Fitness, Learning, Family, Home — are user-managed rows, editable from the running app.** Not a Rust enum, not a config file. Adding one is never a development task. A fresh database seeds five; the set belongs to the user from then on. **A life area is well-formed only once it has a guardrail, or is explicitly marked pool-only** — enforced at M2, when guardrails exist. | Resolves #36, which framed this as closed-enum versus extensible-plain-data and read the enum as obligatory by analogy with `T-three-task-kinds`, `T-unknown-kind-rejected` and `T-period-closed-set`. **The analogy does not hold, and that is the load-bearing part.** Those are fields the scheduler *branches on* — a `match` with a different body per variant, which is why `T-three-task-kinds` warned that `if committed {} else {}` silently mistreats a third variant. A life area is a **lookup key, not a discriminant**: there is no per-life-area code path, since the scheduler looks up its guardrail, counts its capacity and groups the reckoning by it identically for every one. A set you `match` on must be closed; a set you index by need not be. **And the enum was never protecting against the real hazard.** The stated risk was a life area no guardrail governs and no capacity number counts (`D-guardrails-never-yield`: a life area outside the walls is covered by no wall) — but a non-exhaustive `match` reports missing arms, never a missing wall. The guardrail-completeness rule above is the check that actually catches it, and it needs no compiler. **`T-complexity-8` is unaffected:** its threshold of 8 is derived from *"the largest enums (`Domain`, `BlockState`) have 5 variants"*, and `BlockState` still has exactly five (`T-fact-plan-line`), so the derivation stands on the other enum alone. #36's claim that the justification stops describing the codebase does not survive contact with it. **This is not `R-plugin-surface`**, which refuses a general-purpose extensibility surface; this is one entity of the product's own model being editable by its single user (`D-single-user`), the same class of thing as the guardrails have always been. Rejected alternative: a config file read at startup — it satisfies "no rebuild" and still fails this project's own bar, that *a schema element with no observable behaviour has nothing to specify against*; the management surface is precisely what makes this specifiable at M1 rather than deferred. Rejected also: two vocabularies, an extensible capture tag plus a closed scheduler `Domain`, as the capture-categorization proposal assumed — every consumer of a life area (guardrails, capacity, the reckoning, menu diversity at #41) is a scheduler concern, so the mapping between the two lists would become the real list, kept in a third place nobody names. The seed keeps every life area cited in a settled decision's reasoning — Fitness (`T-three-task-kinds`), Learning (`D-kill-means-archive`), Family (`D-single-user`), Work (`D-pool-is-default`) — and adds Home for the errand and admin traffic (`buy milk`, `renew passport`) that neither candidate set housed. It is a seed, not a ratification: it is editable the moment the app runs, which is exactly why getting it wrong is now cheap. |
 | T-forms-swap-one-fragment | **A page's forms live inline in the row they act on; a page region rendered by more than one handler is one shared fragment with one id; and a rejection re-renders that same fragment carrying the error, returned as `422`.** htmx is configured to swap on 422 as well as 2xx. | Settled inside the `triage-from-page` pipeline run and recorded here afterwards, because the brief asked for each as a precedent — *"whichever you pick becomes the pattern for every form in this product"*, *"it is the first error-display pattern in the product"* — and the answers ended up living only in code and a commit message. The three are one design, not three preferences: forms inline in the row is what makes the row the unit of action; one shared `#lists` fragment is what lets a triage submitted from the inbox update both the inbox and the task list in a single swap; and re-rendering that same fragment on rejection is what keeps the error attached to the row that caused it, rather than inventing a second error surface. `http::lists` exists because the fragment gained a second renderer — the same "when a second caller appears, the shared thing gets its own home" move as `view`, `payloads` and `app_client`. **The cost, named because it is global and easy to miss:** the 422 swap is configured once for the page (`htmx.config.responseHandling.unshift` in `inbox.html`), so 422 is a swappable status for *every* htmx request on it, present and future — including the quick-add box, which never asked for it. Any endpoint that returns 422 with a body that is not the re-rendered fragment will have that body swapped into the DOM. Accepted deliberately, in exchange for one error convention instead of per-form handling; the guard is that **422 means exactly "validation rejection, body is the re-rendered fragment" everywhere in this product**, and an endpoint that cannot honour that must not use 422. |
+| T-capability-owns-its-queries | **A business domain owns the SQL it issues, not the table it touches.** Three capabilities write to `captures`: `capture` inserts the row, `triage` stamps `triaged_at`, `inbox` lists the untriaged. Each query lives in that capability's own `store.rs`. No module owns a table. | The rule that decides whether `T-package-by-business-domain` actually happened, or whether the technical layer merely survived under a capability's name. The tempting alternative is "`capture` owns the `captures` table, so every query against it lives there" — which sounds like ownership and is in fact the old `store/` directory with a new label: `triage` and `inbox` would both reach into `capture` for persistence, the dependency arrows would point sideways between capabilities rather than inward, and `ls src/` would go back to describing storage. Table-shaped ownership also gets the coupling exactly backwards. `inbox`'s listing query is coupled to *what the inbox shows* — it changed when the inbox gained a task list, and it will change again when life areas land (#47) — not to what the `captures` table is. Two queries against one table for two different reasons are two facts, and putting them in one file because the table is one table is the same category error `T-templates-take-view-models` corrected on the delivery side, where a `sqlx::FromRow` struct was documented as "a capture as the inbox view needs it". Accepted cost, and it is real: the same table is now written from three files, so a schema change touches all three rather than one, and a nine-line test preamble is duplicated between two `store.rs` files. Both are the price of the arrows pointing inward, and both are visible — the compiler finds the schema change, and the duplication was reported by the DRY gate rather than hidden. Enforced by `platform/boundary.rs`, which asserts no module outside a `store.rs` or `platform/db.rs` writes production SQL, so a capability cannot quietly start querying from its handler instead. |
 
 **Renumbered on merge, then superseded.** This branch allocated numeric IDs that `trunk` had already given to other decisions, and its source comments were left citing the stale numbers. Both problems are gone: decisions are keyed by slug now, and the citations were migrated with a CI gate behind them. Kept as the record of why.
 
@@ -738,3 +739,70 @@ asked to be decided against what the log received, after the pull request had
 already merged. Doing that comparison at the pipeline-available notification —
 before the merge, while the slice's authors are still reachable — is cheaper and
 is what the role's own step 5 asks for.
+
+### 2026-08-14 — The tree now names the product (#44, PR #49)
+
+`ls crates/trellis-server/src/` reads `capture inbox platform triage`. It read
+`http store` this morning.
+
+**`T-capability-owns-its-queries` is the decision that made it real**, and it is
+recorded above as its own slug because it is the one a future contributor will
+argue with. Splitting `store/capture.rs` three ways looks like scattering
+persistence; the argument for it is that the alternative is the old `store/`
+directory wearing a capability's name. Worth restating the tell: under
+table-shaped ownership, `triage` and `inbox` would both depend on `capture` for
+persistence, so the arrows would run sideways between capabilities instead of
+inward — which is `T-module-boundary`'s rule broken by a change made in its
+name.
+
+**`platform/` is named to say "not a capability" out loud.** Three subjects and
+one honest bucket beats promoting `db` or `web` to a subject. It holds the
+composition root, the connection, the clock, the static assets, the shared
+response mapping, and the boundary gate.
+
+**The gate replaced itself properly, which was the risk this change carried.**
+`T-module-boundary` shipped a check that globbed `src/store/*.rs`, and this
+restructure dissolved that directory — so the two tests would not have failed,
+they would have stopped covering anything. That is the same rule dying quietly
+that `T-module-boundary` wrote its own warning about. `platform/boundary.rs`
+walks `src/` rather than naming a directory, puts a floor under every assertion
+so a walk that returns nothing fails instead of passing, and covers its own
+source file — the SQL needle is assembled from two halves at runtime rather than
+kept on an exception list, because an exception list is the one place a real
+violation can hide. It was verified by breaking it four ways and watching each
+fail, including recreating `src/store/` and renaming every `store.rs` away while
+still compiling: the vacuous-coverage case the old tests died of.
+
+It also gained the half the old check never had — nothing outside a `store.rs`
+or `platform/db.rs` writes production SQL — and it gates the packaging rule
+itself, so an `http/` or `store/` reappearing at the crate root is a failing
+test rather than a review comment.
+
+**#24 closes with this.** Its three options were all layer-shaped: split
+`scheduler-db` out, accept the collapse, or enforce a module rule. None of them
+considered organising by capability, which is the answer. The brief's remaining
+role-named crates (`scheduler-web`, `scheduler-bot`, `scheduler-bin`) are
+rejected as a plan by the same reasoning; a crate earns existence when a
+capability needs a real boundary, not because a layer has a name. Renaming the
+crates that do exist is deliberately excluded: `scheduler-core` is named twice
+in `swarmforge/constitution/articles/stack.prompt`, which no agent may edit
+without the owner's direction.
+
+**Measured, unchanged:** complexity 5 violations (the same `acceptance-tests`
+dispatch chains covered by the 2026-08-12 entry, identical scores), CRAP 0,
+lint 0, coverage 96.41%, acceptance 11/11, `cargo test --workspace` 204 passing.
+No `.feature` file, no migration, no template, no crate name and nothing under
+`swarmforge/` was touched, and the route table is byte-identical — this changed
+where code lives and nothing about what the product does.
+
+**DRY moved 1.61–1.74% → 2.15%** (threshold 3), and most of that is not code.
+Six of seven new clone pairs are jscpd matching *prose* between `README.md` and
+`docs/design/architecture.md`; one is real, a nine-line test preamble now shared
+by two `store.rs` files, which is `T-capability-owns-its-queries`' accepted cost
+showing up exactly where it should. The gate scans markdown because
+`scripts/analyzers/dry.sh` restricts no formats — raised as **#50**. Every DRY
+figure recorded in this file (3.26%, 2.66%, 2.0%, 1.96%) was measured the same
+way, so none of them is comparable to what a Rust-only gate will report; the
+correcting line goes in when #50 establishes the new baseline. Noted here rather
+than quietly, per the habit this log adopted on 2026-08-13: measurable
+assertions in this file get measured.

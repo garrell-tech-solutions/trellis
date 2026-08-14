@@ -115,14 +115,19 @@ jobs:
       # No toolchain action: `rustup toolchain install` with no toolchain
       # argument installs exactly the toolchain rust-toolchain.toml pins,
       # rather than overriding the pin with a RUSTUP_TOOLCHAIN of its own.
+      # The clippy/rustfmt components and the musl target are declared in that
+      # file too (T-toolchain-pinned), so this one command brings all three.
       #
-      # The component/target adds are a separate, deliberate step. When the
-      # pinned toolchain is already present -- which it is on ubuntu-latest,
-      # since the runner images ship stable -- `rustup toolchain install`
-      # short-circuits with "using existing install" and silently ignores its
-      # own --component and --target flags. Passing them there looks correct
-      # and does nothing. `rustup {component,target} add` is idempotent and
-      # applies to the active (pinned) toolchain, so it works either way.
+      # The explicit adds below are kept as a safety net, not as the source of
+      # truth. When the pinned toolchain is already present, `rustup toolchain
+      # install` can short-circuit with "using existing install"; `rustup
+      # {component,target} add` is idempotent and applies to the active
+      # (pinned) toolchain, so it closes that gap either way. Since the pin is
+      # an exact version, the runner's preinstalled stable is usually the wrong
+      # version and gets downloaded rather than reused. Measured at ~12s on
+      # ubuntu-latest (six components) on the run that introduced this pin --
+      # cheap, and the cost of CI and a developer checkout agreeing. Expect it
+      # to grow the further the pin drifts from the runner image's stable.
       - name: Install the toolchain pinned by rust-toolchain.toml
         run: |
           rustup toolchain install --profile minimal
@@ -131,6 +136,23 @@ jobs:
           rustup show active-toolchain
           cargo --version
           rustc --version
+
+      # A pin nothing checks is a comment -- same reasoning as
+      # scripts/ci/migration_immutability.sh and scripts/ci/decision_slugs.sh.
+      # If an override (RUSTUP_TOOLCHAIN, a stray toolchain argument, a runner
+      # image quirk) ever silently wins over rust-toolchain.toml, every job
+      # below would compile on an unpinned toolchain and nothing would say so.
+      - name: Verify the active toolchain is the pinned one
+        run: |
+          PINNED="$(grep -E '^[[:space:]]*channel' rust-toolchain.toml \
+            | sed -E 's/.*"(.*)".*/\1/')"
+          echo "rust-toolchain.toml pins: $PINNED"
+          if ! rustc --version | grep -qF "rustc $PINNED "; then
+            echo "FAIL: active rustc is not the pinned toolchain." >&2
+            echo "      pinned:  $PINNED" >&2
+            echo "      active:  $(rustc --version)" >&2
+            exit 1
+          fi
 
       # Fail loudly and early if the musl std is missing, rather than 400
       # crates later with a confusing "can't find crate for `core`".

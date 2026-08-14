@@ -8,8 +8,9 @@ why) before proposing changes to either.
 
 Prerequisites:
 
-- Rust via `rustup` — the toolchain is pinned in `rust-toolchain.toml`
-  (stable) and installs itself automatically on first `cargo` invocation.
+- Rust via `rustup` — the toolchain is pinned in `rust-toolchain.toml` to an
+  exact version rather than a channel, and installs itself automatically on
+  first `cargo` invocation.
 - [Babashka](https://babashka.org/) (`bb`) — used by the acceptance test
   generator.
 - The [Acceptance Pipeline Specification](https://github.com/garrelj1) tools

@@ -20,8 +20,11 @@ fi
 
 COBERTURA_FILE="$(mktemp)"
 trap 'rm -f "$COBERTURA_FILE"' EXIT
-# --include-ignored: see coverage.sh.
-cargo llvm-cov "${SCOPE[@]}" --cobertura --output-path "$COBERTURA_FILE" >/dev/null 2>&1 -- --include-ignored
+# --include-ignored and --ignore-run-fail: see coverage.sh. The second one is
+# what stops an instrumented run's 50ms timing assertion from failing a CRAP
+# measurement that has nothing to do with it.
+cargo llvm-cov "${SCOPE[@]}" --cobertura --output-path "$COBERTURA_FILE" \
+  --ignore-run-fail >/dev/null 2>&1 -- --include-ignored
 
 python3 - "$TARGET" "$THRESHOLD" "$SCRIPT_DIR" "$COBERTURA_FILE" <<'PYEOF'
 import json, os, subprocess, sys
@@ -74,6 +77,21 @@ def coverage_for(filename, fn_name, start, end):
 
 
 files = rust_files_under(target, ".")
+
+# See complexity.sh: an empty walk is a vacuous pass, not a clean tree.
+if not files:
+    print(json.dumps({
+        "tool": "crap.sh (cargo-llvm-cov + rust-code-analysis-cli)",
+        "metric": "crap",
+        "threshold": threshold,
+        "violations": [{
+            "error": f"no Rust source files found under {target!r}",
+            "hint": "nothing was analyzed, so this is a vacuous pass, not a clean tree",
+        }],
+        "summary": {"functions_analyzed": 0},
+    }, indent=2))
+    sys.exit(1)
+
 violations = []
 total_functions = 0
 

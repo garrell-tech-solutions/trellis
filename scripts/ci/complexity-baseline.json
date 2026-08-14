@@ -1,0 +1,63 @@
+{
+  "_comment": [
+    "The accepted-red baseline for scripts/analyzers/complexity.sh, enforced by",
+    "scripts/ci/complexity_baseline.sh. Read that script's header before editing",
+    "this file -- adding a row here is a decision, not a formality.",
+    "",
+    "T-complexity-8 sets the threshold at 8 and every entry below is over it.",
+    "They are over it deliberately. Each one is a Gherkin step dispatcher: a",
+    "regex chain in which every arm is a one-line delegation to a handler. By",
+    "T-complexity-8's own rule -- 'a function over 8 is carrying logic that is",
+    "not the match; extract that, do not flatten the match' -- there is nothing",
+    "to extract. The only way to move these numbers is a (Regex, handler) table,",
+    "and because the handlers are async with differing arities, a uniform table",
+    "in Rust needs a boxed-future wrapper per step: roughly forty wrappers to",
+    "replace forty one-line branches, which is exactly the 'indirection that is",
+    "strictly worse to read' that T-complexity-8 refuses. The 2026-08-12 entry",
+    "in docs/decisions.md says it in bold: do not flatten these into a registry",
+    "to make the number go down.",
+    "",
+    "The scores are exact, not ceilings. A dispatcher whose score moves in",
+    "either direction fails this gate until the number here is updated in the",
+    "same commit, so the movement lands in a diff a reviewer can see. That is",
+    "the property actually worth guarding, and it is the one this project has",
+    "already been burned by: the 2026-08-12 log entry said 'three violations",
+    "remain' while steps/mod.rs::dispatch had gone 5 -> 9 inside that very",
+    "slice. The total held at three only because another function dropped off.",
+    "The correction on 2026-08-13 named the shape -- 'which is exactly how a red",
+    "gate gets waived on the next read'."
+  ],
+  "threshold": 8,
+  "accepted": [
+    {
+      "file": "crates/acceptance-tests/src/steps/capture.rs",
+      "function": "dispatch",
+      "cyclomatic_complexity": 14,
+      "why": "Gherkin step dispatcher; regex chain, one-line delegation per arm."
+    },
+    {
+      "file": "crates/acceptance-tests/src/steps/inbox_view.rs",
+      "function": "dispatch",
+      "cyclomatic_complexity": 11,
+      "why": "Gherkin step dispatcher; regex chain, one-line delegation per arm."
+    },
+    {
+      "file": "crates/acceptance-tests/src/steps/mod.rs",
+      "function": "dispatch",
+      "cyclomatic_complexity": 11,
+      "why": "Top-level step dispatcher; delegates to one step module per arm."
+    },
+    {
+      "file": "crates/acceptance-tests/src/steps/triage.rs",
+      "function": "dispatch",
+      "cyclomatic_complexity": 17,
+      "why": "Gherkin step dispatcher; regex chain, one-line delegation per arm."
+    },
+    {
+      "file": "crates/acceptance-tests/src/steps/triage_from_page.rs",
+      "function": "dispatch",
+      "cyclomatic_complexity": 12,
+      "why": "Gherkin step dispatcher; regex chain, one-line delegation per arm."
+    }
+  ]
+}

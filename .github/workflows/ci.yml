@@ -1,12 +1,23 @@
 name: CI
 
-# The fast gate. Every check here is one of the canonical commands from
-# swarmforge/constitution/articles/stack.prompt, or an existing executable QA
-# procedure under scripts/qa/. Nothing is reimplemented in YAML: the scripts
-# stay the single authoritative definition of what they assert.
+# Every check here is one of the canonical commands from
+# swarmforge/constitution/articles/stack.prompt, or an existing executable
+# script under scripts/. Nothing is reimplemented in YAML: the scripts stay the
+# single authoritative definition of what they assert. In particular no
+# threshold, baseline percentage or format list appears in this file -- the
+# analyzers own those, so changing one is a change to the analyzer and shows up
+# in its diff rather than here.
 #
-# The slow analyzers (mutation, CRAP, DRY, coverage) are deliberately NOT here
-# -- see issue #23. Add them once this gate is green and trusted.
+# Two build jobs, split by how long they take rather than by what they check:
+#
+#   gate     fmt, clippy, unit tests, the purity gate, the musl release build.
+#            Fast feedback. Unchanged by issue #26.
+#   quality  the Gherkin acceptance suite and the analyzers. Slower, needs
+#            babashka and the APS tooling, and cannot start reporting honest
+#            numbers until the acceptance entrypoints exist. Added by #26.
+#
+# They run in parallel and neither waits on the other, so a formatting mistake
+# still reports in about a minute.
 
 on:
   push:
@@ -173,6 +184,13 @@ jobs:
       - name: Clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
 
+      # Unit tests only, and that is not a shortcoming of this step -- it is
+      # what `cargo test --workspace` means in a fresh clone. The generated
+      # acceptance entrypoints are gitignored (.gitignore:29, correctly: the
+      # .feature file is the source of truth), so Cargo discovers no
+      # integration test binaries here and prints `ok` for a strict subset of
+      # what a reader assumes it ran. The Gherkin suite is gated in `quality`
+      # below, which generates the entrypoints first. Issue #26.
       - name: Test
         run: cargo test --workspace
 
@@ -189,3 +207,207 @@ jobs:
       # a release build that exits 0 but links dynamically is not a pass.
       - name: Release build (musl, static)
         run: ./scripts/qa/release_binary.sh
+
+  # The Gherkin acceptance suite and the analyzers (issue #26). Until this job
+  # existed, CI enforced none of the thresholds
+  # swarmforge/constitution/articles/stack.prompt declares, and the acceptance
+  # suite -- the specifier's entire output -- ran only when a human or an agent
+  # remembered to invoke it in a worktree that had already generated the
+  # entrypoints.
+  #
+  # Its own job rather than more steps on `gate`, because it needs babashka,
+  # the APS pipeline, jscpd and two cargo-installed analyzers that `gate` has
+  # no use for, and because roughly twenty minutes of analyzers hanging off the
+  # fast gate would stop it being fast. The toolchain preamble is duplicated
+  # from `gate` deliberately and is the whole overlap: extracting fifteen lines
+  # of rustup into a composite action would put this workflow's setup in a file
+  # the workflow does not show you, to save less than it costs to look for.
+  quality:
+    name: acceptance suite + analyzers
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - uses: actions/checkout@v5
+
+      # features/release_binary.feature is one of the eleven, and its step
+      # handler runs the musl release build, so this job needs the same musl C
+      # toolchain `gate` does. libsqlite3-sys compiles C against the target.
+      - name: Install musl C toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends musl-tools
+
+      # See the equivalent step in `gate` for why there is no toolchain action:
+      # a bare `rustup toolchain install` honours rust-toolchain.toml's pin
+      # instead of overriding it (T-toolchain-pinned).
+      #
+      # llvm-tools-preview is added here rather than in rust-toolchain.toml on
+      # purpose. stack.prompt lists it as part of the coverage tool's install
+      # line, not as part of the toolchain; nothing outside this job needs it,
+      # and a fresh clone should not pay to download it in order to run
+      # `cargo build`.
+      - name: Install the toolchain pinned by rust-toolchain.toml
+        run: |
+          rustup toolchain install --profile minimal
+          rustup component add clippy rustfmt llvm-tools-preview
+          rustup target add x86_64-unknown-linux-musl
+          rustup show active-toolchain
+          cargo --version
+
+      - uses: Swatinem/rust-cache@v2
+
+      # Babashka. engineering.prompt: "Prefer the Babashka APS tools ... Use
+      # Go-based APS tools only if the Babashka APS tools do not work in the
+      # current project environment." The Babashka ones work, so this is the
+      # supported path and the Go tools are never installed.
+      #
+      # scripts/acceptance/generate.bb also shells out to `rustfmt`, so that
+      # the generated entrypoints satisfy `cargo fmt --all -- --check` like
+      # hand-written source. That component is installed above.
+      #
+      # Downloaded into RUNNER_TEMP rather than the checkout for the same
+      # reason APS_HOME points outside it: nothing that is not this project's
+      # source belongs in a tree four analyzers are about to walk.
+      - name: Install babashka
+        run: |
+          curl -sSL https://raw.githubusercontent.com/babashka/babashka/master/install \
+            -o "$RUNNER_TEMP/install-babashka"
+          chmod +x "$RUNNER_TEMP/install-babashka"
+          sudo "$RUNNER_TEMP/install-babashka"
+          bb --version
+
+      # The APS pipeline is installed out of tree, not vendored -- the same
+      # arrangement scripts/acceptance/lib.sh describes and the same command it
+      # prints when the pipeline is missing. Its bb.edn declares only :paths
+      # and :tasks, no external deps, so a shallow clone is the whole install
+      # and nothing is fetched at run time.
+      #
+      # RUNNER_TEMP, not the checkout: the APS pipeline is a second source
+      # tree, and a second source tree inside the checkout is precisely what
+      # issue #26's third trap is about. Every analyzer below walks the
+      # workspace; putting APS in it would have them measuring somebody else's
+      # repository and reporting the total as this project's.
+      #
+      # APS_HOME is exported through GITHUB_ENV rather than declared in a
+      # job-level `env:` block, because the value depends on RUNNER_TEMP and
+      # the `runner` context does not exist at job level -- referencing it
+      # there fails the whole workflow before a single job is created, with no
+      # job log to say why. scripts/acceptance/lib.sh reads APS_HOME and falls
+      # back to ~/.cache/swarmforge/aps-pipeline; setting it here keeps the
+      # clone target and the consumer from drifting apart.
+      - name: Install the APS pipeline
+        run: |
+          echo "APS_HOME=$RUNNER_TEMP/aps-pipeline" >> "$GITHUB_ENV"
+          git clone --depth 1 \
+            https://github.com/unclebob/Acceptance-Pipeline-Specification.git \
+            "$RUNNER_TEMP/aps-pipeline"
+          test -f "$RUNNER_TEMP/aps-pipeline/bb.edn"
+
+      - name: Install jscpd
+        run: |
+          npm install -g jscpd
+          jscpd --version
+
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-llvm-cov
+
+      # No prebuilt binary for this one, so it is a from-source build the first
+      # time. Swatinem/rust-cache above caches ~/.cargo/bin, so subsequent runs
+      # restore it.
+      #
+      # --locked is load-bearing, not hygiene. Without it this install fails
+      # outright on the pinned toolchain: rust-code-analysis 0.0.25 pins
+      # tree-sitter 0.20, its tree-sitter-<language> grammar crates take a
+      # caret range, and newer grammars published since that release pull in
+      # tree-sitter 0.26. Two versions of the crate land in one dependency
+      # graph and the build dies on
+      #
+      #   error[E0308]: expected `tree_sitter::Language`, found a different
+      #                 `tree_sitter::Language`
+      #
+      # which reads like a compiler bug and is really a resolver outcome that
+      # depends on what was published this week. --locked uses the Cargo.lock
+      # published with the crate, so the grammar versions are the ones the
+      # release was built against. Verified on rustc 1.97.1: fails without it,
+      # builds in 14s with it, and the binary reports identical metrics.
+      - name: Install rust-code-analysis-cli
+        run: |
+          if ! command -v rust-code-analysis-cli >/dev/null; then
+            cargo install rust-code-analysis-cli --locked
+          fi
+          rust-code-analysis-cli --version
+
+      # ---------------------------------------------------------------------
+      # ORDER BELOW IS LOAD-BEARING. DO NOT REORDER.
+      #
+      # coverage.sh and crap.sh must run AFTER scripts/acceptance/run.sh.
+      # The step handlers under crates/acceptance-tests/src/steps/ are ordinary
+      # library code, and the only thing that executes them is a generated
+      # entrypoint. Run the analyzers first and every handler reads as dead
+      # code. Measured both ways on 2026-08-14 by moving the generated
+      # entrypoints aside and re-running: coverage 96.41% -> 86.80% with ten
+      # files under the 80% threshold, and CRAP 0 violations -> 5, topping out
+      # at 72.0. Every one of those fifteen is an artefact of the ordering
+      # rather than a fact about the tree.
+      #
+      # The failure that produces is the worse kind: plausible numbers. Nothing
+      # errors, the JSON is well formed, and the only tell is that the figures
+      # are wrong. Whoever reorders these steps will be looking at a coverage
+      # regression that did not happen.
+      # ---------------------------------------------------------------------
+
+      - name: Acceptance suite (Gherkin, 11 features)
+        id: acceptance
+        run: ./scripts/acceptance/run.sh
+
+      # The cheap guard, and the one that closes the silence. run.sh ends in
+      # `cargo test -p acceptance-tests`; if generation produced nothing that
+      # command finds nothing, passes, and run.sh exits 0 having asserted
+      # nothing at all. This compares the generated entrypoints against
+      # features/*.feature by name.
+      #
+      # !cancelled() so it reports even when the step above failed: if run.sh
+      # broke partway, what generation managed to produce is exactly the
+      # diagnostic worth having.
+      - name: Every feature generated an entrypoint
+        if: ${{ !cancelled() }}
+        run: ./scripts/ci/acceptance_entrypoints.sh
+
+      # Coverage and CRAP are gated on the acceptance run having SUCCEEDED,
+      # not merely on the job not being cancelled -- see the ordering note
+      # above. A number measured without the entrypoints is not a smaller
+      # truth, it is a different and wrong one, and printing it would invite
+      # someone to act on it.
+      - name: Coverage (threshold owned by scripts/analyzers/coverage.sh)
+        if: ${{ !cancelled() && steps.acceptance.outcome == 'success' }}
+        run: ./scripts/analyzers/coverage.sh .
+
+      - name: CRAP (threshold owned by scripts/analyzers/crap.sh)
+        if: ${{ !cancelled() && steps.acceptance.outcome == 'success' }}
+        run: ./scripts/analyzers/crap.sh .
+
+      # Complexity and DRY read source, not test results, so they are
+      # independent of the acceptance run and still report when it fails.
+      #
+      # Complexity goes through scripts/ci/complexity_baseline.sh rather than
+      # calling the analyzer directly. The analyzer is legitimately red -- five
+      # step dispatchers that T-complexity-8 and the 2026-08-12 decisions log
+      # entry both refuse to flatten -- so gating on its exit code would mean a
+      # permanently red build, which is a red X reviewers learn to ignore. The
+      # gate pins the accepted set instead and fails when it grows, moves or
+      # goes stale. The threshold is untouched and still lives in
+      # swarmforge/constitution/articles/stack.prompt.
+      - name: Complexity against the accepted baseline
+        if: ${{ !cancelled() }}
+        run: ./scripts/ci/complexity_baseline.sh .
+
+      # Invoked, not reimplemented: no threshold, no baseline percentage and no
+      # format list appears here. #50 changed what dry.sh measures -- it now
+      # restricts to rust,bash rather than scanning prose -- while this branch
+      # was in flight, and a number or a format set copied into the workflow
+      # would have gone stale on that merge without anything saying so.
+      - name: DRY (threshold owned by scripts/analyzers/dry.sh)
+        if: ${{ !cancelled() }}
+        run: ./scripts/analyzers/dry.sh .

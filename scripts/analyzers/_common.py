@@ -19,6 +19,13 @@ def rust_files_under(path, root):
     walked unless excluded here, and every function in them is counted
     again under a path nobody is working in.
 
+    `tmp/` is excluded for a related reason: the constitution tells every
+    agent to put scratch files there ("Use ./tmp/ in your assigned worktree
+    for temporary files"), so a copy of a source file made while debugging
+    is normal and must not be able to fail a gate on its own.
+    scripts/analyzers/dry.sh has ignored it since it was written; this is
+    the same exclusion for the analyzers that walk the tree themselves.
+
     Exclusions are matched against the path *relative to `root`*, not the
     path as `find` printed it. Matching the raw path would mean an analyzer
     invoked from inside a worktree with an absolute argument saw
@@ -29,6 +36,7 @@ def rust_files_under(path, root):
     ).stdout.splitlines()
     skip_substrings = (
         "/target/", "/build/", "/mutants.out", "/.worktrees/", "/.claude/",
+        "/tmp/",
     )
     root_abs = os.path.abspath(root)
     files = []

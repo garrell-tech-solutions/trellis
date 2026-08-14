@@ -369,23 +369,41 @@ pub async fn then_task_has_quota_target(
 
 pub fn then_triage_is_rejected(world: &mut World) -> Result<(), String> {
     match world.last_status {
-        Some(status) if (400..500).contains(&status) => Ok(()),
-        Some(status) => Err(format!("expected a client error, got status {status}")),
+        Some(422) => Ok(()),
+        Some(status) => Err(format!(
+            "expected the validation rejection status 422, got {status}"
+        )),
         None => Err("no triage response recorded".to_string()),
     }
 }
 
+/// Checks the JSON rejection body (the API path) when there is one; a
+/// page-originated triage has no JSON body at all — its response is the
+/// re-rendered `#lists` fragment, so the fallback checks that HTML for the
+/// same rejection prose `http::triage::rejection_message` writes into the
+/// failing row (`"{field} is required"`). Both paths report the same fact
+/// ("triage-from-page brief: the page and the API share one validation
+/// contract"), just through the shape each transport actually returns.
 pub fn then_rejection_names(world: &mut World, expected_field: &str) -> Result<(), String> {
-    let body = world
-        .last_response_body
-        .as_ref()
-        .ok_or_else(|| "no rejection body recorded".to_string())?;
-    match body.get("missing_field").and_then(Value::as_str) {
-        Some(field) if field == expected_field => Ok(()),
-        other => Err(format!(
-            "expected rejection to name {expected_field}, body reported {other:?}"
-        )),
+    if let Some(body) = world.last_response_body.clone() {
+        return match body.get("missing_field").and_then(Value::as_str) {
+            Some(field) if field == expected_field => Ok(()),
+            other => Err(format!(
+                "expected rejection to name {expected_field}, body reported {other:?}"
+            )),
+        };
     }
+    if let Some(html) = world.last_html_body.clone() {
+        let needle = format!("{expected_field} is required");
+        return if html.contains(&needle) {
+            Ok(())
+        } else {
+            Err(format!(
+                "expected the page's rejection to say {needle:?}, got:\n{html}"
+            ))
+        };
+    }
+    Err("no rejection response recorded".to_string())
 }
 
 /// [`then_rejection_names`]'s counterpart for a field that was present but
@@ -439,6 +457,24 @@ pub async fn then_capture_still_waiting(world: &World) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Folded in from the PR #31 review: this used to accept anything in
+    /// `400..500`, so a malformed-JSON 400 (an axum extractor failure, never
+    /// reaching the domain validation) would satisfy a scenario written to
+    /// prove a 422 validation rejection.
+    #[test]
+    fn then_triage_is_rejected_errors_on_a_400_that_is_not_the_validation_status() {
+        let mut world = World::new();
+        world.last_status = Some(400);
+        assert!(then_triage_is_rejected(&mut world).is_err());
+    }
+
+    #[test]
+    fn then_triage_is_rejected_passes_on_the_validation_status() {
+        let mut world = World::new();
+        world.last_status = Some(422);
+        assert_eq!(then_triage_is_rejected(&mut world), Ok(()));
+    }
 
     #[tokio::test]
     async fn given_capture_waiting_records_the_capture_id() {

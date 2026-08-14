@@ -67,6 +67,34 @@ run_invalid_period() {
 run_invalid_period "fortnight"
 run_invalid_period "Week"
 
+# --- Procedure: non-positive target_count ---
+run_invalid_target_count() {
+  local bad_target_count="$1"
+  local name="invalid-target-count-$bad_target_count"
+  setup_scenario "$name" || return
+  local body
+  body="$(printf '{"kind":"quota","target_count":%s,"target_minutes_each":45,"period":"week"}' "$bad_target_count")"
+  qa_triage "$CAPTURE_ID" "$body"
+  qa_assert_rejected_naming "$name" invalid_field target_count
+  qa_stop_server
+}
+run_invalid_target_count "0"
+run_invalid_target_count "-1"
+
+# --- Procedure: non-positive target_minutes_each ---
+run_invalid_target_minutes_each() {
+  local bad_target_minutes_each="$1"
+  local name="invalid-target-minutes-each-$bad_target_minutes_each"
+  setup_scenario "$name" || return
+  local body
+  body="$(printf '{"kind":"quota","target_count":3,"target_minutes_each":%s,"period":"week"}' "$bad_target_minutes_each")"
+  qa_triage "$CAPTURE_ID" "$body"
+  qa_assert_rejected_naming "$name" invalid_field target_minutes_each
+  qa_stop_server
+}
+run_invalid_target_minutes_each "0"
+run_invalid_target_minutes_each "-5"
+
 if [[ "$FAILURES" -ne 0 ]]; then
   exit 1
 fi

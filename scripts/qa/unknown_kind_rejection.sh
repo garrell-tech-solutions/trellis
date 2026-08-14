@@ -50,19 +50,31 @@ if setup_scenario "$name"; then
     FAILURES=1
   fi
   # An absent kind is reported as unknown_kind: null, not silently treated
-  # as pool or omitted from the body -- check the key is present and null,
-  # not just that qa_json_field (string-only) comes back empty.
-  has_null_unknown_kind="$(python3 -c '
-import json, sys
-try:
-    body = json.loads(sys.argv[1])
-except ValueError:
-    print("false")
-    sys.exit()
-print("true" if ("unknown_kind" in body and body["unknown_kind"] is None) else "false")
-' "$BODY")"
-  if [[ "$has_null_unknown_kind" != "true" ]]; then
-    echo "FAIL: [$name] expected the rejection body to report unknown_kind: null, got: $BODY" >&2
+  # as pool or omitted from the body -- qa_json_raw_field (unlike the
+  # string-only qa_json_field) can tell "null" from "key absent".
+  raw="$(qa_json_raw_field "$BODY" unknown_kind)"
+  if [[ "$raw" != "null" ]]; then
+    echo "FAIL: [$name] expected the rejection body to report unknown_kind: null, got unknown_kind: ${raw:-<absent>} (body: $BODY)" >&2
+    FAILURES=1
+  fi
+  qa_assert_durable_state_unchanged "$name"
+fi
+qa_stop_server
+
+# --- Procedure: kind submitted as the wrong JSON type ---
+name="wrong-json-type"
+if setup_scenario "$name"; then
+  qa_triage "$CAPTURE_ID" '{"kind": 7}'
+
+  if [[ "$STATUS" -lt 400 || "$STATUS" -ge 500 ]]; then
+    echo "FAIL: [$name] expected a client error, got status $STATUS" >&2
+    FAILURES=1
+  fi
+  # The rejection must echo back the submitted number 7, not null -- a
+  # wrong-typed kind is still something the client can see reflected.
+  raw="$(qa_json_raw_field "$BODY" unknown_kind)"
+  if [[ "$raw" != "7" ]]; then
+    echo "FAIL: [$name] expected the rejection body to report unknown_kind: 7, got unknown_kind: ${raw:-<absent>} (body: $BODY)" >&2
     FAILURES=1
   fi
   qa_assert_durable_state_unchanged "$name"

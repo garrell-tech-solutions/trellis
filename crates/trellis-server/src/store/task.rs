@@ -32,6 +32,26 @@ pub async fn insert(
     Ok(())
 }
 
+/// A row of [`list_all`]: a task, alongside the text of the capture it was
+/// triaged from — the task list's own contents have no text of their own to
+/// show, so the join is the store's business, not the page's.
+#[derive(Debug, Clone, PartialEq, Eq, sqlx::FromRow)]
+pub struct TaskWithCaptureText {
+    pub kind: String,
+    pub raw_text: String,
+}
+
+/// Every task, newest first.
+pub async fn list_all(pool: &SqlitePool) -> Result<Vec<TaskWithCaptureText>, sqlx::Error> {
+    sqlx::query_as(
+        "SELECT tasks.kind, captures.raw_text FROM tasks \
+         JOIN captures ON captures.id = tasks.capture_id \
+         ORDER BY tasks.id DESC",
+    )
+    .fetch_all(pool)
+    .await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -161,5 +181,57 @@ mod tests {
             .unwrap();
 
         assert!(insert(&pool, 1, &TaskKind::Pool, 0).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn list_all_is_empty_against_a_fresh_database() {
+        let (_dir, pool) = test_pool().await;
+
+        assert_eq!(list_all(&pool).await.unwrap(), Vec::new());
+    }
+
+    #[tokio::test]
+    async fn list_all_reports_each_tasks_kind_and_the_text_of_the_capture_it_came_from() {
+        let (_dir, pool) = test_pool().await;
+        let capture_id = insert_capture(&pool).await;
+
+        insert(&pool, capture_id, &TaskKind::Pool, 7).await.unwrap();
+
+        assert_eq!(
+            list_all(&pool).await.unwrap(),
+            vec![TaskWithCaptureText {
+                kind: "pool".to_string(),
+                raw_text: "buy milk".to_string(),
+            }]
+        );
+    }
+
+    #[tokio::test]
+    async fn list_all_lists_tasks_newest_first() {
+        let (_dir, pool) = test_pool().await;
+        let first_capture = insert_capture(&pool).await;
+        let second_capture = sqlx::query_scalar(
+            "INSERT INTO captures (raw_text, source, created_at_ms) \
+             VALUES ('call the dentist', 'web', 0) RETURNING id",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+
+        insert(&pool, first_capture, &TaskKind::Pool, 1)
+            .await
+            .unwrap();
+        insert(&pool, second_capture, &TaskKind::Pool, 2)
+            .await
+            .unwrap();
+
+        let tasks = list_all(&pool).await.unwrap();
+        assert_eq!(
+            tasks
+                .iter()
+                .map(|t| t.raw_text.as_str())
+                .collect::<Vec<_>>(),
+            vec!["call the dentist", "buy milk"]
+        );
     }
 }

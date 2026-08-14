@@ -154,8 +154,15 @@ pub enum TriageRejection {
     /// A field was present but its value is outside the field's domain.
     InvalidField(Field),
     /// `kind` was absent, or named something that is not one of the three.
-    /// Carries what was submitted, so the rejection can say so.
-    UnknownKind(Option<String>),
+    ///
+    /// Carries nothing. It once carried the submitted `kind`, but no adapter
+    /// could use it: the delivery module already holds what arrived, in the
+    /// transport's own types, and that is strictly the better copy — a JSON
+    /// `{"kind": 7}` reaches the core as `None`, because reading it as a
+    /// string is what turned it into one. Reporting what was submitted is
+    /// the adapter's job precisely because the adapter is the only place it
+    /// still exists.
+    UnknownKind,
 }
 
 /// T-three-task-kinds: task kind is a three-variant sum type. Each variant
@@ -212,6 +219,16 @@ fn require_i64(field: Field, value: Option<i64>) -> Result<i64, TriageRejection>
     value.ok_or(TriageRejection::MissingField(field))
 }
 
+/// A quota target of zero or fewer sessions/minutes defeats the reckoning's
+/// own math (`count(done)/target_count`) before a task can ever be created.
+fn require_positive(field: Field, value: i64) -> Result<i64, TriageRejection> {
+    if value > 0 {
+        Ok(value)
+    } else {
+        Err(TriageRejection::InvalidField(field))
+    }
+}
+
 impl TaskKind {
     /// Decides which kind of task, if any, a set of triage fields describes.
     pub fn from_fields(fields: &TriageFields) -> Result<Self, TriageRejection> {
@@ -219,7 +236,7 @@ impl TaskKind {
             Some(POOL) => Ok(Self::Pool),
             Some(COMMITTED) => Self::committed_from(fields),
             Some(QUOTA) => Self::quota_from(fields),
-            _ => Err(TriageRejection::UnknownKind(fields.kind.clone())),
+            _ => Err(TriageRejection::UnknownKind),
         }
     }
 
@@ -249,6 +266,9 @@ impl TaskKind {
         let target_minutes_each =
             require_i64(Field::TargetMinutesEach, fields.target_minutes_each)?;
         let period = require(Field::Period, &fields.period)?;
+
+        let target_count = require_positive(Field::TargetCount, target_count)?;
+        let target_minutes_each = require_positive(Field::TargetMinutesEach, target_minutes_each)?;
         let period = Period::parse(&period).ok_or(TriageRejection::InvalidField(Field::Period))?;
 
         Ok(Self::Quota {
@@ -620,13 +640,53 @@ mod tests {
         );
     }
 
+    #[test]
+    fn quota_fields_with_a_zero_target_count_are_rejected_naming_it_invalid() {
+        let mut fields = quota_fields();
+        fields.target_count = Some(0);
+        assert_eq!(
+            TaskKind::from_fields(&fields),
+            Err(TriageRejection::InvalidField(Field::TargetCount))
+        );
+    }
+
+    #[test]
+    fn quota_fields_with_a_negative_target_count_are_rejected_naming_it_invalid() {
+        let mut fields = quota_fields();
+        fields.target_count = Some(-1);
+        assert_eq!(
+            TaskKind::from_fields(&fields),
+            Err(TriageRejection::InvalidField(Field::TargetCount))
+        );
+    }
+
+    #[test]
+    fn quota_fields_with_a_zero_target_minutes_each_are_rejected_naming_it_invalid() {
+        let mut fields = quota_fields();
+        fields.target_minutes_each = Some(0);
+        assert_eq!(
+            TaskKind::from_fields(&fields),
+            Err(TriageRejection::InvalidField(Field::TargetMinutesEach))
+        );
+    }
+
+    #[test]
+    fn quota_fields_with_a_negative_target_minutes_each_are_rejected_naming_it_invalid() {
+        let mut fields = quota_fields();
+        fields.target_minutes_each = Some(-5);
+        assert_eq!(
+            TaskKind::from_fields(&fields),
+            Err(TriageRejection::InvalidField(Field::TargetMinutesEach))
+        );
+    }
+
     // --- unknown kind --------------------------------------------------------
 
     #[test]
     fn an_unrecognised_kind_is_rejected_and_reports_what_was_submitted() {
         assert_eq!(
             TaskKind::from_fields(&kind_named("someday")),
-            Err(TriageRejection::UnknownKind(Some("someday".to_string())))
+            Err(TriageRejection::UnknownKind)
         );
     }
 
@@ -634,7 +694,7 @@ mod tests {
     fn an_absent_kind_is_rejected_with_nothing_to_report() {
         assert_eq!(
             TaskKind::from_fields(&TriageFields::default()),
-            Err(TriageRejection::UnknownKind(None))
+            Err(TriageRejection::UnknownKind)
         );
     }
 }

@@ -1,9 +1,9 @@
-//! `GET /`: the untriaged capture queue (D-visible-slices' first slice,
-//! issue #30).
+//! `GET /`: the untriaged capture queue and task list (D-visible-slices'
+//! first two slices, issues #30 and #33).
 
-use crate::http::view::CaptureRow;
+use crate::http::lists::build_lists;
+use crate::http::view::{CaptureRow, TaskRow};
 use crate::http::{render_template, write_failed};
-use crate::store;
 use askama::Template;
 use axum::extract::State;
 use axum::http::StatusCode;
@@ -14,18 +14,15 @@ use sqlx::SqlitePool;
 #[template(path = "inbox.html")]
 struct InboxTemplate {
     captures: Vec<CaptureRow>,
+    tasks: Vec<TaskRow>,
 }
 
 pub async fn show_inbox(State(pool): State<SqlitePool>) -> Result<Response, StatusCode> {
-    let captures = store::capture::list_untriaged(&pool)
-        .await
-        .map_err(write_failed)?
-        .into_iter()
-        .map(|capture| CaptureRow {
-            text: capture.raw_text,
-        })
-        .collect();
-    Ok(render_template(StatusCode::OK, &InboxTemplate { captures }))
+    let (captures, tasks) = build_lists(&pool, None).await.map_err(write_failed)?;
+    Ok(render_template(
+        StatusCode::OK,
+        &InboxTemplate { captures, tasks },
+    ))
 }
 
 #[cfg(test)]

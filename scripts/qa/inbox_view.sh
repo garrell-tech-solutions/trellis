@@ -40,19 +40,24 @@ qa_index_of() {
   python3 -c 'import sys; print(sys.argv[1].find(sys.argv[2]))' "$1" "$2"
 }
 
+# The page renders the inbox and the task list together (triage-from-page),
+# so assertions below scope to the inbox's own <ul id="captures"> section --
+# a capture's text legitimately appears in the task list too once triaged.
+qa_inbox_section() { qa_html_section "$1" captures; }
+
 # --- Procedure: list order ---
 name="list-order"
 if qa_start_server "$BIN" "$TMP_DIR/$name.sqlite" "$TMP_DIR/$name.log"; then
   qa_submit_capture "call the dentist" >/dev/null
   qa_submit_capture "buy milk" >/dev/null
-  page="$(qa_get_inbox)"
-  if [[ "$page" != *"call the dentist"* || "$page" != *"buy milk"* ]]; then
-    echo "FAIL: [$name] expected both captures listed, got:
-$page" >&2
+  inbox="$(qa_inbox_section "$(qa_get_inbox)")"
+  if [[ "$inbox" != *"call the dentist"* || "$inbox" != *"buy milk"* ]]; then
+    echo "FAIL: [$name] expected both captures listed in the inbox, got:
+$inbox" >&2
     FAILURES=1
   else
-    newer_pos="$(qa_index_of "$page" "buy milk")"
-    older_pos="$(qa_index_of "$page" "call the dentist")"
+    newer_pos="$(qa_index_of "$inbox" "buy milk")"
+    older_pos="$(qa_index_of "$inbox" "call the dentist")"
     if (( newer_pos >= older_pos )); then
       echo "FAIL: [$name] expected \"buy milk\" (newest) before \"call the dentist\" (oldest), found at positions $newer_pos and $older_pos" >&2
       FAILURES=1
@@ -104,8 +109,9 @@ qa_stop_server
 name="empty-state"
 if qa_start_server "$BIN" "$TMP_DIR/$name.sqlite" "$TMP_DIR/$name.log"; then
   page="$(qa_get_inbox)"
-  if [[ "$page" == *"<li>"* ]]; then
-    echo "FAIL: [$name] expected no capture rows rendered, found at least one <li>" >&2
+  inbox="$(qa_inbox_section "$page")"
+  if [[ "$inbox" == *"<li"* ]]; then
+    echo "FAIL: [$name] expected no capture rows rendered, found at least one <li> in the inbox" >&2
     FAILURES=1
   fi
   if [[ "$page" != *"Nothing to triage"* ]]; then
@@ -127,9 +133,9 @@ if qa_start_server "$BIN" "$TMP_DIR/$name.sqlite" "$TMP_DIR/$name.log"; then
     echo "FAIL: [$name] setup triage returned status $STATUS, expected 201" >&2
     FAILURES=1
   fi
-  page="$(qa_get_inbox)"
-  if [[ "$page" == *"call the dentist"* ]]; then
-    echo "FAIL: [$name] a triaged capture still appears in the inbox page" >&2
+  inbox="$(qa_inbox_section "$(qa_get_inbox)")"
+  if [[ "$inbox" == *"call the dentist"* ]]; then
+    echo "FAIL: [$name] a triaged capture still appears in the inbox section" >&2
     FAILURES=1
   fi
   if qa_capture_untriaged "$capture_id"; then
@@ -145,12 +151,12 @@ qa_stop_server
 name="hostile-text"
 if qa_start_server "$BIN" "$TMP_DIR/$name.sqlite" "$TMP_DIR/$name.log"; then
   qa_submit_capture "<script>alert('boom')</script>" >/dev/null
-  page="$(qa_get_inbox)"
-  if [[ "$page" == *"<script>"* ]]; then
+  inbox="$(qa_inbox_section "$(qa_get_inbox)")"
+  if [[ "$inbox" == *"<script>"* ]]; then
     echo "FAIL: [$name] response contains an unescaped <script> tag" >&2
     FAILURES=1
   fi
-  if [[ "$page" != *"boom"* ]]; then
+  if [[ "$inbox" != *"boom"* ]]; then
     echo "FAIL: [$name] response does not contain the word \"boom\" -- content may have been stripped instead of escaped" >&2
     FAILURES=1
   fi

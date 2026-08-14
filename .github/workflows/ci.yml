@@ -124,8 +124,10 @@ jobs:
       # {component,target} add` is idempotent and applies to the active
       # (pinned) toolchain, so it closes that gap either way. Since the pin is
       # an exact version, the runner's preinstalled stable is usually the wrong
-      # version and gets downloaded rather than reused -- roughly a minute,
-      # which is the cost of CI and a developer checkout agreeing.
+      # version and gets downloaded rather than reused. Measured at ~12s on
+      # ubuntu-latest (six components) on the run that introduced this pin --
+      # cheap, and the cost of CI and a developer checkout agreeing. Expect it
+      # to grow the further the pin drifts from the runner image's stable.
       - name: Install the toolchain pinned by rust-toolchain.toml
         run: |
           rustup toolchain install --profile minimal

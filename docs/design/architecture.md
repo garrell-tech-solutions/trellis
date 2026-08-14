@@ -30,7 +30,12 @@ crates/acceptance-tests   APS runtime + step handlers; entrypoints generated fro
 
 The brief specified six crates. Three exist. `scheduler-db` collapsed into
 `trellis-server` — settled as a module boundary rather than a crate split, and
-still awaiting ratification (#24).
+ratified by `T-package-by-business-domain`: the brief's other three
+(`scheduler-web`, `scheduler-bot`, `scheduler-bin`) are role names too, and a
+crate earns existence when a capability needs a real boundary — a purity gate,
+an independent dependency set — not because a layer has a name. That closes
+#24. Renaming the crates that exist is deliberately not part of it:
+`scheduler-core` is named twice in the constitution, which no agent may edit.
 
 ## Two things are called "layers". They are unrelated.
 
@@ -49,26 +54,35 @@ layer.
 
 ### The module boundary — built (`T-module-boundary`, `T-templates-take-view-models`)
 
-Which code may name what. Dependencies point inward.
+Which code may name what. Dependencies point inward, and the tree names
+business domains rather than technical roles (`T-package-by-business-domain`,
+#44). What went away is `http/` and `store/` as *top-level directories*; the
+dependency rule itself is unchanged.
 
 ```
-scheduler-core          the rules. names neither adapter.
-trellis-server::http    requests -> core inputs; core types -> view models
-trellis-server::store   core types -> rows
+crates/trellis-server/src/
+  capture/    http.rs  store.rs
+  triage/     http.rs  store.rs
+  inbox/      http.rs  lists.rs  store.rs  view.rs
+  platform/   app.rs  assets.rs  boundary.rs  clock.rs  db.rs  response.rs
 ```
 
-`store/mod.rs` carries a test asserting no store module names `axum` or
-`StatusCode`. It is a substring grep over source text — it catches the naive
-import and is defeated by a nested submodule or a type alias. Treat it as a
-lint, not a proof.
-
-Templates render `http::view` models, never `store` row types.
-
-**Superseded in shape, not in substance** (`T-package-by-business-domain`, #44).
-The dependency rule above stands. The `http/` + `store/` *directories* do not —
-the tree is being reorganised by business domain, so a capability's delivery,
-persistence and view code sit together under its own name. Until #44 merges,
-what is described above is what is built.
+Three capabilities and one bucket named so a reader can tell it is not one.
+`scheduler-core` holds the rules and names neither adapter; a domain's `http`
+turns requests into core inputs and core types into view models; its `store`
+turns core types into rows and is the only production SQL; its `view` is what
+a template renders, never a `store` row type. `capture` and `triage` reach
+into `inbox::view` and `inbox::lists` because the inbox is the surface they
+act on. `platform/boundary.rs` checks all of it by **walking** `src/` rather
+than naming a directory — the previous check globbed `src/store/*.rs` and
+would have stopped covering anything the moment that directory dissolved,
+which is the failure `T-module-boundary` named against itself. It asserts that
+no persistence module names `axum` or `StatusCode` (the old rule); that
+nothing outside a `store.rs` or `platform/db.rs` writes production SQL (the
+half the old check never had); that no top-level directory carries a
+technical-role name; and a floor on each, so an empty walk fails rather than
+passes. It is still a substring scan over source text — defeated by a type
+alias or a macro, so treat it as a lint, not a proof.
 
 ## Three things are called "domain". They are unrelated.
 
@@ -297,4 +311,4 @@ Everything above marked **GAP**, in the order it blocks work:
 | Per-life-area capacity vs `allowed_windows` | M2 | #6 |
 | `Block::missed` unreachable under silence-means-done | M6 | #4 |
 | U2 / U3 / U4 — hard vs soft, backward-pass input, window crossing | M3 | #7 |
-| Crate layout ratification | nothing; cost grows | #24 |
+| ~~Crate layout ratification~~ | ~~nothing; cost grows~~ | **closed** — `T-package-by-business-domain`, #44 |

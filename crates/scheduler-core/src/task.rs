@@ -243,10 +243,24 @@ impl TaskKind {
     /// Required fields are checked before values, and in a fixed order, so a
     /// submission with several problems names the same one every time.
     fn committed_from(fields: &TriageFields) -> Result<Self, TriageRejection> {
+        let (deadline, deadline_type, priority) = Self::require_committed_fields(fields)?;
+        Self::parse_committed_fields(deadline, deadline_type, priority)
+    }
+
+    fn require_committed_fields(
+        fields: &TriageFields,
+    ) -> Result<(String, String, String), TriageRejection> {
         let deadline = require(Field::Deadline, &fields.deadline)?;
         let deadline_type = require(Field::DeadlineType, &fields.deadline_type)?;
         let priority = require(Field::Priority, &fields.priority)?;
+        Ok((deadline, deadline_type, priority))
+    }
 
+    fn parse_committed_fields(
+        deadline: String,
+        deadline_type: String,
+        priority: String,
+    ) -> Result<Self, TriageRejection> {
         let deadline =
             parse_deadline_ms(&deadline).ok_or(TriageRejection::InvalidField(Field::Deadline))?;
         let deadline_type = DeadlineType::parse(&deadline_type)
@@ -262,11 +276,23 @@ impl TaskKind {
     }
 
     fn quota_from(fields: &TriageFields) -> Result<Self, TriageRejection> {
+        let (target_count, target_minutes_each, period) = Self::require_quota_fields(fields)?;
+        Self::parse_quota_fields(target_count, target_minutes_each, period)
+    }
+
+    fn require_quota_fields(fields: &TriageFields) -> Result<(i64, i64, String), TriageRejection> {
         let target_count = require_i64(Field::TargetCount, fields.target_count)?;
         let target_minutes_each =
             require_i64(Field::TargetMinutesEach, fields.target_minutes_each)?;
         let period = require(Field::Period, &fields.period)?;
+        Ok((target_count, target_minutes_each, period))
+    }
 
+    fn parse_quota_fields(
+        target_count: i64,
+        target_minutes_each: i64,
+        period: String,
+    ) -> Result<Self, TriageRejection> {
         let target_count = require_positive(Field::TargetCount, target_count)?;
         let target_minutes_each = require_positive(Field::TargetMinutesEach, target_minutes_each)?;
         let period = Period::parse(&period).ok_or(TriageRejection::InvalidField(Field::Period))?;

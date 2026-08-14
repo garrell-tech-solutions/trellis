@@ -64,16 +64,32 @@ crates/trellis-server/src/
   capture/    http.rs  store.rs
   triage/     http.rs  store.rs
   inbox/      http.rs  lists.rs  store.rs  view.rs
-  platform/   app.rs  assets.rs  boundary.rs  clock.rs  db.rs  response.rs
+  stats/      http.rs  store.rs
+  platform/   app.rs  assets.rs  boundary.rs  clock.rs  db.rs  request.rs
+              response.rs  test_support.rs
 ```
 
-Three capabilities and one bucket named so a reader can tell it is not one.
+Four capabilities and one bucket named so a reader can tell it is not one.
 `scheduler-core` holds the rules and names neither adapter; a domain's `http`
 turns requests into core inputs and core types into view models; its `store`
 turns core types into rows and is the only production SQL; its `view` is what
 a template renders, never a `store` row type. `capture` and `triage` reach
 into `inbox::view` and `inbox::lists` because the inbox is the surface they
-act on. `platform/boundary.rs` checks all of it by **walking** `src/` rather
+act on.
+
+A domain has a `view` only when its page shape is its own: `inbox`'s rows are
+assembled from two queries and carry a slot for an in-flight rejection, while
+`stats` renders `scheduler_core::ratio`'s answer directly, and a struct
+copying that field for field would be a view model in name only.
+
+**The rule that decides what goes in the core**, and the one this tree is
+easiest to get wrong: a rule that survives changing HTTP for something else
+belongs in `scheduler-core`. The window's length, the sample floor, the
+fifty-percent line and the share arithmetic are all that, so they are
+`scheduler_core::ratio`, not `stats/`. The core is the *enforced* pure
+boundary — `cargo tree -p scheduler-core` is a gate with an acceptance test
+behind it — while a pure-by-convention module sitting beside the adapters is
+one import away from stopping being pure. `platform/boundary.rs` checks all of it by **walking** `src/` rather
 than naming a directory — the previous check globbed `src/store/*.rs` and
 would have stopped covering anything the moment that directory dissolved,
 which is the failure `T-module-boundary` named against itself. It asserts that
@@ -99,6 +115,15 @@ were discussing different subjects.
 Bare "domain" is always the life area. If you mean packaging, write both words.
 
 ---
+
+### The clock — built
+
+`Clock` is a value the composition root hands to `build_app`, not a global a
+handler reaches for. It carries an offset from the real wall clock, which is
+what makes `trellis serve --now <RFC3339>` an offset rather than a freeze: the
+server starts believing it is that instant and time advances normally from
+there. One clock per server, so two servers in one process — or two tests —
+disagree without disturbing each other.
 
 ## Domain model — built
 
@@ -282,6 +307,8 @@ POST /captures                raw text in. JSON -> 201 JSON; form-encoded -> 201
                               HTML fragment. One route, content-negotiated.
                               50ms budget, asserted by capture_endpoint.feature.
 POST /captures/{id}/triage    capture -> task
+GET  /stats                   the committed share of the last fourteen days
+                              (R2, #45). Rules in `scheduler_core::ratio`.
 ```
 
 Rejections are `422`. An unrecognised `kind` reports

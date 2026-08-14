@@ -35,7 +35,8 @@ mod tests {
     use tower::ServiceExt;
 
     async fn get_inbox(pool: &SqlitePool) -> String {
-        let app = crate::platform::app::build_app(pool.clone());
+        let app =
+            crate::platform::app::build_app(pool.clone(), crate::platform::clock::Clock::system());
         let response = app
             .oneshot(Request::builder().uri("/").body(Body::empty()).unwrap())
             .await

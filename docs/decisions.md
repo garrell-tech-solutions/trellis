@@ -158,6 +158,9 @@ O4 → #40 · O5 → #41 · O6 → #36. Issue #1 is titled `OQ2`; same question.
 | T-classifier-covers-domain | **Domain and title categorization folds into the existing classifier trait (M1 keyword impl, M9 LLM impl) — not a second pipeline.** The trait's output grows `domain` and `title` alongside `kind`/`deadline`/`priority`, carrying per-field confidence the same way. The keyword implementation guesses `domain` by keyword match and passes `title` through unchanged; M9's LLM implementation improves both behind the same trait. **Classification is invoked from a background worker after capture, not inside `POST /captures` and not synchronously at triage.** | Two asks arrived separately — classify a capture's task *kind*, and tag it with a *domain* and a cleaned-up *title* — and they are the same mechanism: classify raw text, cheap rules first, LLM later, fall back safely, measure against labelled data. M9 (#19) already commits to exactly that shape, so a standalone categorization worker would duplicate the trait, the fallback and the evaluation harness for a second field set. Growing the trait's output at M1 rather than at M9 is the same argument T-three-task-kinds made for the three-variant `kind`: retrofitting an output shape after M9 depends on it is the expensive order. **On invocation timing**, the apparent conflict between "a trait implies a synchronous call" and "a background poller" dissolves — a trait describes *swappability*, not *when it is called*, and a worker can call a synchronous `classify()` perfectly well. What is genuinely settled is *where*: `POST /captures` has a 50ms budget asserted by `capture_endpoint.feature`, which no LLM round trip fits inside; and blocking triage on a network call puts the latency in front of the user at the one moment they are waiting. So the worker fills the fields between capture and triage. Provider is **OpenRouter** behind a hand-rolled `reqwest`+`serde` client, model pinned by `OPENROUTER_MODEL` with a cheap default — swappable without a code change, consistent with T-handrolled-gcal-client's precedent against generated SDKs. |
 | T-templates-take-view-models | **Templates render view models, never store row types.** `http::view` holds what a page shows; `store` holds what a query returned. Handlers map between them. | The inbox slice had `inbox.html` and `capture_row.html` rendering `store::capture::UntriagedCapture` directly — a `sqlx::FromRow` struct, documented as "a capture as the inbox view needs it", which is persistence described in terms of a page. The tell was in `create_capture`: to return the new row's markup it **hand-built an `UntriagedCapture`** for a capture it had just written and never read back, because the template demanded that type. A struct being fabricated to satisfy a renderer is no longer a row. Left alone, every later view inherits the pattern and the templates end up bound to the schema — and the coupling bites in both directions, since `store` would grow a view-shaped type per page. The two structs carry the same single field today and the mapping is one line; that is precisely why this is the cheap moment to draw the line, before the triage screen needs a row id to aim an action at and the calendar needs formatted times that are not columns. This applies T-module-boundary's module boundary to the delivery side — it is not a new boundary, and "layer" stays reserved for the Plan/Constraints domain split (T-fact-plan-line). |
 | T-toolchain-pinned | **`rust-toolchain.toml` pins an exact rustc version, not a channel**, and declares the `clippy`/`rustfmt` components and the `x86_64-unknown-linux-musl` target alongside it. Bumping the version is a deliberate act in its own commit. CI asserts the active `rustc` matches the pin. | The file said `channel = "stable"`, which pins nothing — it resolves to whatever stable each machine happens to hold. Two places in the repo nevertheless described it as a pin and reasoned from that: `README.md`'s prerequisites, and the CI comment block whose step is named "Install the toolchain pinned by rust-toolchain.toml". The gap was real and already open — the owner's checkout was on 1.91.1 while `ubuntu-latest` resolved `stable` to 1.97.1, six releases apart. What that costs is not the version lag but the *asymmetry*: `cargo clippy` in CI runs six releases of new lints against code that is clean locally, so a branch that changed nothing goes red on a schedule nobody controls, and the failure looks arbitrary at the moment it appears. The components and target moved into the same file because they are the same class of fact — CI was adding them by hand (`rustup component add`, `rustup target add`), which is a fresh clone's build breaking in a way the workflow already knew how to prevent. Rejected alternative: keep the floating channel and correct the two descriptions to say "selects stable" — honest, and it keeps CI permanently ahead of every developer machine by an unbounded margin, which is the property that produces the arbitrary red build. Rejected also: pin in CI only, via a toolchain action — that makes the workflow the source of truth for something every local `cargo` invocation also needs, and `rust-toolchain.toml` exists precisely so both read the same line. Cost, accepted: the runner's preinstalled stable is now usually the wrong version and gets downloaded (~1 min/run), and adopting a new toolchain becomes a chore someone has to do rather than something that happens. That chore is the point — it lands the new lints on a commit whose subject is the bump. |
+| T-package-by-business-domain | **The code is organised by business domain — the capabilities Trellis provides — not by technical role.** A reader learns what Trellis *does* from `ls`, not what it is built with. `T-module-boundary`'s dependency rule survives unchanged; its `http/` + `store/` directory shape does not. **Vocabulary, fixed here: bare "domain" always means a life area** (`T-life-areas-are-data`); **"business domain", always both words, means this packaging axis.** | The owner's standing architectural preference — Uncle Bob's screaming architecture — which had never been written down anywhere, so `T-module-boundary` was settled without it and landed the opposite: `ls src/` said *this speaks HTTP and has a database*. Recorded now because an unrecorded preference is one an agent cannot honour, and three agents had already built against its inverse. **The rule reaches crates too.** The brief's six — `scheduler-db`, `scheduler-gcal`, `scheduler-bot`, `scheduler-web`, `scheduler-bin` — are role names (db, web, bot, bin) and are rejected as a plan; a crate earns existence when a capability needs a real boundary (a purity gate, an independent dependency set), not because a layer has a name. That closes #24, whose three options were all layer-shaped and none of which considered capability packaging. **Renaming existing crates is excluded from the first pass**, because `scheduler-core` is named twice in `swarmforge/constitution/articles/stack.prompt` — the mutation-parallelism table and the core purity gate — and no agent may edit the constitution without explicit owner direction. So the decision covers crates and the execution cannot; that split is deliberate, not an oversight. **The one real trap, and it is this decision's own shape turned on itself:** `store/mod.rs` carries two tests that glob `src/store/*.rs`, and when that directory ceases to exist they do not fail — they stop covering anything. `T-module-boundary` wrote its own warning — *"a layering rule nothing checks is a comment"* — and this is how that rule dies quietly. A replacement gate ships inside the restructure (#44), not after it. |
+| T-life-areas-are-data | **Life areas — what this log elsewhere calls domains: Work, Fitness, Learning, Family, Home — are user-managed rows, editable from the running app.** Not a Rust enum, not a config file. Adding one is never a development task. A fresh database seeds five; the set belongs to the user from then on. **A life area is well-formed only once it has a guardrail, or is explicitly marked pool-only** — enforced at M2, when guardrails exist. | Resolves #36, which framed this as closed-enum versus extensible-plain-data and read the enum as obligatory by analogy with `T-three-task-kinds`, `T-unknown-kind-rejected` and `T-period-closed-set`. **The analogy does not hold, and that is the load-bearing part.** Those are fields the scheduler *branches on* — a `match` with a different body per variant, which is why `T-three-task-kinds` warned that `if committed {} else {}` silently mistreats a third variant. A life area is a **lookup key, not a discriminant**: there is no per-life-area code path, since the scheduler looks up its guardrail, counts its capacity and groups the reckoning by it identically for every one. A set you `match` on must be closed; a set you index by need not be. **And the enum was never protecting against the real hazard.** The stated risk was a life area no guardrail governs and no capacity number counts (`D-guardrails-never-yield`: a life area outside the walls is covered by no wall) — but a non-exhaustive `match` reports missing arms, never a missing wall. The guardrail-completeness rule above is the check that actually catches it, and it needs no compiler. **`T-complexity-8` is unaffected:** its threshold of 8 is derived from *"the largest enums (`Domain`, `BlockState`) have 5 variants"*, and `BlockState` still has exactly five (`T-fact-plan-line`), so the derivation stands on the other enum alone. #36's claim that the justification stops describing the codebase does not survive contact with it. **This is not `R-plugin-surface`**, which refuses a general-purpose extensibility surface; this is one entity of the product's own model being editable by its single user (`D-single-user`), the same class of thing as the guardrails have always been. Rejected alternative: a config file read at startup — it satisfies "no rebuild" and still fails this project's own bar, that *a schema element with no observable behaviour has nothing to specify against*; the management surface is precisely what makes this specifiable at M1 rather than deferred. Rejected also: two vocabularies, an extensible capture tag plus a closed scheduler `Domain`, as the capture-categorization proposal assumed — every consumer of a life area (guardrails, capacity, the reckoning, menu diversity at #41) is a scheduler concern, so the mapping between the two lists would become the real list, kept in a third place nobody names. The seed keeps every life area cited in a settled decision's reasoning — Fitness (`T-three-task-kinds`), Learning (`D-kill-means-archive`), Family (`D-single-user`), Work (`D-pool-is-default`) — and adds Home for the errand and admin traffic (`buy milk`, `renew passport`) that neither candidate set housed. It is a seed, not a ratification: it is editable the moment the app runs, which is exactly why getting it wrong is now cheap. |
+| T-forms-swap-one-fragment | **A page's forms live inline in the row they act on; a page region rendered by more than one handler is one shared fragment with one id; and a rejection re-renders that same fragment carrying the error, returned as `422`.** htmx is configured to swap on 422 as well as 2xx. | Settled inside the `triage-from-page` pipeline run and recorded here afterwards, because the brief asked for each as a precedent — *"whichever you pick becomes the pattern for every form in this product"*, *"it is the first error-display pattern in the product"* — and the answers ended up living only in code and a commit message. The three are one design, not three preferences: forms inline in the row is what makes the row the unit of action; one shared `#lists` fragment is what lets a triage submitted from the inbox update both the inbox and the task list in a single swap; and re-rendering that same fragment on rejection is what keeps the error attached to the row that caused it, rather than inventing a second error surface. `http::lists` exists because the fragment gained a second renderer — the same "when a second caller appears, the shared thing gets its own home" move as `view`, `payloads` and `app_client`. **The cost, named because it is global and easy to miss:** the 422 swap is configured once for the page (`htmx.config.responseHandling.unshift` in `inbox.html`), so 422 is a swappable status for *every* htmx request on it, present and future — including the quick-add box, which never asked for it. Any endpoint that returns 422 with a body that is not the re-rendered fragment will have that body swapped into the DOM. Accepted deliberately, in exchange for one error convention instead of per-form handling; the guard is that **422 means exactly "validation rejection, body is the re-rendered fragment" everywhere in this product**, and an endpoint that cannot honour that must not use 422. |
 
 **Renumbered on merge, then superseded.** This branch allocated numeric IDs that `trunk` had already given to other decisions, and its source comments were left citing the stale numbers. Both problems are gone: decisions are keyed by slug now, and the citations were migrated with a CI gate behind them. Kept as the record of why.
 
@@ -646,3 +649,92 @@ The gate added with it follows `T-migrations-append-only` and the decision-slug
 checker: CI compares `rustc --version` against the channel in the file and
 fails if they differ. The pin is now the kind of claim that cannot quietly stop
 being true.
+
+### 2026-08-14 — Two decisions the repo had been reasoning without
+
+Both recorded as `T-package-by-business-domain` and `T-life-areas-are-data`.
+Neither is new information about the product; both are things the owner already
+believed and the repo had never been told.
+
+**The word collision is the story of the session.** The PM opened by asking the
+owner to settle #36 — which five *domains*, meaning life areas: Work, Fitness,
+Learning, Family. The owner answered about *packaging the codebase by domain*,
+meaning business capabilities. One word, two meanings, and a full round trip
+spent before either party noticed they were discussing different subjects.
+
+That is the third time this project has paid for an overloaded word in a week.
+`T-fact-plan-line` had to referee "layer", reserving it for the Plan/Constraints
+split and demoting `T-module-boundary`'s code split to "the module boundary",
+explicitly because *"a `Block` row is otherwise Plan-layer and store-layer at
+once and the word stops carrying information."* The same fix is applied one word
+over: **bare "domain" is a life area; "business domain", both words, is the
+packaging axis.** Written into `docs/design/architecture.md` next to the "layer"
+entry, since that file exists to hold exactly this.
+
+**On the packaging rule.** Worth being honest that this reopens a settled
+decision. `T-module-boundary` was argued well and its dependency rule was right;
+what it lacked was any knowledge that the owner wanted the tree to scream its
+intent, because nobody had written that down. The rule survives, the directory
+shape does not, and #24 closes with a fourth option its own list never
+contained. The trap is recorded in the decision itself: the boundary tests glob
+a directory that is about to stop existing, and they will pass while covering
+nothing.
+
+**On life areas, a correction to the argument this log made.** #36 argued the
+enum was the safe answer by analogy with the closed sets — and the PM repeated
+that argument twice before the owner's constraint ("I don't want to compile and
+run the app just to create a new life area") exposed it as a bad analogy. The
+closed sets are all fields the scheduler *branches* on. A life area is indexed,
+never matched. The distinction was available the whole time and nobody drew it,
+which is how a good precedent gets over-applied: `T-three-task-kinds`,
+`T-unknown-kind-rejected` and `T-period-closed-set` were each right, and their
+shared conclusion was mistaken for a rule about sets in general.
+
+Two claims made against the enum's removal turned out to be false and are
+retracted here rather than left standing in #36. `T-complexity-8` does **not**
+lose its derivation — `BlockState` still has five variants and carries it alone.
+And the enum was never the thing guarding against a life area with no guardrail;
+a non-exhaustive `match` cannot express that. The guardrail-completeness rule in
+`T-life-areas-are-data` is the check that was actually wanted, and it wants no
+compiler.
+
+Making the list editable from the running app — rather than from a config file,
+which was the PM's recommendation — is also what makes it *specifiable at M1*.
+A config file would have left the entity with no observable behaviour, and this
+log has already ruled that such a thing has nothing to specify against. The
+management surface is the behaviour. Tracked as #47; #36 closes against it.
+
+### 2026-08-14 — Three delivery patterns that were settled in code and nowhere else
+
+Recorded as `T-forms-swap-one-fragment`, retroactively, covering decisions the
+`triage-from-page` slice made and did not write down: forms inline in the row,
+one shared fragment per page region, and rejection as a 422 re-rendering that
+same fragment.
+
+The brief had asked for exactly these, by name, and said why they mattered —
+*"whichever you pick becomes the pattern for every form in this product"* and
+*"say what you chose; it is the first error-display pattern in the product."*
+The slice chose well. It answered in a commit message and a template, and the
+decisions log — the file every agent reads at startup, from a worktree — got the
+architect's module-placement note and nothing about the three patterns every
+future page will inherit.
+
+This is the inverse of the failure named on 2026-08-13. That entry described **a
+description that outruns the thing it describes**: prose confidently asserting a
+brief, a set of invariants, a pin, none of which existed. This is the same gap
+from the other side — the thing exists, is correct, is load-bearing, and has no
+description at all. Both produce an agent reasoning from something that is not
+there. The second is easier to miss, because nothing dangles: a reader who opens
+`capture_row.html` sees the pattern and assumes it was decided somewhere.
+
+The specific item worth having written down is the 422 configuration. It is a
+one-line global override of htmx's response handling, it applies to every
+request the page will ever make, and it is invisible from any of the handlers
+that depend on it. That is not a detail a future slice should have to
+rediscover by breaking it.
+
+**Process note for the PM role:** these were caught by comparing what the brief
+asked to be decided against what the log received, after the pull request had
+already merged. Doing that comparison at the pipeline-available notification —
+before the merge, while the slice's authors are still reachable — is cheaper and
+is what the role's own step 5 asks for.

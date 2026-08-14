@@ -64,6 +64,26 @@ lint, not a proof.
 
 Templates render `http::view` models, never `store` row types.
 
+**Superseded in shape, not in substance** (`T-package-by-business-domain`, #44).
+The dependency rule above stands. The `http/` + `store/` *directories* do not —
+the tree is being reorganised by business domain, so a capability's delivery,
+persistence and view code sit together under its own name. Until #44 merges,
+what is described above is what is built.
+
+## Three things are called "domain". They are unrelated.
+
+The same problem as "layer", one word over, and it cost a full round trip
+between the PM and the owner on 2026-08-14 before anyone noticed the two sides
+were discussing different subjects.
+
+| Term | Means | Where |
+|---|---|---|
+| **domain** (bare) | A **life area** — Work, Fitness, Learning, Family, Home. The thing guardrails wall off, capacity counts, and the reckoning groups by. | `T-life-areas-are-data`, `D-single-user`, `D-pool-is-default`, #47 |
+| **business domain** (always both words) | The **code-packaging axis**. A capability the product provides, used to name directories and crates. | `T-package-by-business-domain`, #44 |
+| **domain model** | Ordinary usage: the shapes below. Not a third concept, just the phrase. | this file |
+
+Bare "domain" is always the life area. If you mean packaging, write both words.
+
 ---
 
 ## Domain model — built
@@ -201,23 +221,41 @@ those two contiguous free hours.
 
 ---
 
-## Domains — **GAP** (#36)
+## Life areas — specified (`T-life-areas-are-data`, #47)
 
-The product is organised around five domains. **Which five is contested**, and
-the two answers overlap on two members.
+Settled 2026-08-14, resolving #36. **Life areas are user-managed rows, editable
+from the running app** — not a Rust enum, not a config file. There is no
+canonical list to ratify; there is a seed, and then it is the user's.
 
-| Source | Set |
-|---|---|
-| `docs/decisions.md` | Fitness (`T-three-task-kinds`), Learning (`D-kill-means-archive`), Family (`D-single-user`), Work |
-| Capture-categorization proposal | Work, Health, Home, Learning, Social |
+```
+life area   { name, archived_at }        # shape TBD by #47
+seed        Work · Fitness · Learning · Family · Home
+```
 
-Unsettled alongside it: whether the capture-tagging vocabulary and the
-scheduler's `Domain` are one concept or two. `T-complexity-8` derives the
-complexity threshold of 8 from `Domain` being a **5-variant enum**; the
-proposal makes the capture list extensible plain data. Diverge, and a capture
-can carry a domain that no guardrail governs and no capacity number counts.
+The seed keeps every life area cited in a settled decision's reasoning — Fitness
+(`T-three-task-kinds`), Learning (`D-kill-means-archive`), Family
+(`D-single-user`), Work (`D-pool-is-default`) — and adds Home for errand and
+admin traffic, which neither candidate set housed.
 
-Nothing should be built against a domain list until this is answered.
+**One concept, not two.** The capture-tagging vocabulary and the scheduler's
+life area are the same list. Every consumer of one is a scheduler concern —
+guardrails, capacity, the reckoning, menu diversity (#41) — so two lists would
+make the mapping between them the real list.
+
+**Why not a closed enum**, given `kind`, `period`, `deadline_type` and `priority`
+all are: those are fields the scheduler **branches on**, a `match` with a
+different body per variant. A life area is a **lookup key, not a discriminant** —
+every one is handled identically. A set you `match` on must be closed; a set you
+index by need not be.
+
+**The invariant that replaces the enum:** a life area is well-formed only once
+it has a guardrail, or is explicitly marked pool-only. Enforced at M2, when
+guardrails exist. A non-exhaustive `match` never expressed this — it reports
+missing arms, not a missing wall.
+
+`T-complexity-8`'s threshold of 8 is unaffected: it is derived from *"the largest
+enums (`Domain`, `BlockState`) have 5 variants"*, and `BlockState` still has
+exactly five, so the derivation stands on that one alone.
 
 ---
 
@@ -255,8 +293,8 @@ Everything above marked **GAP**, in the order it blocks work:
 | Gap | Blocks | Tracked |
 |---|---|---|
 | Invariants 1, 3, 4 undefined | M3 cannot be specified | #11 |
-| Which five domains, and one concept or two | M1 S4, M9 | #36 |
-| Per-domain capacity vs `allowed_windows` | M2 | #6 |
+| ~~Which five domains, and one concept or two~~ | ~~M1 S4, M9~~ | **closed** — `T-life-areas-are-data`, #47 |
+| Per-life-area capacity vs `allowed_windows` | M2 | #6 |
 | `Block::missed` unreachable under silence-means-done | M6 | #4 |
 | U2 / U3 / U4 — hard vs soft, backward-pass input, window crossing | M3 | #7 |
 | Crate layout ratification | nothing; cost grows | #24 |

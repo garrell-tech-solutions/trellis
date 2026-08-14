@@ -12,9 +12,10 @@ against it rather than quietly reversing it.
 - **State** (what is in flight, what is done): the project board —
   https://github.com/orgs/garrell-tech-solutions/projects/4
 - **Phases and acceptance criteria**: GitHub Milestones and their epic issues.
-- **Architecture**: `docs/design/brief.md` — **does not exist yet.** Every epic
-  links to it. Until it lands, the vocabulary it would define lives nowhere; see
-  the 2026-08-12 vocabulary note below.
+- **Architecture and vocabulary**: `docs/design/architecture.md` — type shapes,
+  layer names, the `schedule()` signature, the closed enums, and an index of
+  what is still undefined. Epics link to `docs/design/brief.md`, which has
+  never existed; those links should point at the architecture reference.
 - **Rationale and rejected options**: this file.
 
 ## How to read the IDs
@@ -548,3 +549,26 @@ Enforcement matters more than the convention: CI fails if a slug cited under
 `crates/` is absent from this file. The off-by-one above was undetectable;
 under the gate it is a failed build. Same shape as
 `T-migrations-append-only` — the rule is only real once something checks it.
+
+### 2026-08-13 — An architecture reference, assembled rather than written
+
+`docs/design/architecture.md` now exists. It is a vocabulary reference, not the
+product brief: type shapes, the two unrelated things called "layers", the
+`schedule()` signature, the closed enums, and an index of what is still
+undefined.
+
+Nothing in it is new. Every entry was recovered from code, migrations, this log
+or an epic's acceptance criteria, and each is marked **built**, **specified** or
+**GAP** so a reader knows whether they are looking at something verifiable
+today, something fixed by decision but unwritten, or a hole. The "built" rows
+were checked against the tree rather than transcribed.
+
+It exists because two failures this week had the same cause. Nineteen issues
+link to `docs/design/brief.md`, which has never existed, so the vocabulary lived
+in whichever decision happened to need an example — which is how the project
+came to hold two different sets of five domains (#36) without anyone noticing,
+and how "Invariants 1-5" came to be asserted by number in M3's strongest
+acceptance criterion while three of them are described nowhere.
+
+The brief itself is still absent and still the owner's to supply. This does not
+replace it. It replaces the *dangling reference* to it.

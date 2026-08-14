@@ -18,6 +18,27 @@ sys.path.insert(0, script_dir)
 from _common import rust_files_under, production_functions
 
 files = rust_files_under(target, ".")
+
+# A walk that returns nothing must fail, not pass. Same floor as
+# trellis-server's platform/boundary.rs, and for the same reason: an analyzer
+# with no input exits 0 and reports "no violations", which is indistinguishable
+# from a clean tree on a CI summary line. Mistype the path, point the gate at a
+# directory that has been renamed away, or land an exclusion that swallows the
+# whole tree, and the gate silently stops covering anything -- which is the
+# exact defect class issue #26 exists to close.
+if not files:
+    print(json.dumps({
+        "tool": "rust-code-analysis-cli",
+        "metric": "complexity",
+        "threshold": threshold,
+        "violations": [{
+            "error": f"no Rust source files found under {target!r}",
+            "hint": "nothing was analyzed, so this is a vacuous pass, not a clean tree",
+        }],
+        "summary": {"functions_analyzed": 0},
+    }, indent=2))
+    sys.exit(1)
+
 violations = []
 total_functions = 0
 

@@ -84,8 +84,38 @@ print(value if isinstance(value, str) else "")
 ' "$body" "$field"
 }
 
+# Prints a field's raw JSON-encoded value from a JSON object body (e.g. `7`,
+# `null`, `"someday"`), or nothing if the field is absent or the body does
+# not parse. Unlike qa_json_field, this is not string-only -- use it when the
+# field may legitimately carry a non-string value.
+qa_json_raw_field() {
+  local body="$1" field="$2"
+  python3 -c '
+import json, sys
+try:
+    obj = json.loads(sys.argv[1])
+except ValueError:
+    sys.exit()
+if sys.argv[2] in obj:
+    print(json.dumps(obj[sys.argv[2]]))
+' "$body" "$field"
+}
+
 qa_task_count() {
   sqlite3 "$DB_PATH" 'SELECT COUNT(*) FROM tasks;'
+}
+
+# Extracts the contents of <ul id="html_id">...</ul> from a page, or prints
+# nothing if not found. The inbox page renders both the capture list and the
+# task list on one page (triage-from-page), so an assertion about one must
+# not accidentally match text that legitimately belongs to the other.
+qa_html_section() {
+  local page="$1" html_id="$2"
+  python3 -c '
+import re, sys
+m = re.search(r"<ul id=\"" + re.escape(sys.argv[2]) + r"\">(.*?)</ul>", sys.argv[1], re.S)
+print(m.group(1) if m else "")
+' "$page" "$html_id"
 }
 
 # True (exit 0) if capture_id is still present and untriaged.

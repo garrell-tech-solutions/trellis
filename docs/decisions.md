@@ -148,7 +148,7 @@ O4 → #40 · O5 → #41 · O6 → #36. Issue #1 is titled `OQ2`; same question.
 | T-pins-in-constraints | Pins are a first-class entity in the Constraints layer: `pin { task_id, start, end, source }`. `pinned` is **not** a column on `Block`. Lands at **M3**, with the `schedule()` signature that consumes it — not at M1. | Resolves C1. Blocks are Plan-layer: disposable, engine-written, deleted wholesale on every recompute (R-incremental-patching). A pin is user-authored intent, so a pin living on a block cannot survive the recompute that deletes its row — which makes M3's regeneration property ("delete all future blocks, re-run, get byte-identical placements") and M6's "a drag creates a pin that survives the next recompute" mutually unsatisfiable. `schedule(tasks, hard_events, guardrails, **pins**, now)` had already made the call implicitly by taking pins as an *input*. Rejected alternative: keep `pinned` on `Block` and exempt pinned rows from deletion — that makes the Plan layer partly durable, the exact fact/plan confusion C2 is separately untangling, and weakens M3's strongest property to "delete all *non-pinned* blocks". Deferred to M3 because pins have no M1 behaviour: no `Block` to drop the column from, no scheduler to consume them, no drag to create one. |
 | T-auto-close-event | Auto-close is recorded as an **event**, not a column: `auto_close_event { task_id, closed_at, remaining_minutes_before, undone_at }`. Lands at **M6** with auto-close itself. | Resolves C4, and goes further than the issue proposed. The AC bundled two requirements into one column: *undo restores exactly*, and *R-guardrail-override can measure an undo rate*. A column on `task` serves the first and cannot serve the second — it is overwritten on the second close, so the event denominator is wrong and a task that auto-closes repeatedly (the strongest possible evidence that silence does **not** mean done for that work) collapses to a single row. Undo restores from the latest event with `undone_at IS NULL`; undo rate is `count(undone_at IS NOT NULL) / count(*)`, which is what R-guardrail-override's 15%/30% thresholds actually need. Falling back to `estimated_minutes` was never viable: it is correct only for never-started tasks, where undo matters least, and silently inflates every partially-completed one. Additive, so it does not block M1. |
 | T-archived-at-only | `archived_at` is the single archive signal. `status: dropped` is removed. | Resolves N1. Two fields for one state, in a system where D-inaction-archives makes archiving the *default* outcome reached implicitly from several paths — decay pass, three-strike, and simply closing the review (U7) — means every path gets two chances to set one and forget the other. The resulting half-archived task is alive on whichever surface filters the field that was missed: a task returning from the dead, in a product whose entire value is that the user trusts what it shows. M8's all-surfaces proptest is the test designed to catch this, and it can only assert a clean invariant against one field. `archived_at` also carries strictly more information — the reckoning's "47 archived this quarter, 31 Learning" needs a timestamp, which `status: dropped` cannot supply. |
-| T-module-boundary | Three layers, dependencies pointing inward: `scheduler-core` holds the rules; `trellis-server::http` translates requests into core inputs; `trellis-server::store` translates core types into rows. Adapters name core types; the core names neither. | The rules had been living inside the axum handlers, expressed as `serde_json::Value` probes and `StatusCode` returns — the function that wrote a task row took a *transport* type as a parameter and returned an *HTTP* type as its error. That leaves no seam to test a rule at: answering "is this triage valid?" required a running server and a SQLite pool. It also made T-sqlite-sqlx's "a Postgres swap stays mechanical" untrue, since the queries were spread across handler modules instead of confined to one layer. The split is what makes `scheduler-core` non-empty for the first time, and gives T-core-no-tokio's no-tokio rule something to protect. `store/mod.rs` carries a unit test asserting that no store module names `axum` or `StatusCode`: a layering rule nothing checks is a comment. |
+| T-module-boundary | Three modules, dependencies pointing inward: `scheduler-core` holds the rules; `trellis-server::http` translates requests into core inputs; `trellis-server::store` translates core types into rows. Adapters name core types; the core names neither. | The rules had been living inside the axum handlers, expressed as `serde_json::Value` probes and `StatusCode` returns — the function that wrote a task row took a *transport* type as a parameter and returned an *HTTP* type as its error. That leaves no seam to test a rule at: answering "is this triage valid?" required a running server and a SQLite pool. It also made T-sqlite-sqlx's "a Postgres swap stays mechanical" untrue, since the queries were spread across handler modules instead of confined to one layer. The split is what makes `scheduler-core` non-empty for the first time, and gives T-core-no-tokio's no-tokio rule something to protect. `store/mod.rs` carries a unit test asserting that no store module names `axum` or `StatusCode`: a layering rule nothing checks is a comment. |
 | T-unknown-kind-rejected | `kind` is validated against the three variants at the boundary. A submission naming anything else is rejected with `422 {"unknown_kind": <submitted>}`. | T-three-task-kinds committed to a three-variant sum type, but the M1 implementation read `kind` as `payload.get("kind").and_then(as_str).unwrap_or("")` and stored whatever string arrived, so `{"kind":"banana"}` wrote `banana` into a column whose domain is three values. That is the failure mode T-three-task-kinds named — not the `if committed {} else {}` shape it predicted, but a weaker one, with no discrimination at all. Since `tasks.kind` carries no `CHECK` constraint, the only thing standing between a typo and durable out-of-domain data was the caller. Rejecting is a **behaviour change on input nothing specifies**: no feature, QA procedure or unit test covered an unrecognised kind, and the old permissiveness was an artifact of `unwrap_or("")` rather than a decision. Rejected alternative: keep a fourth catch-all variant to preserve the old behaviour exactly — that reintroduces the stringly-typed hole inside the very type introduced to close it, and makes every future `match` carry an arm that means "we do not know what this is". |
 | T-quota-targets-required | Quota triage requires `target_count`, `target_minutes_each` and `period`, rejected the same way `committed`'s three fields are. | T-three-task-kinds made the *columns* nullable for a schema reason — one `tasks` table shared by three kinds, most columns unused per row. That is a storage fact, not a triage-time permission. A quota row with no target can never be scheduled at M8 (nothing to place) and can never appear in D-quota-no-rollover's reckoning (`count(done)/target_count` has no denominator) — the same "wall protecting an empty room" failure T-three-task-kinds named for Fitness-as-pool, relocated to quota-with-no-target instead of pool. Requiring the fields at triage costs nothing today (no M1 surface depends on omitting them) and closes the hole before a real quota row can be created. |
 | T-empty-equals-absent | An empty string and an absent key report identically — both use the existing `{"missing_field": <name>}` shape. | `require()` treated `Some("")` as present, which is the empty-string half of the hole this slice closes; the other half is deciding what the closed case reports. Distinguishing "you sent nothing" from "you sent an empty string" is a distinction a client rarely intends — an unfilled HTML form field and an absent field are the same submitter mistake. One shape, one code path in `require()`, rather than a second rejection variant carrying no information the caller can act on differently. |
@@ -572,3 +572,51 @@ acceptance criterion while three of them are described nowhere.
 
 The brief itself is still absent and still the owner's to supply. This does not
 replace it. It replaces the *dangling reference* to it.
+
+### 2026-08-13 — triage-from-page: a payload nobody could use, and a shared fragment
+
+The slice extended the delivery module correctly — `view::CaptureRow` grew the
+`id` and `error` that `T-templates-take-view-models` predicted it would need,
+and `store::TaskWithCaptureText` stayed a row rather than becoming a second
+view model. Two things wanted straightening.
+
+**`TriageRejection::UnknownKind` carried a payload no adapter could use.**
+Both consumers destructured it as `_` and reported `kind_submitted` from the
+request instead, with a comment explaining that the core's copy is not the one
+to trust: JSON `{"kind": 7}` reaches the core as `None`, because reading it as
+a string is what turned it into one. So the core was carrying a value that is
+never better than the adapter's and sometimes strictly worse, and the only
+documentation it had was a warning not to use it. It is now a unit variant.
+The core says *this kind is not one of the three*; what arrived is the
+adapter's to report, because the adapter is the only place it still exists.
+
+A sum-type payload every consumer ignores is not extra information, it is a
+second source of truth that loses. Behaviour is unchanged — both responses
+were already built from the request.
+
+**The `#lists` fragment now lives beside its two renderers, not inside one.**
+`ListsTemplate` and `build_lists` sat in `http::inbox`, so the triage endpoint
+depended on the inbox *page* to render the fragment they share. `http::lists`
+holds both; `inbox` and `triage` are now siblings over it. Same move as
+`view`, `payloads` and `app_client`: when a second caller appears, the shared
+thing gets its own home rather than one caller reaching into the other.
+
+**Property coverage** gained the invariant this slice's own brief asserts —
+"the page and `POST /captures/{id}/triage` are one code path, not two". That
+is now two hand-written, field-by-field translations into the same
+`TriageFields`, which is exactly where the claim can quietly stop being true:
+add a field to the core, wire it into one transport, and it still compiles and
+still passes every example test that does not use that field. The property
+submits one arbitrary submission through both and requires the results to be
+identical. Checked by dropping `period` from the form mapping alone — it
+fails, shrinking to the single field.
+
+**Wording repair, called out rather than made quietly:** `T-module-boundary`
+opened with "Three layers", written before `T-fact-plan-line` reserved *layer*
+for the Plan/Constraints domain split. Changed to "Three modules". The
+substance is untouched; the row was contradicting the naming rule that
+supersedes it, in the one document agents consult to learn the vocabulary.
+
+**Complexity is 5**, all still regex dispatch chains in the acceptance step
+modules — `triage_from_page::dispatch` is the new one, same shape. The
+2026-08-12 entry's reasoning stands. DRY 1.96%, CRAP 0.

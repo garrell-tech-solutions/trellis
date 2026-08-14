@@ -6,29 +6,33 @@ use sqlx::SqlitePool;
 /// module's business; what a page does with them is not (see `http::view`).
 #[derive(Debug, Clone, PartialEq, Eq, sqlx::FromRow)]
 pub struct UntriagedCapture {
+    pub id: i64,
     pub raw_text: String,
 }
 
 /// Untriaged captures, newest first — the inbox's contents.
 pub async fn list_untriaged(pool: &SqlitePool) -> Result<Vec<UntriagedCapture>, sqlx::Error> {
-    sqlx::query_as("SELECT raw_text FROM captures WHERE triaged_at IS NULL ORDER BY id DESC")
+    sqlx::query_as("SELECT id, raw_text FROM captures WHERE triaged_at IS NULL ORDER BY id DESC")
         .fetch_all(pool)
         .await
 }
 
+/// Returns the new capture's id — the triage page needs it to aim a triage
+/// action at the row it just rendered.
 pub async fn insert(
     pool: &SqlitePool,
     raw_text: &str,
     source: &str,
     created_at_ms: i64,
-) -> Result<(), sqlx::Error> {
-    sqlx::query("INSERT INTO captures (raw_text, source, created_at_ms) VALUES (?, ?, ?)")
-        .bind(raw_text)
-        .bind(source)
-        .bind(created_at_ms)
-        .execute(pool)
-        .await?;
-    Ok(())
+) -> Result<i64, sqlx::Error> {
+    sqlx::query_scalar(
+        "INSERT INTO captures (raw_text, source, created_at_ms) VALUES (?, ?, ?) RETURNING id",
+    )
+    .bind(raw_text)
+    .bind(source)
+    .bind(created_at_ms)
+    .fetch_one(pool)
+    .await
 }
 
 pub async fn mark_triaged(
@@ -58,6 +62,30 @@ mod tests {
         .fetch_one(pool)
         .await
         .unwrap()
+    }
+
+    #[tokio::test]
+    async fn insert_returns_the_new_captures_id() {
+        let (_dir, pool) = test_pool().await;
+
+        let id = insert(&pool, "buy milk", "web", 1234).await.unwrap();
+
+        let row_id: i64 = sqlx::query_scalar("SELECT id FROM captures")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(id, row_id);
+    }
+
+    #[tokio::test]
+    async fn list_untriaged_reports_each_captures_id() {
+        let (_dir, pool) = test_pool().await;
+        let id = insert_capture(&pool, "buy milk").await;
+
+        let captures = list_untriaged(&pool).await.unwrap();
+
+        assert_eq!(captures.len(), 1);
+        assert_eq!(captures[0].id, id);
     }
 
     #[tokio::test]

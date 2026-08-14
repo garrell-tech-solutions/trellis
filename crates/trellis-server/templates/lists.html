@@ -1,0 +1,17 @@
+<div id="lists">
+<h2>Inbox</h2>
+{% if captures.is_empty() %}
+<p>Nothing to triage. Add a capture above to get started.</p>
+{% endif %}
+<ul id="captures">
+{% for capture in captures %}
+{% include "capture_row.html" %}
+{% endfor %}
+</ul>
+<h2>Tasks</h2>
+<ul id="tasks">
+{% for task in tasks %}
+{% include "task_row.html" %}
+{% endfor %}
+</ul>
+</div>

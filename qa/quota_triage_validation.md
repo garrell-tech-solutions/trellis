@@ -75,6 +75,50 @@ For each row:
   accepted in place of `week`.
 - The tasks table is still empty.
 
+## Procedure — non-positive target_count — repeat once per example row
+
+Example rows:
+
+| bad_target_count |
+|-------------------|
+| 0                  |
+| -1                 |
+
+For each row:
+
+1. Triage the capture as kind `quota`, supplying the row's `bad_target_count`,
+   a valid `target_minutes_each: 45`, and `period: week`.
+2. Observe the response status and body.
+3. Query the tasks table and count its rows.
+
+### Expected Observable Outcomes
+- Triage is rejected, and the response body identifies `target_count` as the
+  invalid field. A quota task with a zero or negative target can never be
+  completed, so it can never be reported on at the reckoning — `0` is not a
+  meaningful target, it is a divide-by-zero waiting to happen.
+- The tasks table is still empty.
+
+## Procedure — non-positive target_minutes_each — repeat once per example row
+
+Example rows:
+
+| bad_target_minutes_each |
+|---------------------------|
+| 0                          |
+| -5                         |
+
+For each row:
+
+1. Triage the capture as kind `quota`, supplying a valid `target_count: 3`,
+   the row's `bad_target_minutes_each`, and `period: week`.
+2. Observe the response status and body.
+3. Query the tasks table and count its rows.
+
+### Expected Observable Outcomes
+- Triage is rejected, and the response body identifies `target_minutes_each`
+  as the invalid field.
+- The tasks table is still empty.
+
 ## Independent of Implementation
 
 This procedure depends only on the triage endpoint's rejection contract and on

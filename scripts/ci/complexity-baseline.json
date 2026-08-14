@@ -44,8 +44,14 @@
     {
       "file": "crates/acceptance-tests/src/steps/mod.rs",
       "function": "dispatch",
+      "cyclomatic_complexity": 12,
+      "why": "Top-level step dispatcher; delegates to one step module per arm. 11 -> 12 because the stats_ratio module added one more one-line arm: a new step, not new logic."
+    },
+    {
+      "file": "crates/acceptance-tests/src/steps/stats_ratio.rs",
+      "function": "dispatch",
       "cyclomatic_complexity": 11,
-      "why": "Top-level step dispatcher; delegates to one step module per arm."
+      "why": "Gherkin step dispatcher; regex chain, one-line delegation per arm. Recorded at 11, not the 17 it first measured: three arms inlined an example_value unwrap before delegating, and that logic was extracted into handlers (issue #55)."
     },
     {
       "file": "crates/acceptance-tests/src/steps/triage.rs",

@@ -17,8 +17,16 @@ const DAY_MS: i64 = 24 * 60 * 60 * 1000;
 static GIVEN_TASKS_TRIAGED_TODAY: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"^<(\w+)> (committed|pool|quota) tasks were triaged today$").unwrap()
 });
+/// The count and `days_ago` here may each be a `<name>` placeholder or a
+/// bare literal: the boundary rows care only which *side* of the window a
+/// task lands on, not its exact count or distance from it, so those cells
+/// are written as literals the mutator cannot touch rather than as example
+/// columns whose mutation nothing downstream could ever observe (the survivor
+/// this step handler and the split of `stats-ratio-window-03` were both
+/// added to close).
 static GIVEN_TASKS_TRIAGED_DAYS_AGO: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"^<(\w+)> (committed|pool|quota) tasks were triaged <(\w+)> days ago$").unwrap()
+    Regex::new(r"^(<\w+>|\d+) (committed|pool|quota) tasks were triaged (<\w+>|\d+) days ago$")
+        .unwrap()
 });
 static WHEN_STATS_VIEWED: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^the stats page is viewed$").unwrap());
@@ -104,6 +112,11 @@ async fn insert_fixture_tasks(
     kind: &str,
     created_at_ms: i64,
 ) -> Result<(), String> {
+    if count < 0 {
+        return Err(format!(
+            "fixture task count must not be negative, got {count}"
+        ));
+    }
     let pool = world.pool()?;
     for _ in 0..count {
         let capture_id: i64 = sqlx::query_scalar(
@@ -137,18 +150,24 @@ async fn given_tasks_triaged_today(
     insert_fixture_tasks(world, count, kind, now_ms()).await
 }
 
+/// Resolves a `<name>` placeholder against the example row, or parses `token`
+/// itself when it is a bare literal (see [`GIVEN_TASKS_TRIAGED_DAYS_AGO`]).
+fn resolve_int(example: &BTreeMap<String, String>, token: &str) -> Result<i64, String> {
+    let raw = match token.strip_prefix('<').and_then(|t| t.strip_suffix('>')) {
+        Some(name) => example_value(example, name)?,
+        None => token,
+    };
+    raw.parse().map_err(|e| format!("bad integer {raw:?}: {e}"))
+}
+
 async fn given_tasks_triaged_days_ago(
     world: &mut World,
     example: &BTreeMap<String, String>,
     caps: &regex::Captures<'_>,
 ) -> Result<(), String> {
-    let count: i64 = example_value(example, &caps[1])?
-        .parse()
-        .map_err(|e| format!("bad task count: {e}"))?;
+    let count = resolve_int(example, &caps[1])?;
     let kind = &caps[2];
-    let days_ago: i64 = example_value(example, &caps[3])?
-        .parse()
-        .map_err(|e| format!("bad days_ago: {e}"))?;
+    let days_ago = resolve_int(example, &caps[3])?;
     let created_at_ms = now_ms() - days_ago * DAY_MS;
     insert_fixture_tasks(world, count, kind, created_at_ms).await
 }

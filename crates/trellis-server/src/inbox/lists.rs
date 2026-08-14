@@ -73,6 +73,7 @@ mod tests {
     use super::*;
     use crate::capture::store::insert as insert_capture;
     use crate::platform::test_support::test_pool;
+    use scheduler_core::task::TaskKind;
 
     #[tokio::test]
     async fn an_error_attaches_only_to_the_capture_that_failed_triage() {
@@ -91,5 +92,20 @@ mod tests {
         let other_row = captures.iter().find(|c| c.id == other_id).unwrap();
         assert_eq!(failed_row.error.as_deref(), Some("deadline is required"));
         assert_eq!(other_row.error, None);
+    }
+
+    #[tokio::test]
+    async fn the_task_list_carries_each_triaged_tasks_kind_and_capture_text() {
+        let (_dir, pool) = test_pool().await;
+        let capture_id = insert_capture(&pool, "buy milk", "web", 0).await.unwrap();
+        crate::triage::store::insert_task(&pool, capture_id, &TaskKind::Pool, 0)
+            .await
+            .unwrap();
+
+        let (_captures, tasks) = build_lists(&pool, None).await.unwrap();
+
+        assert_eq!(tasks.len(), 1);
+        assert_eq!(tasks[0].kind, "pool");
+        assert_eq!(tasks[0].text, "buy milk");
     }
 }

@@ -1,0 +1,12 @@
+# cargo-mutants configuration. See https://mutants.rs/.
+#
+# `main` is the process entry point: it reads real `std::env::args()` and
+# hands them to `dispatch`, which carries every decision `main` could make
+# and is itself fully mutation-covered. Nothing but a real subprocess could
+# exercise `main`'s own body, so mutating it can only ever survive -- it is
+# an environmental boundary, not undertested logic (T-module-boundary's
+# testable/environmentally-unsuitable split, applied to a single function
+# rather than a whole module).
+exclude_re = [
+    '^crates/trellis-server/src/main\.rs:\d+:\d+: replace main -> ExitCode',
+]

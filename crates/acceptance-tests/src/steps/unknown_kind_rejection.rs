@@ -74,7 +74,7 @@ async fn dispatch_triaged_kind_as_number(
 /// the submitted kind, or `null` when none was named) — checking it is
 /// present is what the Gherkin step names; the more specific shape (that the
 /// value echoes exactly what was submitted) is exercised at the unit level
-/// in `http::triage`.
+/// in `triage::http`.
 fn then_rejection_reports_unknown_kind(world: &mut World) -> Result<(), String> {
     let body = world
         .last_response_body

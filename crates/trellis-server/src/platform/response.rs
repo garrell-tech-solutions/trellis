@@ -1,17 +1,14 @@
-//! Delivery adapters: the only place in the crate that knows requests and
-//! status codes exist.
+//! The two things every capability's `http` module does with its answer:
+//! render a template, or name a failed write.
 //!
-//! A handler's whole job is translation — request body into a
+//! Neither decides anything about captures, triage or the inbox, which is
+//! why they live in `platform` rather than in one of them — and why a
+//! capability that needed a *third* shared helper would be a sign that the
+//! capabilities are wrong, not that this module needs another function.
+//! A handler's whole job is still translation: request body into a
 //! `scheduler_core` input, core decision into a response, store failure into
 //! a status code. Any rule that survives changing HTTP for something else
-//! belongs in `scheduler_core`, not here.
-
-pub mod assets;
-pub mod capture;
-pub mod inbox;
-pub mod lists;
-pub mod triage;
-pub mod view;
+//! belongs in `scheduler_core`, not in a handler and not here.
 
 use askama::Template;
 use axum::http::StatusCode;

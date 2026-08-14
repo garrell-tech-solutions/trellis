@@ -23,14 +23,14 @@ fn require_db_arg(args: &[String]) -> PathBuf {
 
 async fn run_migrate(args: &[String]) -> ExitCode {
     let db_path = require_db_arg(args);
-    let pool = match trellis_server::db::connect(&db_path).await {
+    let pool = match trellis_server::platform::db::connect(&db_path).await {
         Ok(pool) => pool,
         Err(err) => {
             eprintln!("could not open database: {err}");
             return ExitCode::FAILURE;
         }
     };
-    match trellis_server::db::run_migrations(&pool).await {
+    match trellis_server::platform::db::run_migrations(&pool).await {
         Ok(()) => ExitCode::SUCCESS,
         Err(err) => {
             eprintln!("migration failed: {err}");
@@ -42,13 +42,13 @@ async fn run_migrate(args: &[String]) -> ExitCode {
 async fn bind_server(args: &[String]) -> Result<(tokio::net::TcpListener, axum::Router), String> {
     let db_path = require_db_arg(args);
     let addr = arg_value(args, "--addr").unwrap_or_else(|| "127.0.0.1:8080".to_string());
-    let pool = trellis_server::db::connect(&db_path)
+    let pool = trellis_server::platform::db::connect(&db_path)
         .await
         .map_err(|err| format!("open database: {err}"))?;
-    trellis_server::db::run_migrations(&pool)
+    trellis_server::platform::db::run_migrations(&pool)
         .await
         .map_err(|err| format!("run migrations: {err}"))?;
-    let app = trellis_server::app::build_app(pool);
+    let app = trellis_server::platform::app::build_app(pool);
     let listener = tokio::net::TcpListener::bind(&addr)
         .await
         .map_err(|err| format!("bind {addr}: {err}"))?;

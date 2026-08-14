@@ -1,17 +1,17 @@
 //! `POST /captures`.
 //!
 //! One code path for both callers: the JSON API and the inbox's quick-add
-//! box both end at this handler and the same `store::capture::insert` call,
+//! box both end at this handler and the same [`store::insert`] call,
 //! so a capture created either way is the same row (inbox-view brief:
 //! "the box and `POST /captures` are one code path, not two"). Content type
 //! is the only thing that differs — a plain form post (the quick-add box)
 //! gets back the new row's markup to swap into the page; a JSON request (the
 //! existing API) gets back exactly what it always has, unchanged.
 
-use crate::clock::now_ms;
-use crate::http::view::CaptureRow;
-use crate::http::{render_template, write_failed};
-use crate::store;
+use crate::capture::store;
+use crate::inbox::view::CaptureRow;
+use crate::platform::clock::now_ms;
+use crate::platform::response::{render_template, write_failed};
 use askama::Template;
 use axum::extract::{FromRequest, Request, State};
 use axum::http::{header, StatusCode};
@@ -76,7 +76,7 @@ pub async fn create_capture(
     State(pool): State<SqlitePool>,
     CaptureInput { payload, from_form }: CaptureInput,
 ) -> Result<Response, StatusCode> {
-    let id = store::capture::insert(&pool, &payload.raw_text, &payload.source, now_ms())
+    let id = store::insert(&pool, &payload.raw_text, &payload.source, now_ms())
         .await
         .map_err(write_failed)?;
 
@@ -98,13 +98,13 @@ pub async fn create_capture(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_support::test_pool;
+    use crate::platform::test_support::test_pool;
     use axum::body::{to_bytes, Body};
     use axum::http::Request;
     use tower::ServiceExt;
 
     async fn post_capture(pool: &SqlitePool, content_type: &str, body: &str) -> Response {
-        let app = crate::app::build_app(pool.clone());
+        let app = crate::platform::app::build_app(pool.clone());
         app.oneshot(
             Request::builder()
                 .method("POST")

@@ -1,6 +1,6 @@
 //! `POST /captures/{id}/triage`.
 //!
-//! One code path for both callers, the same shape as `http::capture`: the
+//! One code path for both callers, the same shape as `capture::http`: the
 //! JSON API and the page's own triage controls (triage-from-page, issue #33)
 //! both end at this handler and the same `scheduler_core`/`store` calls, so a
 //! task created either way is the same row. Content type is the only thing
@@ -9,10 +9,10 @@
 //! refused; a JSON request (the existing API) gets back exactly what it
 //! always has, unchanged.
 
-use crate::clock::now_ms;
-use crate::http::lists::{build_lists, ListsTemplate};
-use crate::http::{render_template, write_failed};
-use crate::store;
+use crate::inbox::lists::{build_lists, ListsTemplate};
+use crate::platform::clock::now_ms;
+use crate::platform::response::{render_template, write_failed};
+use crate::triage::store;
 use axum::extract::{FromRequest, Path, Request, State};
 use axum::http::{header, StatusCode};
 use axum::response::{IntoResponse, Response};
@@ -139,10 +139,10 @@ fn rejection_message(rejection: &TriageRejection, kind_submitted: &Value) -> Str
 
 async fn write_task(pool: &SqlitePool, capture_id: i64, kind: &TaskKind) -> Result<(), StatusCode> {
     let created_at_ms = now_ms();
-    store::task::insert(pool, capture_id, kind, created_at_ms)
+    store::insert_task(pool, capture_id, kind, created_at_ms)
         .await
         .map_err(write_failed)?;
-    store::capture::mark_triaged(pool, capture_id, created_at_ms)
+    store::mark_triaged(pool, capture_id, created_at_ms)
         .await
         .map_err(write_failed)?;
     Ok(())
@@ -206,7 +206,7 @@ pub async fn create_triage(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_support::test_pool;
+    use crate::platform::test_support::test_pool;
     use axum::body::Body;
     use axum::http::Request;
     use proptest::prelude::*;
@@ -228,7 +228,7 @@ mod tests {
         capture_id: i64,
         body: Value,
     ) -> axum::response::Response {
-        let app = crate::app::build_app(pool.clone());
+        let app = crate::platform::app::build_app(pool.clone());
         app.oneshot(
             Request::builder()
                 .method("POST")
@@ -262,7 +262,7 @@ mod tests {
             .map(|(name, value)| format!("{name}={value}"))
             .collect::<Vec<_>>()
             .join("&");
-        let app = crate::app::build_app(pool.clone());
+        let app = crate::platform::app::build_app(pool.clone());
         app.oneshot(
             Request::builder()
                 .method("POST")

@@ -11,10 +11,11 @@
 
 use crate::inbox::lists::{build_lists, ListsTemplate};
 use crate::platform::clock::now_ms;
+use crate::platform::request::content_type_is_json;
 use crate::platform::response::{render_template, write_failed};
 use crate::triage::store;
 use axum::extract::{FromRequest, Path, Request, State};
-use axum::http::{header, StatusCode};
+use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::{Form, Json};
 use scheduler_core::task::{TaskKind, TriageFields, TriageRejection};
@@ -101,13 +102,6 @@ impl<S: Send + Sync> FromRequest<S> for TriageInput {
     }
 }
 
-fn content_type_is_json(req: &Request) -> bool {
-    req.headers()
-        .get(header::CONTENT_TYPE)
-        .and_then(|v| v.to_str().ok())
-        .is_some_and(|v| v.starts_with("application/json"))
-}
-
 /// The rejection contract: a client error whose body names what was wrong.
 /// A rejection that does not say what was wrong is a failure even with the
 /// right status code.
@@ -171,13 +165,11 @@ async fn page_response(
     Ok(render_template(status, &ListsTemplate { captures, tasks }))
 }
 
-pub async fn create_triage(
-    State(pool): State<SqlitePool>,
-    Path(capture_id): Path<i64>,
-    input: TriageInput,
-) -> Result<Response, StatusCode> {
-    let from_page = matches!(input, TriageInput::Form(_));
-    let (fields, kind_submitted): (TriageFields, Value) = match input {
+/// The two things every branch of [`TriageInput`] must produce: the fields
+/// the core decides on, and the raw `kind` a rejection echoes back
+/// (T-unknown-kind-rejected).
+fn fields_from_input(input: TriageInput) -> (TriageFields, Value) {
+    match input {
         TriageInput::Json(payload) => {
             let kind_submitted = payload.get("kind").cloned().unwrap_or(Value::Null);
             (triage_fields(&payload), kind_submitted)
@@ -186,7 +178,16 @@ pub async fn create_triage(
             let kind_submitted = json!(form.kind);
             (form.into(), kind_submitted)
         }
-    };
+    }
+}
+
+pub async fn create_triage(
+    State(pool): State<SqlitePool>,
+    Path(capture_id): Path<i64>,
+    input: TriageInput,
+) -> Result<Response, StatusCode> {
+    let from_page = matches!(input, TriageInput::Form(_));
+    let (fields, kind_submitted) = fields_from_input(input);
 
     let outcome = TaskKind::from_fields(&fields);
 

@@ -11,10 +11,11 @@
 use crate::capture::store;
 use crate::inbox::view::CaptureRow;
 use crate::platform::clock::now_ms;
+use crate::platform::request::content_type_is_json;
 use crate::platform::response::{render_template, write_failed};
 use askama::Template;
 use axum::extract::{FromRequest, Request, State};
-use axum::http::{header, StatusCode};
+use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::{Form, Json};
 use serde::Deserialize;
@@ -57,13 +58,6 @@ impl<S: Send + Sync> FromRequest<S> for CaptureInput {
             })
         }
     }
-}
-
-fn content_type_is_json(req: &Request) -> bool {
-    req.headers()
-        .get(header::CONTENT_TYPE)
-        .and_then(|v| v.to_str().ok())
-        .is_some_and(|v| v.starts_with("application/json"))
 }
 
 #[derive(Template)]

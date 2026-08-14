@@ -34,7 +34,16 @@ pub(crate) async fn build_lists(
     pool: &SqlitePool,
     error: Option<(i64, String)>,
 ) -> Result<(Vec<CaptureRow>, Vec<TaskRow>), sqlx::Error> {
-    let captures = store::list_untriaged(pool)
+    let captures = build_capture_rows(pool, error).await?;
+    let tasks = build_task_rows(pool).await?;
+    Ok((captures, tasks))
+}
+
+async fn build_capture_rows(
+    pool: &SqlitePool,
+    error: Option<(i64, String)>,
+) -> Result<Vec<CaptureRow>, sqlx::Error> {
+    Ok(store::list_untriaged(pool)
         .await?
         .into_iter()
         .map(|capture| CaptureRow {
@@ -45,16 +54,18 @@ pub(crate) async fn build_lists(
                 .map(|(_, message)| message.clone()),
             text: capture.raw_text,
         })
-        .collect();
-    let tasks = store::list_tasks(pool)
+        .collect())
+}
+
+async fn build_task_rows(pool: &SqlitePool) -> Result<Vec<TaskRow>, sqlx::Error> {
+    Ok(store::list_tasks(pool)
         .await?
         .into_iter()
         .map(|task| TaskRow {
             kind: task.kind,
             text: task.raw_text,
         })
-        .collect();
-    Ok((captures, tasks))
+        .collect())
 }
 
 #[cfg(test)]

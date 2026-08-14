@@ -39,14 +39,18 @@ pub async fn counts_in_window(
 
     let mut counts = WindowCounts::default();
     for (kind, count) in rows {
-        match kind.as_str() {
-            "committed" => counts.committed = count,
-            "pool" => counts.pool = count,
-            "quota" => counts.quota = count,
-            _ => {}
-        }
+        add_kind_count(&mut counts, &kind, count);
     }
     Ok(counts)
+}
+
+fn add_kind_count(counts: &mut WindowCounts, kind: &str, count: i64) {
+    match kind {
+        "committed" => counts.committed = count,
+        "pool" => counts.pool = count,
+        "quota" => counts.quota = count,
+        _ => {}
+    }
 }
 
 #[cfg(test)]

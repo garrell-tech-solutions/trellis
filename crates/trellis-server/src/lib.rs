@@ -5,6 +5,7 @@
 //! - [`capture`] — raw text in, fast enough to use mid-thought.
 //! - [`triage`] — a capture becomes a typed task.
 //! - [`inbox`] — what is still waiting, and what has already become a task.
+//! - [`stats`] — the rolling committed:pool ratio, R2's instrumentation.
 //! - [`platform`] — deliberately *not* a capability: the route table, the
 //!   database, the clock, the vendored static assets. It is named so that a
 //!   reader can tell at a glance which directories are the product and which
@@ -19,7 +20,11 @@
 //! - a domain's `store` — persistence. Translates core types into rows, and
 //!   is the only place production SQL is written.
 //! - a domain's `view` — what the templates render, never a store row type
-//!   (`T-templates-take-view-models`).
+//!   (`T-templates-take-view-models`). Only the domains that need one have
+//!   one: `inbox`'s rows are assembled from two queries and carry a slot for
+//!   an in-flight rejection, so its page shape is its own; `stats` renders
+//!   what `scheduler_core::ratio` already decided, and a struct copying that
+//!   field for field would be a view model in name only.
 //!
 //! A handler calls its store; a store never calls back. What changed is that
 //! those three roles are now leaves under a capability's name rather than
@@ -34,4 +39,5 @@
 pub mod capture;
 pub mod inbox;
 pub mod platform;
+pub mod stats;
 pub mod triage;

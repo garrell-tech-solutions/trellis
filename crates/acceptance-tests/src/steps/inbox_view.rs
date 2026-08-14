@@ -80,7 +80,10 @@ pub async fn dispatch(world: &mut World, text: &str) -> Option<Result<(), String
 
 pub(super) async fn html_response(world: &mut World, request: Request<Body>) -> Result<(), String> {
     let pool = world.pool()?.clone();
-    let app = trellis_server::platform::app::build_app(pool);
+    let app = trellis_server::platform::app::build_app(
+        pool,
+        trellis_server::platform::clock::Clock::system(),
+    );
     let response = app
         .oneshot(request)
         .await

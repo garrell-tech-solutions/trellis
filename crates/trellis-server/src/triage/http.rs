@@ -10,11 +10,12 @@
 //! always has, unchanged.
 
 use crate::inbox::lists::{build_lists, ListsTemplate};
-use crate::platform::clock::now_ms;
+use crate::platform::clock::Clock;
+use crate::platform::request::content_type_is_json;
 use crate::platform::response::{render_template, write_failed};
 use crate::triage::store;
 use axum::extract::{FromRequest, Path, Request, State};
-use axum::http::{header, StatusCode};
+use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::{Form, Json};
 use scheduler_core::task::{TaskKind, TriageFields, TriageRejection};
@@ -101,13 +102,6 @@ impl<S: Send + Sync> FromRequest<S> for TriageInput {
     }
 }
 
-fn content_type_is_json(req: &Request) -> bool {
-    req.headers()
-        .get(header::CONTENT_TYPE)
-        .and_then(|v| v.to_str().ok())
-        .is_some_and(|v| v.starts_with("application/json"))
-}
-
 /// The rejection contract: a client error whose body names what was wrong.
 /// A rejection that does not say what was wrong is a failure even with the
 /// right status code.
@@ -137,8 +131,15 @@ fn rejection_message(rejection: &TriageRejection, kind_submitted: &Value) -> Str
     }
 }
 
-async fn write_task(pool: &SqlitePool, capture_id: i64, kind: &TaskKind) -> Result<(), StatusCode> {
-    let created_at_ms = now_ms();
+/// The instant is passed in rather than read here: reading the clock is the
+/// handler's business, and a triage stamps the task and the capture it
+/// consumed with the same one.
+async fn write_task(
+    pool: &SqlitePool,
+    capture_id: i64,
+    kind: &TaskKind,
+    created_at_ms: i64,
+) -> Result<(), StatusCode> {
     store::insert_task(pool, capture_id, kind, created_at_ms)
         .await
         .map_err(write_failed)?;
@@ -156,6 +157,7 @@ async fn page_response(
     capture_id: i64,
     outcome: Result<TaskKind, TriageRejection>,
     kind_submitted: &Value,
+    created_at_ms: i64,
 ) -> Result<Response, StatusCode> {
     let (status, error) = match &outcome {
         Ok(_) => (StatusCode::CREATED, None),
@@ -165,19 +167,17 @@ async fn page_response(
         ),
     };
     if let Ok(kind) = &outcome {
-        write_task(pool, capture_id, kind).await?;
+        write_task(pool, capture_id, kind, created_at_ms).await?;
     }
     let (captures, tasks) = build_lists(pool, error).await.map_err(write_failed)?;
     Ok(render_template(status, &ListsTemplate { captures, tasks }))
 }
 
-pub async fn create_triage(
-    State(pool): State<SqlitePool>,
-    Path(capture_id): Path<i64>,
-    input: TriageInput,
-) -> Result<Response, StatusCode> {
-    let from_page = matches!(input, TriageInput::Form(_));
-    let (fields, kind_submitted): (TriageFields, Value) = match input {
+/// The two things every branch of [`TriageInput`] must produce: the fields
+/// the core decides on, and the raw `kind` a rejection echoes back
+/// (T-unknown-kind-rejected).
+fn fields_from_input(input: TriageInput) -> (TriageFields, Value) {
+    match input {
         TriageInput::Json(payload) => {
             let kind_submitted = payload.get("kind").cloned().unwrap_or(Value::Null);
             (triage_fields(&payload), kind_submitted)
@@ -186,17 +186,28 @@ pub async fn create_triage(
             let kind_submitted = json!(form.kind);
             (form.into(), kind_submitted)
         }
-    };
+    }
+}
+
+pub async fn create_triage(
+    State(pool): State<SqlitePool>,
+    State(clock): State<Clock>,
+    Path(capture_id): Path<i64>,
+    input: TriageInput,
+) -> Result<Response, StatusCode> {
+    let from_page = matches!(input, TriageInput::Form(_));
+    let (fields, kind_submitted) = fields_from_input(input);
 
     let outcome = TaskKind::from_fields(&fields);
+    let created_at_ms = clock.now_ms();
 
     if from_page {
-        return page_response(&pool, capture_id, outcome, &kind_submitted).await;
+        return page_response(&pool, capture_id, outcome, &kind_submitted, created_at_ms).await;
     }
 
     match outcome {
         Ok(kind) => {
-            write_task(&pool, capture_id, &kind).await?;
+            write_task(&pool, capture_id, &kind, created_at_ms).await?;
             Ok((StatusCode::CREATED, Json(json!({}))).into_response())
         }
         Err(rejection) => Ok(rejected(rejection, &kind_submitted).into_response()),
@@ -228,7 +239,7 @@ mod tests {
         capture_id: i64,
         body: Value,
     ) -> axum::response::Response {
-        let app = crate::platform::app::build_app(pool.clone());
+        let app = crate::platform::app::build_app(pool.clone(), Clock::system());
         app.oneshot(
             Request::builder()
                 .method("POST")
@@ -262,7 +273,7 @@ mod tests {
             .map(|(name, value)| format!("{name}={value}"))
             .collect::<Vec<_>>()
             .join("&");
-        let app = crate::platform::app::build_app(pool.clone());
+        let app = crate::platform::app::build_app(pool.clone(), Clock::system());
         app.oneshot(
             Request::builder()
                 .method("POST")

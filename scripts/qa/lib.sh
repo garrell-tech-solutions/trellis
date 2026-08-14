@@ -20,14 +20,23 @@ qa_wait_ready() {
   return 1
 }
 
-# Starts the trellis server against a fresh database and waits until it is
-# reachable. Sets DB_PATH, ADDR and SERVER_PID.
+# Starts the trellis server against a database (fresh, or an existing file to
+# restart against) and waits until it is reachable. Sets DB_PATH, ADDR and
+# SERVER_PID. now_iso, when given, is passed as --now so the server starts
+# believing it is that instant; the clock then advances normally from there
+# (stats_ratio's "--now offsets the clock, it does not stop it"). now_iso
+# applies to this process only -- pass it again on every restart that needs
+# it, per qa/stats_ratio.md.
 qa_start_server() {
-  local bin="$1" db_path="$2" log_file="$3" port
+  local bin="$1" db_path="$2" log_file="$3" now_iso="${4:-}" port
   DB_PATH="$db_path"
   port="$(qa_free_port)"
   ADDR="127.0.0.1:$port"
-  "$bin" serve --db "$DB_PATH" --addr "$ADDR" >"$log_file" 2>&1 &
+  if [[ -n "$now_iso" ]]; then
+    "$bin" serve --db "$DB_PATH" --addr "$ADDR" --now "$now_iso" >"$log_file" 2>&1 &
+  else
+    "$bin" serve --db "$DB_PATH" --addr "$ADDR" >"$log_file" 2>&1 &
+  fi
   SERVER_PID=$!
   if ! qa_wait_ready "$port"; then
     echo "server never became reachable at $ADDR" >&2

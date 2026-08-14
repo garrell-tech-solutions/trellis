@@ -36,6 +36,29 @@ target, threshold, script_dir, cobertura_path = (
 sys.path.insert(0, script_dir)
 from _common import rust_files_under, production_functions
 
+
+def strip_trailing_turbofish(name):
+    """Drop a trailing `::<Generic::Path>` instantiation, e.g. turning
+    `render_template::<trellis_server::inbox::http::InboxTemplate>` into
+    `render_template`. Only a *trailing* bracket is a turbofish; a leading
+    one is a trait-impl qualifier (`<Type as Trait<Generic>>::method`) whose
+    own method name already survives a plain rsplit, so it's left alone."""
+    if not name.endswith(">"):
+        return name
+    depth = 0
+    i = len(name) - 1
+    while i >= 0:
+        if name[i] == ">":
+            depth += 1
+        elif name[i] == "<":
+            depth -= 1
+            if depth == 0:
+                break
+        i -= 1
+    if i > 0 and name[:i].endswith("::"):
+        return name[: i - 2]
+    return name
+
 # file -> [(short_name, line_rate, [line numbers])]
 # Keyed on normpath: cargo-llvm-cov's cobertura export writes filenames
 # without a "./" prefix (e.g. "crates/foo/src/lib.rs"), while `find .`
@@ -52,7 +75,7 @@ for cls in tree.iter("class"):
     entries = coverage_by_file.setdefault(filename, [])
     for m in methods_el.findall("method"):
         full_name = m.get("name")
-        short_name = full_name.rsplit("::", 1)[-1]
+        short_name = strip_trailing_turbofish(full_name).rsplit("::", 1)[-1]
         if short_name.startswith("{closure"):
             continue
         lines_el = m.find("lines")

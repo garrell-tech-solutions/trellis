@@ -10,11 +10,12 @@
 
 use crate::capture::store;
 use crate::inbox::view::CaptureRow;
-use crate::platform::clock::now_ms;
+use crate::platform::clock::Clock;
+use crate::platform::request::content_type_is_json;
 use crate::platform::response::{render_template, write_failed};
 use askama::Template;
 use axum::extract::{FromRequest, Request, State};
-use axum::http::{header, StatusCode};
+use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::{Form, Json};
 use serde::Deserialize;
@@ -59,13 +60,6 @@ impl<S: Send + Sync> FromRequest<S> for CaptureInput {
     }
 }
 
-fn content_type_is_json(req: &Request) -> bool {
-    req.headers()
-        .get(header::CONTENT_TYPE)
-        .and_then(|v| v.to_str().ok())
-        .is_some_and(|v| v.starts_with("application/json"))
-}
-
 #[derive(Template)]
 #[template(path = "capture_row.html")]
 struct CaptureRowTemplate<'a> {
@@ -74,9 +68,10 @@ struct CaptureRowTemplate<'a> {
 
 pub async fn create_capture(
     State(pool): State<SqlitePool>,
+    State(clock): State<Clock>,
     CaptureInput { payload, from_form }: CaptureInput,
 ) -> Result<Response, StatusCode> {
-    let id = store::insert(&pool, &payload.raw_text, &payload.source, now_ms())
+    let id = store::insert(&pool, &payload.raw_text, &payload.source, clock.now_ms())
         .await
         .map_err(write_failed)?;
 
@@ -104,7 +99,7 @@ mod tests {
     use tower::ServiceExt;
 
     async fn post_capture(pool: &SqlitePool, content_type: &str, body: &str) -> Response {
-        let app = crate::platform::app::build_app(pool.clone());
+        let app = crate::platform::app::build_app(pool.clone(), Clock::system());
         app.oneshot(
             Request::builder()
                 .method("POST")

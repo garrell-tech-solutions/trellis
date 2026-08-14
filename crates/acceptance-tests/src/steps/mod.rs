@@ -24,6 +24,7 @@ mod inbox_view;
 mod migrations;
 mod payloads;
 mod quota_triage_validation;
+mod stats_ratio;
 mod triage;
 mod triage_from_page;
 mod unknown_kind_rejection;
@@ -129,6 +130,9 @@ pub async fn dispatch(
         return outcome;
     }
     if let Some(outcome) = triage_from_page::dispatch(world, text).await {
+        return outcome;
+    }
+    if let Some(outcome) = stats_ratio::dispatch(world, text, example).await {
         return outcome;
     }
     if let Some(outcome) = migrations::dispatch(world, text).await {

@@ -3,25 +3,40 @@
 Not an Analyzer Contract entry point itself -- imported by the scripts that
 are.
 """
+import os
 import re
 import subprocess
 
 
 def rust_files_under(path, root):
     """Resolve a file-or-directory analyzer argument to a list of source
-    files, excluding build output and generated acceptance-test entry
-    points (see .gitignore: those are regenerated from features/*.feature
-    and are not hand-maintained source)."""
+    files, excluding build output, git worktrees, and generated
+    acceptance-test entry points (see .gitignore: those are regenerated
+    from features/*.feature and are not hand-maintained source).
+
+    `find` does not read .gitignore, so `.claude/worktrees/agent-*/` and
+    `.worktrees/<role>/` -- each a whole second copy of this tree -- are
+    walked unless excluded here, and every function in them is counted
+    again under a path nobody is working in.
+
+    Exclusions are matched against the path *relative to `root`*, not the
+    path as `find` printed it. Matching the raw path would mean an analyzer
+    invoked from inside a worktree with an absolute argument saw
+    `/.claude/` in every result and reported a clean, empty run."""
     out = subprocess.run(
         ["find", path, "-name", "*.rs", "-type", "f"],
         capture_output=True, text=True, check=True,
     ).stdout.splitlines()
-    skip_substrings = ("/target/", "/build/", "/mutants.out")
+    skip_substrings = (
+        "/target/", "/build/", "/mutants.out", "/.worktrees/", "/.claude/",
+    )
+    root_abs = os.path.abspath(root)
     files = []
     for f in out:
-        if any(s in f for s in skip_substrings):
+        rel = "/" + os.path.relpath(os.path.abspath(f), root_abs)
+        if any(s in rel for s in skip_substrings):
             continue
-        if re.search(r"/tests/[^/]*_acceptance\.rs$", f):
+        if re.search(r"/tests/[^/]*_acceptance\.rs$", rel):
             continue
         files.append(f)
     return sorted(files)

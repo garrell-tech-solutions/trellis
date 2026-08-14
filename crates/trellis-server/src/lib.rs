@@ -20,7 +20,11 @@
 //! - a domain's `store` — persistence. Translates core types into rows, and
 //!   is the only place production SQL is written.
 //! - a domain's `view` — what the templates render, never a store row type
-//!   (`T-templates-take-view-models`).
+//!   (`T-templates-take-view-models`). Only the domains that need one have
+//!   one: `inbox`'s rows are assembled from two queries and carry a slot for
+//!   an in-flight rejection, so its page shape is its own; `stats` renders
+//!   what `scheduler_core::ratio` already decided, and a struct copying that
+//!   field for field would be a view model in name only.
 //!
 //! A handler calls its store; a store never calls back. What changed is that
 //! those three roles are now leaves under a capability's name rather than

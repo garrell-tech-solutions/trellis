@@ -1,5 +1,6 @@
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
+use trellis_server::platform::clock::Clock;
 
 fn arg_value(args: &[String], flag: &str) -> Option<String> {
     let mut iter = args.iter();
@@ -56,21 +57,22 @@ fn parse_now_arg(args: &[String]) -> Result<Option<i64>, String> {
     }
 }
 
-/// Pins the process clock when `--now` was given; a no-op otherwise, leaving
-/// the server on the real clock.
-fn apply_pinned_now(pinned_now_ms: Option<i64>) {
-    if let Some(pinned_now_ms) = pinned_now_ms {
-        trellis_server::platform::clock::set_pinned_now(pinned_now_ms);
+/// The clock this server will run on: pinned when `--now` was given, the real
+/// one otherwise. Chosen here, in the one place that reads the command line,
+/// and handed to `build_app` — nothing downstream decides what time it is.
+fn clock_for(pinned_now_ms: Option<i64>) -> Clock {
+    match pinned_now_ms {
+        Some(pinned_now_ms) => Clock::pinned_at(pinned_now_ms),
+        None => Clock::system(),
     }
 }
 
 async fn bind_server(args: &[String]) -> Result<(tokio::net::TcpListener, axum::Router), String> {
     let db_path = require_db_arg(args);
     let addr = arg_value(args, "--addr").unwrap_or_else(|| "127.0.0.1:8080".to_string());
-    let pinned_now_ms = parse_now_arg(args)?;
+    let clock = clock_for(parse_now_arg(args)?);
     let pool = connect_and_migrate(&db_path).await?;
-    apply_pinned_now(pinned_now_ms);
-    let app = trellis_server::platform::app::build_app(pool);
+    let app = trellis_server::platform::app::build_app(pool, clock);
     let listener = tokio::net::TcpListener::bind(&addr)
         .await
         .map_err(|err| format!("bind {addr}: {err}"))?;
@@ -150,6 +152,30 @@ mod tests {
     fn parse_now_arg_rejects_an_unparseable_value() {
         let args = vec!["--now".to_string(), "not-a-timestamp".to_string()];
         assert!(parse_now_arg(&args).is_err());
+    }
+
+    #[test]
+    fn clock_for_a_pinned_instant_reads_that_instant() {
+        let pinned = 1784883600000;
+
+        let got = clock_for(Some(pinned)).now_ms();
+
+        assert!(
+            (pinned..pinned + 1_000).contains(&got),
+            "expected a clock reading roughly {pinned}, got {got}"
+        );
+    }
+
+    #[test]
+    fn clock_for_no_pin_reads_the_real_clock() {
+        let real = jiff::Timestamp::now().as_millisecond();
+
+        let got = clock_for(None).now_ms();
+
+        assert!(
+            (got - real).abs() < 1_000,
+            "expected a clock reading roughly {real}, got {got}"
+        );
     }
 
     #[tokio::test]

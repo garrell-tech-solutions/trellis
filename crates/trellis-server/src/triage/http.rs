@@ -10,7 +10,7 @@
 //! always has, unchanged.
 
 use crate::inbox::lists::{build_lists, ListsTemplate};
-use crate::platform::clock::now_ms;
+use crate::platform::clock::Clock;
 use crate::platform::request::content_type_is_json;
 use crate::platform::response::{render_template, write_failed};
 use crate::triage::store;
@@ -131,8 +131,15 @@ fn rejection_message(rejection: &TriageRejection, kind_submitted: &Value) -> Str
     }
 }
 
-async fn write_task(pool: &SqlitePool, capture_id: i64, kind: &TaskKind) -> Result<(), StatusCode> {
-    let created_at_ms = now_ms();
+/// The instant is passed in rather than read here: reading the clock is the
+/// handler's business, and a triage stamps the task and the capture it
+/// consumed with the same one.
+async fn write_task(
+    pool: &SqlitePool,
+    capture_id: i64,
+    kind: &TaskKind,
+    created_at_ms: i64,
+) -> Result<(), StatusCode> {
     store::insert_task(pool, capture_id, kind, created_at_ms)
         .await
         .map_err(write_failed)?;
@@ -150,6 +157,7 @@ async fn page_response(
     capture_id: i64,
     outcome: Result<TaskKind, TriageRejection>,
     kind_submitted: &Value,
+    created_at_ms: i64,
 ) -> Result<Response, StatusCode> {
     let (status, error) = match &outcome {
         Ok(_) => (StatusCode::CREATED, None),
@@ -159,7 +167,7 @@ async fn page_response(
         ),
     };
     if let Ok(kind) = &outcome {
-        write_task(pool, capture_id, kind).await?;
+        write_task(pool, capture_id, kind, created_at_ms).await?;
     }
     let (captures, tasks) = build_lists(pool, error).await.map_err(write_failed)?;
     Ok(render_template(status, &ListsTemplate { captures, tasks }))
@@ -183,6 +191,7 @@ fn fields_from_input(input: TriageInput) -> (TriageFields, Value) {
 
 pub async fn create_triage(
     State(pool): State<SqlitePool>,
+    State(clock): State<Clock>,
     Path(capture_id): Path<i64>,
     input: TriageInput,
 ) -> Result<Response, StatusCode> {
@@ -190,14 +199,15 @@ pub async fn create_triage(
     let (fields, kind_submitted) = fields_from_input(input);
 
     let outcome = TaskKind::from_fields(&fields);
+    let created_at_ms = clock.now_ms();
 
     if from_page {
-        return page_response(&pool, capture_id, outcome, &kind_submitted).await;
+        return page_response(&pool, capture_id, outcome, &kind_submitted, created_at_ms).await;
     }
 
     match outcome {
         Ok(kind) => {
-            write_task(&pool, capture_id, &kind).await?;
+            write_task(&pool, capture_id, &kind, created_at_ms).await?;
             Ok((StatusCode::CREATED, Json(json!({}))).into_response())
         }
         Err(rejection) => Ok(rejected(rejection, &kind_submitted).into_response()),
@@ -229,7 +239,7 @@ mod tests {
         capture_id: i64,
         body: Value,
     ) -> axum::response::Response {
-        let app = crate::platform::app::build_app(pool.clone());
+        let app = crate::platform::app::build_app(pool.clone(), Clock::system());
         app.oneshot(
             Request::builder()
                 .method("POST")
@@ -263,7 +273,7 @@ mod tests {
             .map(|(name, value)| format!("{name}={value}"))
             .collect::<Vec<_>>()
             .join("&");
-        let app = crate::platform::app::build_app(pool.clone());
+        let app = crate::platform::app::build_app(pool.clone(), Clock::system());
         app.oneshot(
             Request::builder()
                 .method("POST")

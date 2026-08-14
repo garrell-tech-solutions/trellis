@@ -1,11 +1,17 @@
 //! Composition root: wires each capability's handlers onto routes and hands
-//! them the pool they persist through.
+//! them the pool they persist through and the clock they stamp rows with.
 //!
 //! The one place in the crate that names every business domain at once —
 //! which is what a route table is, and why it sits in `platform` rather than
 //! inside any capability. Read top to bottom it is also the shortest
 //! statement of what this server does.
+//!
+//! It is also the one place that decides what a handler may reach for. Both
+//! of [`AppState`]'s fields are things the outside world supplies — a
+//! database and a clock — so composing them here is what keeps a handler from
+//! going and finding either for itself.
 
+use axum::extract::FromRef;
 use axum::routing::{get, post};
 use axum::Router;
 use sqlx::SqlitePool;
@@ -13,17 +19,39 @@ use sqlx::SqlitePool;
 use crate::capture::http::create_capture;
 use crate::inbox::http::show_inbox;
 use crate::platform::assets::htmx_js;
+use crate::platform::clock::Clock;
 use crate::stats::http::show_stats;
 use crate::triage::http::create_triage;
 
-pub fn build_app(pool: SqlitePool) -> Router {
+/// What a handler is given: somewhere to persist, and an answer to "what time
+/// is it". The [`FromRef`] impls below let each handler extract only the half
+/// it uses, so `show_inbox` still names nothing but a pool.
+#[derive(Clone)]
+pub struct AppState {
+    pub pool: SqlitePool,
+    pub clock: Clock,
+}
+
+impl FromRef<AppState> for SqlitePool {
+    fn from_ref(state: &AppState) -> Self {
+        state.pool.clone()
+    }
+}
+
+impl FromRef<AppState> for Clock {
+    fn from_ref(state: &AppState) -> Self {
+        state.clock
+    }
+}
+
+pub fn build_app(pool: SqlitePool, clock: Clock) -> Router {
     Router::new()
         .route("/", get(show_inbox))
         .route("/static/htmx.min.js", get(htmx_js))
         .route("/captures", post(create_capture))
         .route("/captures/{id}/triage", post(create_triage))
         .route("/stats", get(show_stats))
-        .with_state(pool)
+        .with_state(AppState { pool, clock })
 }
 
 #[cfg(test)]
@@ -38,7 +66,7 @@ mod tests {
     #[tokio::test]
     async fn capture_request_persists_a_row_and_responds_within_50ms() {
         let (_dir, pool) = test_pool().await;
-        let app = build_app(pool.clone());
+        let app = build_app(pool.clone(), Clock::system());
 
         let start = std::time::Instant::now();
         let response = app
@@ -72,7 +100,7 @@ mod tests {
             let rt = tokio::runtime::Runtime::new().unwrap();
             let (status, stored) = rt.block_on(async {
                 let (_dir, pool) = test_pool().await;
-                let app = build_app(pool.clone());
+                let app = build_app(pool.clone(), Clock::system());
 
                 let body = serde_json::json!({"raw_text": raw_text, "source": source}).to_string();
                 let response = app

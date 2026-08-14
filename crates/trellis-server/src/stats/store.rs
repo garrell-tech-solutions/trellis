@@ -1,4 +1,4 @@
-//! `/stats`'s own query: task counts by kind inside the rolling window.
+//! `/stats`'s own query: task counts by kind between two instants.
 //!
 //! Counting tasks for `/stats` is `/stats`'s query, in its own `store.rs` --
 //! not a function added to `triage::store`, which already touches `tasks`
@@ -6,27 +6,21 @@
 //! `tasks.created_at_ms`, which is triage time (R2: "instrument the ratio at
 //! triage") -- not `captures.created_at_ms`, which is capture time and
 //! diverges from it whenever a capture sits in the inbox for days.
+//!
+//! Which instants those are is not decided here. This module knows how to
+//! count a range; how long the range is, and what the counts mean, are
+//! `scheduler_core::ratio`'s -- so a change to the window's length never
+//! reaches the SQL, and the SQL never has an opinion about the ratio.
 
+use scheduler_core::ratio::KindCounts;
 use sqlx::SqlitePool;
-
-/// Fourteen days, in milliseconds: "14 x 24h back from now -- instant
-/// arithmetic on epoch millis, no timezone" (the handoff brief's settled
-/// answer to the window's exact definition).
-pub const WINDOW_MS: i64 = 14 * 24 * 60 * 60 * 1000;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub struct WindowCounts {
-    pub committed: i64,
-    pub pool: i64,
-    pub quota: i64,
-}
 
 /// Task counts by kind, over `[window_start_ms, now_ms]` inclusive.
 pub async fn counts_in_window(
     pool: &SqlitePool,
     window_start_ms: i64,
     now_ms: i64,
-) -> Result<WindowCounts, sqlx::Error> {
+) -> Result<KindCounts, sqlx::Error> {
     let rows: Vec<(String, i64)> = sqlx::query_as(
         "SELECT kind, COUNT(*) FROM tasks \
          WHERE created_at_ms >= ? AND created_at_ms <= ? \
@@ -37,26 +31,18 @@ pub async fn counts_in_window(
     .fetch_all(pool)
     .await?;
 
-    let mut counts = WindowCounts::default();
+    let mut counts = KindCounts::default();
     for (kind, count) in rows {
-        add_kind_count(&mut counts, &kind, count);
+        counts.record(&kind, count);
     }
     Ok(counts)
-}
-
-fn add_kind_count(counts: &mut WindowCounts, kind: &str, count: i64) {
-    match kind {
-        "committed" => counts.committed = count,
-        "pool" => counts.pool = count,
-        "quota" => counts.quota = count,
-        _ => {}
-    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::platform::test_support::test_pool;
+    use proptest::prelude::*;
     use scheduler_core::task::TaskKind;
 
     async fn given_a_capture(pool: &SqlitePool) -> i64 {
@@ -78,7 +64,7 @@ mod tests {
 
         let counts = counts_in_window(&pool, 0, 1_000_000).await.unwrap();
 
-        assert_eq!(counts, WindowCounts::default());
+        assert_eq!(counts, KindCounts::default());
     }
 
     #[tokio::test]
@@ -111,7 +97,7 @@ mod tests {
 
         assert_eq!(
             counts,
-            WindowCounts {
+            KindCounts {
                 committed: 1,
                 pool: 2,
                 quota: 1,
@@ -160,5 +146,66 @@ mod tests {
             .unwrap();
 
         assert!(counts_in_window(&pool, 0, 1_000).await.is_err());
+    }
+
+    /// The three kinds, indexed so a property can draw one.
+    fn nth_kind(index: usize) -> TaskKind {
+        match index {
+            0 => TaskKind::Pool,
+            1 => TaskKind::Committed {
+                deadline: 1787245200000,
+                deadline_type: scheduler_core::task::DeadlineType::Hard,
+                priority: scheduler_core::task::Priority::P1,
+            },
+            _ => TaskKind::Quota {
+                target_count: 3,
+                target_minutes_each: 45,
+                period: scheduler_core::task::Period::Week,
+            },
+        }
+    }
+
+    fn tallied_in_memory(tasks: &[(usize, i64)], window: (i64, i64)) -> KindCounts {
+        let mut counts = KindCounts::default();
+        for (kind, created_at_ms) in tasks {
+            if !(window.0..=window.1).contains(created_at_ms) {
+                continue;
+            }
+            match kind {
+                0 => counts.pool += 1,
+                1 => counts.committed += 1,
+                _ => counts.quota += 1,
+            }
+        }
+        counts
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig { cases: 32, ..ProptestConfig::default() })]
+
+        /// The query is a *filter and a tally*: exactly the tasks stamped
+        /// inside the window, each counted against its own kind. The example
+        /// tests above sample one task either side of each bound; this pins
+        /// the whole `WHERE` and the `GROUP BY` against any mix of kinds and
+        /// any spread of instants across and around the window, which is the
+        /// shape a fortnight of real triage actually has.
+        #[test]
+        #[ignore]
+        fn counts_in_window_tallies_exactly_the_tasks_stamped_inside_it(
+            tasks in prop::collection::vec((0usize..3, 900i64..2_101), 0..12),
+        ) {
+            const WINDOW: (i64, i64) = (1_000, 2_000);
+
+            let rt = tokio::runtime::Runtime::new().unwrap();
+            let counted = rt.block_on(async {
+                let (_dir, pool) = test_pool().await;
+                for (kind, created_at_ms) in &tasks {
+                    given_a_task(&pool, &nth_kind(*kind), *created_at_ms).await;
+                }
+                counts_in_window(&pool, WINDOW.0, WINDOW.1).await.unwrap()
+            });
+
+            prop_assert_eq!(counted, tallied_in_memory(&tasks, WINDOW));
+        }
     }
 }

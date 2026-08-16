@@ -24,13 +24,6 @@ use scheduler_core::life_area::{parse_name, NameRejection};
 use serde::Deserialize;
 use sqlx::SqlitePool;
 
-fn to_option(row: store::LifeAreaRow) -> LifeAreaOption {
-    LifeAreaOption {
-        id: row.id,
-        name: row.name,
-    }
-}
-
 #[derive(Template)]
 #[template(path = "life_areas.html")]
 struct LifeAreasTemplate {
@@ -52,7 +45,7 @@ async fn active_options(pool: &SqlitePool) -> Result<Vec<LifeAreaOption>, Status
         .await
         .map_err(write_failed)?
         .into_iter()
-        .map(to_option)
+        .map(LifeAreaOption::from)
         .collect())
 }
 

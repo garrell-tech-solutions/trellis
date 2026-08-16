@@ -14,6 +14,15 @@ pub struct LifeAreaOption {
     pub name: String,
 }
 
+impl From<super::store::LifeAreaRow> for LifeAreaOption {
+    fn from(row: super::store::LifeAreaRow) -> Self {
+        LifeAreaOption {
+            id: row.id,
+            name: row.name,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

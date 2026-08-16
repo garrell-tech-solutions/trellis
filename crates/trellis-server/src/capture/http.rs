@@ -91,10 +91,7 @@ pub async fn create_capture(
             .await
             .map_err(write_failed)?
             .into_iter()
-            .map(|row| LifeAreaOption {
-                id: row.id,
-                name: row.name,
-            })
+            .map(LifeAreaOption::from)
             .collect();
         Ok(render_template(
             StatusCode::CREATED,

@@ -87,10 +87,7 @@ async fn build_life_area_options(pool: &SqlitePool) -> Result<Vec<LifeAreaOption
     Ok(life_areas_store::list_active(pool)
         .await?
         .into_iter()
-        .map(|row| LifeAreaOption {
-            id: row.id,
-            name: row.name,
-        })
+        .map(LifeAreaOption::from)
         .collect())
 }
 

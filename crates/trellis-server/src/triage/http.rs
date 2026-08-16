@@ -182,22 +182,25 @@ enum TriageOutcome {
     Rejected(Rejection),
 }
 
-/// Kind first, then whether a life area was submitted at all, then — only
-/// once both are settled — whether the submitted name resolves. That fixed
-/// order is what every existing rejection scenario already assumes: a
-/// submission naming no kind must still report `unknown_kind`, not a
-/// life-area complaint, however the life area was submitted, and the
-/// database is not touched until there is a kind and a name worth resolving.
+/// Kind first, then whether a life area was submitted at all — both
+/// decidable without the database, and in that fixed order so a submission
+/// naming no kind still reports `unknown_kind`, not a life-area complaint,
+/// however the life area was submitted.
+fn well_formed_submission(fields: &TriageFields) -> Result<(TaskKind, String), TriageRejection> {
+    let kind = TaskKind::from_fields(fields)?;
+    let life_area_name = require_life_area(fields)?;
+    Ok((kind, life_area_name))
+}
+
+/// Only once a submission is well-formed does the database enter it: whether
+/// the submitted life-area name resolves to a real, active row. The database
+/// is not touched until there is a kind and a name worth resolving.
 async fn decide_triage(
     pool: &SqlitePool,
     fields: &TriageFields,
 ) -> Result<TriageOutcome, StatusCode> {
-    let kind = match TaskKind::from_fields(fields) {
-        Ok(kind) => kind,
-        Err(rejection) => return Ok(TriageOutcome::Rejected(Rejection::Core(rejection))),
-    };
-    let life_area_name = match require_life_area(fields) {
-        Ok(name) => name,
+    let (kind, life_area_name) = match well_formed_submission(fields) {
+        Ok(pair) => pair,
         Err(rejection) => return Ok(TriageOutcome::Rejected(Rejection::Core(rejection))),
     };
     let life_area_id = store::find_active_life_area_id(pool, &life_area_name)

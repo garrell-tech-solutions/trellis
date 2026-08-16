@@ -1,6 +1,14 @@
 <li id="capture-row-{{ capture.id }}">
 {{ capture.text }}
-<form style="display:inline" hx-post="/captures/{{ capture.id }}/triage" hx-vals='{"kind":"pool"}' hx-target="#lists" hx-swap="outerHTML">
+<form style="display:inline" hx-post="/captures/{{ capture.id }}/triage" hx-target="#lists" hx-swap="outerHTML">
+<input type="hidden" name="kind" value="pool">
+<label>Life area
+<select name="life_area">
+{% for life_area in life_areas %}
+<option value="{{ life_area.name }}">{{ life_area.name }}</option>
+{% endfor %}
+</select>
+</label>
 <button type="submit">Pool</button>
 </form>
 <details style="display:inline-block">
@@ -22,6 +30,13 @@
 <option value="P4">P4</option>
 </select>
 </label>
+<label>Life area
+<select name="life_area">
+{% for life_area in life_areas %}
+<option value="{{ life_area.name }}">{{ life_area.name }}</option>
+{% endfor %}
+</select>
+</label>
 <button type="submit">Add</button>
 </form>
 </details>
@@ -35,6 +50,13 @@
 <select name="period">
 <option value="week">week</option>
 <option value="month">month</option>
+</select>
+</label>
+<label>Life area
+<select name="life_area">
+{% for life_area in life_areas %}
+<option value="{{ life_area.name }}">{{ life_area.name }}</option>
+{% endfor %}
 </select>
 </label>
 <button type="submit">Add</button>

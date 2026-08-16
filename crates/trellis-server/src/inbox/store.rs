@@ -23,19 +23,24 @@ pub async fn list_untriaged(pool: &SqlitePool) -> Result<Vec<UntriagedCapture>, 
 }
 
 /// A row of [`list_tasks`]: a task, alongside the text of the capture it was
-/// triaged from — the task list's own rows have no text of their own to
-/// show, so the join is this query's business, not the page's.
+/// triaged from and the name of the life area it was tagged with — the task
+/// list's own rows have no text or life-area name of their own to show, so
+/// both joins are this query's business, not the page's. `life_area_name` is
+/// a `LEFT JOIN`: an archived life area still resolves (it is retired, not
+/// deleted), and this query does not filter on that state at all.
 #[derive(Debug, Clone, PartialEq, Eq, sqlx::FromRow)]
 pub struct TaskWithCaptureText {
     pub kind: String,
     pub raw_text: String,
+    pub life_area_name: Option<String>,
 }
 
 /// Every task, newest first.
 pub async fn list_tasks(pool: &SqlitePool) -> Result<Vec<TaskWithCaptureText>, sqlx::Error> {
     sqlx::query_as(
-        "SELECT tasks.kind, captures.raw_text FROM tasks \
+        "SELECT tasks.kind, captures.raw_text, life_areas.name AS life_area_name FROM tasks \
          JOIN captures ON captures.id = tasks.capture_id \
+         LEFT JOIN life_areas ON life_areas.id = tasks.life_area_id \
          ORDER BY tasks.id DESC",
     )
     .fetch_all(pool)
@@ -119,7 +124,7 @@ mod tests {
         let (_dir, pool) = test_pool().await;
         let capture_id = given_a_capture(&pool, "buy milk").await;
 
-        insert_task(&pool, capture_id, &TaskKind::Pool, 7)
+        insert_task(&pool, capture_id, &TaskKind::Pool, None, 7)
             .await
             .unwrap();
 
@@ -128,8 +133,48 @@ mod tests {
             vec![TaskWithCaptureText {
                 kind: "pool".to_string(),
                 raw_text: "buy milk".to_string(),
+                life_area_name: None,
             }]
         );
+    }
+
+    #[tokio::test]
+    async fn list_tasks_reports_the_name_of_the_life_area_a_task_was_tagged_with() {
+        let (_dir, pool) = test_pool().await;
+        let capture_id = given_a_capture(&pool, "buy milk").await;
+        let learning_id = crate::life_areas::store::find_by_name(&pool, "Learning")
+            .await
+            .unwrap()
+            .unwrap()
+            .id;
+
+        insert_task(&pool, capture_id, &TaskKind::Pool, Some(learning_id), 7)
+            .await
+            .unwrap();
+
+        let tasks = list_tasks(&pool).await.unwrap();
+        assert_eq!(tasks[0].life_area_name.as_deref(), Some("Learning"));
+    }
+
+    #[tokio::test]
+    async fn list_tasks_still_resolves_the_name_of_an_archived_life_area() {
+        let (_dir, pool) = test_pool().await;
+        let capture_id = given_a_capture(&pool, "buy milk").await;
+        let learning_id = crate::life_areas::store::find_by_name(&pool, "Learning")
+            .await
+            .unwrap()
+            .unwrap()
+            .id;
+        insert_task(&pool, capture_id, &TaskKind::Pool, Some(learning_id), 7)
+            .await
+            .unwrap();
+        crate::life_areas::store::archive(&pool, learning_id, 1_000)
+            .await
+            .unwrap();
+
+        let tasks = list_tasks(&pool).await.unwrap();
+
+        assert_eq!(tasks[0].life_area_name.as_deref(), Some("Learning"));
     }
 
     #[tokio::test]
@@ -138,10 +183,10 @@ mod tests {
         let first_capture = given_a_capture(&pool, "buy milk").await;
         let second_capture = given_a_capture(&pool, "call the dentist").await;
 
-        insert_task(&pool, first_capture, &TaskKind::Pool, 1)
+        insert_task(&pool, first_capture, &TaskKind::Pool, None, 1)
             .await
             .unwrap();
-        insert_task(&pool, second_capture, &TaskKind::Pool, 2)
+        insert_task(&pool, second_capture, &TaskKind::Pool, None, 2)
             .await
             .unwrap();
 

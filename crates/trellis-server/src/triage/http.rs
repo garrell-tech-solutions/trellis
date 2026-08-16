@@ -18,7 +18,7 @@ use axum::extract::{FromRequest, Path, Request, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::{Form, Json};
-use scheduler_core::task::{TaskKind, TriageFields, TriageRejection};
+use scheduler_core::task::{require_life_area, TaskKind, TriageFields, TriageRejection};
 use serde::Deserialize;
 use serde_json::{json, Value};
 use sqlx::SqlitePool;
@@ -42,6 +42,7 @@ fn triage_fields(payload: &Value) -> TriageFields {
         target_count: payload.get("target_count").and_then(Value::as_i64),
         target_minutes_each: payload.get("target_minutes_each").and_then(Value::as_i64),
         period: string_field(payload, "period"),
+        life_area: string_field(payload, "life_area"),
     }
 }
 
@@ -58,6 +59,7 @@ pub struct TriageFormRequest {
     target_count: Option<i64>,
     target_minutes_each: Option<i64>,
     period: Option<String>,
+    life_area: Option<String>,
 }
 
 impl From<TriageFormRequest> for TriageFields {
@@ -70,6 +72,7 @@ impl From<TriageFormRequest> for TriageFields {
             target_count: form.target_count,
             target_minutes_each: form.target_minutes_each,
             period: form.period,
+            life_area: form.life_area,
         }
     }
 }
@@ -102,6 +105,17 @@ impl<S: Send + Sync> FromRequest<S> for TriageInput {
     }
 }
 
+/// Every way triage can be refused. `Core` wraps `scheduler_core`'s own
+/// rejection — well-formedness, decidable without a database. `UnknownLifeArea`
+/// is the one reason that needs the database to detect: it asks whether a
+/// submitted name currently resolves to a real, active row, which is an
+/// adapter question, not `scheduler_core`'s to answer
+/// (`T-capability-owns-its-queries`).
+enum Rejection {
+    Core(TriageRejection),
+    UnknownLifeArea(String),
+}
+
 /// The rejection contract: a client error whose body names what was wrong.
 /// A rejection that does not say what was wrong is a failure even with the
 /// right status code.
@@ -111,11 +125,16 @@ impl<S: Send + Sync> FromRequest<S> for TriageInput {
 /// value into `None`, so this module holds the only surviving copy of what
 /// actually arrived. That is what lets `{"kind": 7}` echo back `7` instead
 /// of `null` (T-unknown-kind-rejected: report what was submitted).
-fn rejected(rejection: TriageRejection, kind_submitted: &Value) -> (StatusCode, Json<Value>) {
+fn rejected(rejection: &Rejection, kind_submitted: &Value) -> (StatusCode, Json<Value>) {
     let body = match rejection {
-        TriageRejection::MissingField(field) => json!({ "missing_field": field.name() }),
-        TriageRejection::InvalidField(field) => json!({ "invalid_field": field.name() }),
-        TriageRejection::UnknownKind => json!({ "unknown_kind": kind_submitted }),
+        Rejection::Core(TriageRejection::MissingField(field)) => {
+            json!({ "missing_field": field.name() })
+        }
+        Rejection::Core(TriageRejection::InvalidField(field)) => {
+            json!({ "invalid_field": field.name() })
+        }
+        Rejection::Core(TriageRejection::UnknownKind) => json!({ "unknown_kind": kind_submitted }),
+        Rejection::UnknownLifeArea(name) => json!({ "unknown_life_area": name }),
     };
     (StatusCode::UNPROCESSABLE_ENTITY, Json(body))
 }
@@ -123,11 +142,18 @@ fn rejected(rejection: TriageRejection, kind_submitted: &Value) -> (StatusCode, 
 /// A one-line summary of a rejection for the page's per-row error slot. Not
 /// the API's rejection contract (that stays `rejected`'s job) — this is
 /// prose for a human reading the form they just submitted.
-fn rejection_message(rejection: &TriageRejection, kind_submitted: &Value) -> String {
+fn rejection_message(rejection: &Rejection, kind_submitted: &Value) -> String {
     match rejection {
-        TriageRejection::MissingField(field) => format!("{} is required", field.name()),
-        TriageRejection::InvalidField(field) => format!("{} is invalid", field.name()),
-        TriageRejection::UnknownKind => format!("unrecognised kind: {kind_submitted}"),
+        Rejection::Core(TriageRejection::MissingField(field)) => {
+            format!("{} is required", field.name())
+        }
+        Rejection::Core(TriageRejection::InvalidField(field)) => {
+            format!("{} is invalid", field.name())
+        }
+        Rejection::Core(TriageRejection::UnknownKind) => {
+            format!("unrecognised kind: {kind_submitted}")
+        }
+        Rejection::UnknownLifeArea(name) => format!("{name} is not a life area"),
     }
 }
 
@@ -138,9 +164,10 @@ async fn write_task(
     pool: &SqlitePool,
     capture_id: i64,
     kind: &TaskKind,
+    life_area_id: i64,
     created_at_ms: i64,
 ) -> Result<(), StatusCode> {
-    store::insert_task(pool, capture_id, kind, created_at_ms)
+    store::insert_task(pool, capture_id, kind, Some(life_area_id), created_at_ms)
         .await
         .map_err(write_failed)?;
     store::mark_triaged(pool, capture_id, created_at_ms)
@@ -149,28 +176,68 @@ async fn write_task(
     Ok(())
 }
 
+/// What a validated submission is ready to write, or why it is not.
+enum TriageOutcome {
+    Accepted { kind: TaskKind, life_area_id: i64 },
+    Rejected(Rejection),
+}
+
+/// Kind first, then whether a life area was submitted at all, then — only
+/// once both are settled — whether the submitted name resolves. That fixed
+/// order is what every existing rejection scenario already assumes: a
+/// submission naming no kind must still report `unknown_kind`, not a
+/// life-area complaint, however the life area was submitted, and the
+/// database is not touched until there is a kind and a name worth resolving.
+async fn decide_triage(
+    pool: &SqlitePool,
+    fields: &TriageFields,
+) -> Result<TriageOutcome, StatusCode> {
+    let kind = match TaskKind::from_fields(fields) {
+        Ok(kind) => kind,
+        Err(rejection) => return Ok(TriageOutcome::Rejected(Rejection::Core(rejection))),
+    };
+    let life_area_name = match require_life_area(fields) {
+        Ok(name) => name,
+        Err(rejection) => return Ok(TriageOutcome::Rejected(Rejection::Core(rejection))),
+    };
+    let life_area_id = store::find_active_life_area_id(pool, &life_area_name)
+        .await
+        .map_err(write_failed)?;
+    Ok(match life_area_id {
+        Some(life_area_id) => TriageOutcome::Accepted { kind, life_area_id },
+        None => TriageOutcome::Rejected(Rejection::UnknownLifeArea(life_area_name)),
+    })
+}
+
 /// The page-originated response: whatever happened, re-render `#lists` from
 /// current state. On success that reflects the write; on rejection nothing
 /// changed, but the failing capture's row carries the rejection message.
 async fn page_response(
     pool: &SqlitePool,
     capture_id: i64,
-    outcome: Result<TaskKind, TriageRejection>,
+    outcome: &TriageOutcome,
     kind_submitted: &Value,
     created_at_ms: i64,
 ) -> Result<Response, StatusCode> {
-    let (status, error) = match &outcome {
-        Ok(_) => (StatusCode::CREATED, None),
-        Err(rejection) => (
+    let (status, error) = match outcome {
+        TriageOutcome::Accepted { .. } => (StatusCode::CREATED, None),
+        TriageOutcome::Rejected(rejection) => (
             StatusCode::UNPROCESSABLE_ENTITY,
             Some((capture_id, rejection_message(rejection, kind_submitted))),
         ),
     };
-    if let Ok(kind) = &outcome {
-        write_task(pool, capture_id, kind, created_at_ms).await?;
+    if let TriageOutcome::Accepted { kind, life_area_id } = outcome {
+        write_task(pool, capture_id, kind, *life_area_id, created_at_ms).await?;
     }
-    let (captures, tasks) = build_lists(pool, error).await.map_err(write_failed)?;
-    Ok(render_template(status, &ListsTemplate { captures, tasks }))
+    let (captures, tasks, life_areas) = build_lists(pool, error).await.map_err(write_failed)?;
+    Ok(render_template(
+        status,
+        &ListsTemplate {
+            captures,
+            tasks,
+            life_areas,
+        },
+    ))
 }
 
 /// The two things every branch of [`TriageInput`] must produce: the fields
@@ -197,20 +264,22 @@ pub async fn create_triage(
 ) -> Result<Response, StatusCode> {
     let from_page = matches!(input, TriageInput::Form(_));
     let (fields, kind_submitted) = fields_from_input(input);
-
-    let outcome = TaskKind::from_fields(&fields);
     let created_at_ms = clock.now_ms();
 
+    let outcome = decide_triage(&pool, &fields).await?;
+
     if from_page {
-        return page_response(&pool, capture_id, outcome, &kind_submitted, created_at_ms).await;
+        return page_response(&pool, capture_id, &outcome, &kind_submitted, created_at_ms).await;
     }
 
     match outcome {
-        Ok(kind) => {
-            write_task(&pool, capture_id, &kind, created_at_ms).await?;
+        TriageOutcome::Accepted { kind, life_area_id } => {
+            write_task(&pool, capture_id, &kind, life_area_id, created_at_ms).await?;
             Ok((StatusCode::CREATED, Json(json!({}))).into_response())
         }
-        Err(rejection) => Ok(rejected(rejection, &kind_submitted).into_response()),
+        TriageOutcome::Rejected(rejection) => {
+            Ok(rejected(&rejection, &kind_submitted).into_response())
+        }
     }
 }
 
@@ -309,7 +378,12 @@ mod tests {
         let (_dir, pool) = test_pool().await;
         let capture_id = insert_untriaged_capture(&pool, "buy milk").await;
 
-        let response = triage_response(&pool, capture_id, json!({ "kind": "pool" })).await;
+        let response = triage_response(
+            &pool,
+            capture_id,
+            json!({ "kind": "pool", "life_area": "Work" }),
+        )
+        .await;
 
         assert_eq!(response.status(), StatusCode::CREATED);
         let row: (String, Option<i64>, Option<i64>, Option<i64>, Option<String>) =
@@ -339,7 +413,8 @@ mod tests {
                 "kind": "committed",
                 "deadline": "2026-08-20T17:00:00Z",
                 "deadline_type": "hard",
-                "priority": "P1"
+                "priority": "P1",
+                "life_area": "Work"
             }),
         )
         .await;
@@ -372,7 +447,8 @@ mod tests {
                 "kind": "quota",
                 "target_count": 3,
                 "target_minutes_each": 45,
-                "period": "week"
+                "period": "week",
+                "life_area": "Work"
             }),
         )
         .await;
@@ -398,7 +474,12 @@ mod tests {
         let (_dir, pool) = test_pool().await;
         let capture_id = insert_untriaged_capture(&pool, "buy milk").await;
 
-        triage_response(&pool, capture_id, json!({ "kind": "pool" })).await;
+        triage_response(
+            &pool,
+            capture_id,
+            json!({ "kind": "pool", "life_area": "Work" }),
+        )
+        .await;
 
         let triaged_at: Option<i64> =
             sqlx::query_scalar("SELECT triaged_at FROM captures WHERE id = ?")
@@ -686,7 +767,12 @@ mod tests {
         let (_dir, pool) = test_pool().await;
         let capture_id = insert_untriaged_capture(&pool, "buy milk").await;
 
-        let response = page_triage_response(&pool, capture_id, &[("kind", "pool")]).await;
+        let response = page_triage_response(
+            &pool,
+            capture_id,
+            &[("kind", "pool"), ("life_area", "Work")],
+        )
+        .await;
 
         assert_eq!(response.status(), StatusCode::CREATED);
         let html = response_html(response).await;
@@ -736,7 +822,8 @@ mod tests {
             "priority": "P1",
             "target_count": 3,
             "target_minutes_each": 45,
-            "period": "week"
+            "period": "week",
+            "life_area": "Work"
         });
 
         assert_eq!(
@@ -749,6 +836,7 @@ mod tests {
                 target_count: Some(3),
                 target_minutes_each: Some(45),
                 period: Some("week".to_string()),
+                life_area: Some("Work".to_string()),
             }
         );
     }
@@ -766,26 +854,51 @@ mod tests {
 
     #[test]
     fn a_missing_field_rejection_names_the_field() {
-        let (status, Json(body)) =
-            rejected(TriageRejection::MissingField(Field::Priority), &Value::Null);
+        let (status, Json(body)) = rejected(
+            &Rejection::Core(TriageRejection::MissingField(Field::Priority)),
+            &Value::Null,
+        );
         assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
         assert_eq!(body, json!({ "missing_field": "priority" }));
     }
 
     #[test]
     fn an_invalid_field_rejection_names_the_field() {
-        let (status, Json(body)) =
-            rejected(TriageRejection::InvalidField(Field::Deadline), &Value::Null);
+        let (status, Json(body)) = rejected(
+            &Rejection::Core(TriageRejection::InvalidField(Field::Deadline)),
+            &Value::Null,
+        );
         assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
         assert_eq!(body, json!({ "invalid_field": "deadline" }));
     }
 
     #[test]
     fn an_unknown_kind_rejection_echoes_the_value_it_is_given() {
-        let (status, Json(body)) =
-            rejected(TriageRejection::UnknownKind, &json!({ "not": "a string" }));
+        let (status, Json(body)) = rejected(
+            &Rejection::Core(TriageRejection::UnknownKind),
+            &json!({ "not": "a string" }),
+        );
         assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
         assert_eq!(body, json!({ "unknown_kind": { "not": "a string" } }));
+    }
+
+    #[test]
+    fn an_unknown_life_area_rejection_echoes_the_submitted_name() {
+        let (status, Json(body)) = rejected(
+            &Rejection::UnknownLifeArea("Gardening".to_string()),
+            &Value::Null,
+        );
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+        assert_eq!(body, json!({ "unknown_life_area": "Gardening" }));
+    }
+
+    #[test]
+    fn an_unknown_life_area_rejection_message_names_it() {
+        let message = rejection_message(
+            &Rejection::UnknownLifeArea("Gardening".to_string()),
+            &Value::Null,
+        );
+        assert_eq!(message, "Gardening is not a life area");
     }
 
     /// A submission expressed as JSON and as a form, field for field.
@@ -809,6 +922,7 @@ mod tests {
             fields.target_minutes_each.map(Value::from),
         );
         put("period", fields.period.clone().map(Value::from));
+        put("life_area", fields.life_area.clone().map(Value::from));
         Value::Object(body)
     }
 
@@ -821,6 +935,7 @@ mod tests {
             target_count: fields.target_count,
             target_minutes_each: fields.target_minutes_each,
             period: fields.period.clone(),
+            life_area: fields.life_area.clone(),
         }
     }
 
@@ -844,6 +959,7 @@ mod tests {
             target_count in proptest::option::of(any::<i64>()),
             target_minutes_each in proptest::option::of(any::<i64>()),
             period in proptest::option::of(".{0,10}"),
+            life_area in proptest::option::of(".{0,20}"),
         ) {
             let submission = TriageFields {
                 kind,
@@ -853,6 +969,7 @@ mod tests {
                 target_count,
                 target_minutes_each,
                 period,
+                life_area,
             };
 
             let from_json = triage_fields(&json_body(&submission));

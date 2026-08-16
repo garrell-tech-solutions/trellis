@@ -5,6 +5,7 @@
 //! - [`capture`] — raw text in, fast enough to use mid-thought.
 //! - [`triage`] — a capture becomes a typed task.
 //! - [`inbox`] — what is still waiting, and what has already become a task.
+//! - [`life_areas`] — user-managed rows a task is tagged with at triage.
 //! - [`stats`] — the rolling committed:pool ratio, R2's instrumentation.
 //! - [`platform`] — deliberately *not* a capability: the route table, the
 //!   database, the clock, the vendored static assets. It is named so that a
@@ -38,6 +39,7 @@
 
 pub mod capture;
 pub mod inbox;
+pub mod life_areas;
 pub mod platform;
 pub mod stats;
 pub mod triage;

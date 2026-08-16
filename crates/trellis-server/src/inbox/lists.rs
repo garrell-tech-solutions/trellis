@@ -10,6 +10,8 @@
 
 use crate::inbox::store;
 use crate::inbox::view::{CaptureRow, TaskRow};
+use crate::life_areas::store as life_areas_store;
+use crate::life_areas::view::LifeAreaOption;
 use askama::Template;
 use sqlx::SqlitePool;
 
@@ -18,25 +20,33 @@ use sqlx::SqlitePool;
 /// that template the triage response) because a triage response is not a
 /// page: it has no `<head>`, no quick-add form, nothing but the two lists
 /// htmx is replacing.
+///
+/// `life_areas` rides along beside `captures` and `tasks` because the
+/// triage forms inside `capture_row.html` are part of this same fragment —
+/// the picker they offer must reflect the current, active set on every
+/// render, the same "no restart" requirement the management page itself
+/// has.
 #[derive(Template)]
 #[template(path = "lists.html")]
 pub(crate) struct ListsTemplate {
     pub(crate) captures: Vec<CaptureRow>,
     pub(crate) tasks: Vec<TaskRow>,
+    pub(crate) life_areas: Vec<LifeAreaOption>,
 }
 
-/// Fetches the current inbox and task list, attaching `error` to whichever
-/// capture's triage attempt just failed (if any). Shared by the inbox page
-/// and the triage handler's page-originated response: "the page and
-/// `POST /captures/{id}/triage` are one code path" extends to what gets
+/// Fetches the current inbox, task list and triage picker, attaching `error`
+/// to whichever capture's triage attempt just failed (if any). Shared by the
+/// inbox page and the triage handler's page-originated response: "the page
+/// and `POST /captures/{id}/triage` are one code path" extends to what gets
 /// rendered afterward, not just to how the write itself happens.
 pub(crate) async fn build_lists(
     pool: &SqlitePool,
     error: Option<(i64, String)>,
-) -> Result<(Vec<CaptureRow>, Vec<TaskRow>), sqlx::Error> {
+) -> Result<(Vec<CaptureRow>, Vec<TaskRow>, Vec<LifeAreaOption>), sqlx::Error> {
     let captures = build_capture_rows(pool, error).await?;
     let tasks = build_task_rows(pool).await?;
-    Ok((captures, tasks))
+    let life_areas = build_life_area_options(pool).await?;
+    Ok((captures, tasks, life_areas))
 }
 
 async fn build_capture_rows(
@@ -64,6 +74,22 @@ async fn build_task_rows(pool: &SqlitePool) -> Result<Vec<TaskRow>, sqlx::Error>
         .map(|task| TaskRow {
             kind: task.kind,
             text: task.raw_text,
+            life_area: task.life_area_name,
+        })
+        .collect())
+}
+
+/// The triage picker's choices: every life area not yet archived
+/// (`life_areas::store::list_active` -- the same query the management page's
+/// own list uses, reused here rather than re-issued, since both need exactly
+/// "what is currently choosable").
+async fn build_life_area_options(pool: &SqlitePool) -> Result<Vec<LifeAreaOption>, sqlx::Error> {
+    Ok(life_areas_store::list_active(pool)
+        .await?
+        .into_iter()
+        .map(|row| LifeAreaOption {
+            id: row.id,
+            name: row.name,
         })
         .collect())
 }
@@ -83,7 +109,7 @@ mod tests {
             .unwrap();
         let other_id = insert_capture(&pool, "buy milk", "web", 1).await.unwrap();
 
-        let (captures, _tasks) =
+        let (captures, _tasks, _life_areas) =
             build_lists(&pool, Some((failed_id, "deadline is required".to_string())))
                 .await
                 .unwrap();
@@ -98,14 +124,45 @@ mod tests {
     async fn the_task_list_carries_each_triaged_tasks_kind_and_capture_text() {
         let (_dir, pool) = test_pool().await;
         let capture_id = insert_capture(&pool, "buy milk", "web", 0).await.unwrap();
-        crate::triage::store::insert_task(&pool, capture_id, &TaskKind::Pool, 0)
+        crate::triage::store::insert_task(&pool, capture_id, &TaskKind::Pool, None, 0)
             .await
             .unwrap();
 
-        let (_captures, tasks) = build_lists(&pool, None).await.unwrap();
+        let (_captures, tasks, _life_areas) = build_lists(&pool, None).await.unwrap();
 
         assert_eq!(tasks.len(), 1);
         assert_eq!(tasks[0].kind, "pool");
         assert_eq!(tasks[0].text, "buy milk");
+    }
+
+    #[tokio::test]
+    async fn the_life_area_options_are_the_active_seed() {
+        let (_dir, pool) = test_pool().await;
+
+        let (_captures, _tasks, life_areas) = build_lists(&pool, None).await.unwrap();
+
+        assert_eq!(
+            life_areas
+                .iter()
+                .map(|a| a.name.as_str())
+                .collect::<Vec<_>>(),
+            vec!["Work", "Fitness", "Learning", "Family", "Home"]
+        );
+    }
+
+    #[tokio::test]
+    async fn an_archived_life_area_is_excluded_from_the_picker_options() {
+        let (_dir, pool) = test_pool().await;
+        let learning = crate::life_areas::store::find_by_name(&pool, "Learning")
+            .await
+            .unwrap()
+            .unwrap();
+        crate::life_areas::store::archive(&pool, learning.id, 1_000)
+            .await
+            .unwrap();
+
+        let (_captures, _tasks, life_areas) = build_lists(&pool, None).await.unwrap();
+
+        assert!(!life_areas.iter().any(|a| a.name == "Learning"));
     }
 }

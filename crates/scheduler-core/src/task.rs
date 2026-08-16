@@ -27,6 +27,14 @@ pub struct TriageFields {
     pub target_count: Option<i64>,
     pub target_minutes_each: Option<i64>,
     pub period: Option<String>,
+    /// The life area submitted by name, required for every kind
+    /// (`T-quota-targets-required`'s reasoning: a field the downstream
+    /// cannot function without belongs required at the boundary). Whether
+    /// this name currently resolves to a real, active life area is not
+    /// decidable here -- that needs the `life_areas` table, so it is the
+    /// adapter's job (`T-capability-owns-its-queries`) once
+    /// [`require_life_area`] has confirmed something was submitted at all.
+    pub life_area: Option<String>,
 }
 
 /// A field a triage submission must supply, or supply a valid value for.
@@ -38,6 +46,7 @@ pub enum Field {
     TargetCount,
     TargetMinutesEach,
     Period,
+    LifeArea,
 }
 
 impl Field {
@@ -50,6 +59,7 @@ impl Field {
             Self::TargetCount => "target_count",
             Self::TargetMinutesEach => "target_minutes_each",
             Self::Period => "period",
+            Self::LifeArea => "life_area",
         }
     }
 }
@@ -227,6 +237,14 @@ fn require_positive(field: Field, value: i64) -> Result<i64, TriageRejection> {
     } else {
         Err(TriageRejection::InvalidField(field))
     }
+}
+
+/// Requires that a life area was submitted at all -- every kind needs one
+/// (T-quota-targets-required's reasoning applies equally here). Whether the
+/// submitted name currently resolves to a real, active life area is a
+/// database question and is not decided here; see [`TriageFields::life_area`].
+pub fn require_life_area(fields: &TriageFields) -> Result<String, TriageRejection> {
+    require(Field::LifeArea, &fields.life_area)
 }
 
 impl TaskKind {
@@ -430,6 +448,38 @@ mod tests {
         assert_eq!(Field::TargetCount.name(), "target_count");
         assert_eq!(Field::TargetMinutesEach.name(), "target_minutes_each");
         assert_eq!(Field::Period.name(), "period");
+        assert_eq!(Field::LifeArea.name(), "life_area");
+    }
+
+    // --- require_life_area --------------------------------------------------
+
+    #[test]
+    fn require_life_area_accepts_a_present_non_empty_name() {
+        let fields = TriageFields {
+            life_area: Some("Work".to_string()),
+            ..TriageFields::default()
+        };
+        assert_eq!(require_life_area(&fields), Ok("Work".to_string()));
+    }
+
+    #[test]
+    fn require_life_area_rejects_an_absent_life_area() {
+        assert_eq!(
+            require_life_area(&TriageFields::default()),
+            Err(TriageRejection::MissingField(Field::LifeArea))
+        );
+    }
+
+    #[test]
+    fn require_life_area_rejects_an_empty_life_area_the_same_as_absent() {
+        let fields = TriageFields {
+            life_area: Some(String::new()),
+            ..TriageFields::default()
+        };
+        assert_eq!(
+            require_life_area(&fields),
+            Err(TriageRejection::MissingField(Field::LifeArea))
+        );
     }
 
     // --- TaskKind::from_fields — pool --------------------------------------

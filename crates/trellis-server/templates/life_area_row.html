@@ -1,0 +1,6 @@
+<li id="life-area-row-{{ life_area.id }}">
+{{ life_area.name }}
+<form style="display:inline" hx-post="/life-areas/{{ life_area.id }}/archive" hx-target="#life-areas-list" hx-swap="outerHTML">
+<button type="submit">Archive</button>
+</form>
+</li>

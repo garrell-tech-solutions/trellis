@@ -3,6 +3,7 @@
 
 use crate::inbox::lists::build_lists;
 use crate::inbox::view::{CaptureRow, TaskRow};
+use crate::life_areas::view::LifeAreaOption;
 use crate::platform::response::{render_template, write_failed};
 use askama::Template;
 use axum::extract::State;
@@ -15,13 +16,18 @@ use sqlx::SqlitePool;
 struct InboxTemplate {
     captures: Vec<CaptureRow>,
     tasks: Vec<TaskRow>,
+    life_areas: Vec<LifeAreaOption>,
 }
 
 pub async fn show_inbox(State(pool): State<SqlitePool>) -> Result<Response, StatusCode> {
-    let (captures, tasks) = build_lists(&pool, None).await.map_err(write_failed)?;
+    let (captures, tasks, life_areas) = build_lists(&pool, None).await.map_err(write_failed)?;
     Ok(render_template(
         StatusCode::OK,
-        &InboxTemplate { captures, tasks },
+        &InboxTemplate {
+            captures,
+            tasks,
+            life_areas,
+        },
     ))
 }
 

@@ -1,0 +1,619 @@
+//! Step handlers for `features/life_areas.feature` (managing life areas) and
+//! `features/life_area_triage.feature` (tagging a task with one at triage).
+//! One module for both -- they are the two feature files a single handoff
+//! brief specified together (#47's "combined cut"), and most of what
+//! `life_area_triage.feature` needs beyond "triage rejects/accepts" is the
+//! same picker and tag vocabulary `life_areas.feature` already needs.
+//!
+//! Kept as its own module rather than folded into `triage::dispatch`, which
+//! the complexity gate is already red on (handoff brief gotcha #2).
+//!
+//! Life-area-specific rejections reuse [`super::triage::then_rejection_names`]
+//! directly: that helper already falls back from a JSON `missing_field` body
+//! to an HTML `"{field} is required"` substring, which is exactly the two
+//! shapes `life_area`'s own two "required" rejections take here (a triage
+//! JSON rejection, and the management page's own HTML fragment).
+
+use super::html;
+use super::payloads;
+use super::triage::{then_rejection_names, when_triaged};
+use super::triage_from_page::select_option_values;
+use super::*;
+use axum::body::Body;
+use axum::http::Request;
+use serde_json::{json, Value};
+
+static WHEN_LIFE_AREAS_PAGE_VIEWED: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^the life areas page is viewed$").unwrap());
+static WHEN_LIFE_AREA_ADDED_FROM_PAGE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r#"^a life area named "([^"]+)" is added from the life areas page$"#).unwrap()
+});
+static GIVEN_LIFE_AREA_WAS_ADDED: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r#"^a life area named "([^"]+)" was added$"#).unwrap());
+static LIFE_AREA_IS_ARCHIVED: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r#"^the life area "([^"]+)" is archived$"#).unwrap());
+static THEN_LIFE_AREAS_LISTED_EXACTLY: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r#"^the life areas listed are exactly "([^"]+)"$"#).unwrap());
+static THEN_ADD_NOT_REDIRECT: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^the add response does not redirect the browser$").unwrap());
+static THEN_ADD_REJECTED: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^the add is rejected$").unwrap());
+static THEN_REJECTION_SAYS_ALREADY: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r#"^the rejection says "([^"]+)" is already a life area$"#).unwrap()
+});
+static THEN_REJECTION_SAYS_NOT_A_LIFE_AREA: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r#"^the rejection says "([^"]+)" is not a life area$"#).unwrap());
+static THEN_REJECTION_NAMES_LITERAL: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r#"^the rejection names "([^"]+)"$"#).unwrap());
+static THEN_LIFE_AREAS_LIST_NO_SCRIPT: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r#"^the life areas list does not contain an unescaped "<script>" tag$"#).unwrap()
+});
+static THEN_LIFE_AREAS_LIST_CONTAINS_WORD: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r#"^the life areas list contains the word "([^"]+)"$"#).unwrap());
+static THEN_TRIAGE_CHOICES_EXACTLY: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r#"^the triage life area choices are exactly "([^"]+)"$"#).unwrap()
+});
+static WHEN_NAMED_CAPTURE_TRIAGED_IN_LIFE_AREA: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r#"^"([^"]+)" is triaged as a pool task in life area "([^"]+)"$"#).unwrap()
+});
+static WHEN_CAPTURE_TRIAGED_IN_LIFE_AREA: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r#"^the capture is triaged as a pool task in life area "([^"]+)"$"#).unwrap()
+});
+static WHEN_TRIAGED_OMITTING_LIFE_AREA: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r#"^the capture is triaged as a (\S+) task with "life_area" omitted$"#).unwrap()
+});
+static THEN_TASK_LIST_SHOWS_TAGGED: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r#"^the task list shows "([^"]+)" tagged "([^"]+)"$"#).unwrap());
+
+pub async fn dispatch(
+    world: &mut World,
+    text: &str,
+    example: &BTreeMap<String, String>,
+) -> Option<Result<(), String>> {
+    if WHEN_LIFE_AREAS_PAGE_VIEWED.is_match(text) {
+        return Some(when_life_areas_page_viewed(world).await);
+    }
+    if let Some(caps) = WHEN_LIFE_AREA_ADDED_FROM_PAGE.captures(text) {
+        return Some(dispatch_add_life_area(world, example, &caps).await);
+    }
+    if let Some(caps) = GIVEN_LIFE_AREA_WAS_ADDED.captures(text) {
+        return Some(dispatch_add_life_area(world, example, &caps).await);
+    }
+    if let Some(caps) = LIFE_AREA_IS_ARCHIVED.captures(text) {
+        return Some(dispatch_archive_life_area(world, example, &caps).await);
+    }
+    if let Some(caps) = THEN_LIFE_AREAS_LISTED_EXACTLY.captures(text) {
+        return Some(dispatch_life_areas_listed_exactly(world, example, &caps));
+    }
+    if THEN_ADD_NOT_REDIRECT.is_match(text) {
+        return Some(then_not_redirect(world));
+    }
+    if THEN_ADD_REJECTED.is_match(text) {
+        return Some(then_status_is(world, 422));
+    }
+    if let Some(caps) = THEN_REJECTION_SAYS_ALREADY.captures(text) {
+        return Some(dispatch_rejection_says_already(world, example, &caps));
+    }
+    if let Some(caps) = THEN_REJECTION_SAYS_NOT_A_LIFE_AREA.captures(text) {
+        return Some(dispatch_rejection_says_not_a_life_area(
+            world, example, &caps,
+        ));
+    }
+    if let Some(caps) = THEN_REJECTION_NAMES_LITERAL.captures(text) {
+        return Some(then_rejection_names(world, &caps[1]));
+    }
+    if THEN_LIFE_AREAS_LIST_NO_SCRIPT.is_match(text) {
+        return Some(then_life_areas_list_excludes(world, "<script>"));
+    }
+    if let Some(caps) = THEN_LIFE_AREAS_LIST_CONTAINS_WORD.captures(text) {
+        return Some(then_life_areas_list_contains(world, &caps[1]));
+    }
+    if let Some(caps) = THEN_TRIAGE_CHOICES_EXACTLY.captures(text) {
+        return Some(dispatch_triage_choices_exactly(world, example, &caps).await);
+    }
+    if let Some(caps) = WHEN_NAMED_CAPTURE_TRIAGED_IN_LIFE_AREA.captures(text) {
+        return Some(dispatch_named_capture_triaged(world, &caps).await);
+    }
+    if let Some(caps) = WHEN_CAPTURE_TRIAGED_IN_LIFE_AREA.captures(text) {
+        return Some(dispatch_capture_triaged_in_life_area(world, &caps).await);
+    }
+    if let Some(caps) = WHEN_TRIAGED_OMITTING_LIFE_AREA.captures(text) {
+        return Some(dispatch_triaged_omitting_life_area(world, example, &caps).await);
+    }
+    if let Some(caps) = THEN_TASK_LIST_SHOWS_TAGGED.captures(text) {
+        return Some(then_task_list_shows_tagged(world, &caps[1], &caps[2]));
+    }
+    None
+}
+
+static BRACKETED_PLACEHOLDER: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^<(\w+)>$").unwrap());
+
+/// A captured value that may be a literal, or a `<name>` placeholder to look
+/// up in the current example row -- most steps here are shared by a plain
+/// `Scenario` (a literal in the text) and a `Scenario Outline` (a
+/// placeholder), and the parser leaves `<name>` unsubstituted either way.
+///
+/// The whole value must match `^<\w+>$`, not merely start with `<` and end
+/// with `>` -- a hostile name like `<script>alert('boom')</script>` does
+/// both and is not a placeholder at all.
+fn resolve(example: &BTreeMap<String, String>, raw: &str) -> Result<String, String> {
+    match BRACKETED_PLACEHOLDER.captures(raw) {
+        Some(caps) => example_value(example, &caps[1]).map(str::to_string),
+        None => Ok(raw.to_string()),
+    }
+}
+
+/// Delegates to [`super::inbox_view::html_response`], which already does
+/// "send a request, record status and body" -- every request built in this
+/// module only adds the method, route and form body.
+async fn html_get(world: &mut World, uri: &str) -> Result<(), String> {
+    let request = Request::builder()
+        .uri(uri)
+        .body(Body::empty())
+        .map_err(|e| format!("build request: {e}"))?;
+    super::inbox_view::html_response(world, request).await
+}
+
+async fn when_life_areas_page_viewed(world: &mut World) -> Result<(), String> {
+    html_get(world, "/life-areas").await
+}
+
+async fn post_life_area_form(world: &mut World, name: &str) -> Result<(), String> {
+    let body = format!("name={}", super::inbox_view::urlencode(name));
+    let request = Request::builder()
+        .method("POST")
+        .uri("/life-areas")
+        .header("content-type", "application/x-www-form-urlencoded")
+        .body(Body::from(body))
+        .map_err(|e| format!("build request: {e}"))?;
+    super::inbox_view::html_response(world, request).await
+}
+
+async fn dispatch_add_life_area(
+    world: &mut World,
+    example: &BTreeMap<String, String>,
+    caps: &regex::Captures<'_>,
+) -> Result<(), String> {
+    let name = resolve(example, &caps[1])?;
+    post_life_area_form(world, &name).await
+}
+
+async fn life_area_id_by_name(world: &World, name: &str) -> Result<i64, String> {
+    let pool = world.pool()?;
+    let row = trellis_server::life_areas::store::find_by_name(pool, name)
+        .await
+        .map_err(|e| format!("find life area {name:?}: {e}"))?
+        .ok_or_else(|| format!("no life area named {name:?}"))?;
+    Ok(row.id)
+}
+
+async fn dispatch_archive_life_area(
+    world: &mut World,
+    example: &BTreeMap<String, String>,
+    caps: &regex::Captures<'_>,
+) -> Result<(), String> {
+    let name = resolve(example, &caps[1])?;
+    let id = life_area_id_by_name(world, &name).await?;
+    let request = Request::builder()
+        .method("POST")
+        .uri(format!("/life-areas/{id}/archive"))
+        .body(Body::empty())
+        .map_err(|e| format!("build request: {e}"))?;
+    super::inbox_view::html_response(world, request).await
+}
+
+fn html_body(world: &World) -> Result<&str, String> {
+    world
+        .last_html_body
+        .as_deref()
+        .ok_or_else(|| "no HTML response recorded".to_string())
+}
+
+fn life_areas_section(world: &World) -> Result<&str, String> {
+    html::between(html_body(world)?, r#"<ul id="life-areas">"#, "</ul>")
+}
+
+/// The name inside each `<li id="life-area-row-N">...</li>`, in document
+/// order -- the archive button's own text lives after the name in the same
+/// `<li>`, so this stops at the row's `<form` rather than at its `</li>`.
+fn life_area_row_names(section: &str) -> Vec<String> {
+    section
+        .split(r#"<li id="life-area-row-"#)
+        .skip(1)
+        .filter_map(|chunk| {
+            let after_id = chunk.split_once('>')?.1;
+            Some(after_id.split("<form").next()?.trim().to_string())
+        })
+        .collect()
+}
+
+fn dispatch_life_areas_listed_exactly(
+    world: &mut World,
+    example: &BTreeMap<String, String>,
+    caps: &regex::Captures<'_>,
+) -> Result<(), String> {
+    let listed = resolve(example, &caps[1])?;
+    let expected: Vec<String> = listed.split(", ").map(str::to_string).collect();
+    let section = life_areas_section(world)?;
+    let actual = life_area_row_names(section);
+    if actual == expected {
+        Ok(())
+    } else {
+        Err(format!("expected life areas {expected:?}, got {actual:?}"))
+    }
+}
+
+fn then_not_redirect(world: &mut World) -> Result<(), String> {
+    match world.last_status {
+        Some(status) if !(300..400).contains(&status) => Ok(()),
+        Some(status) => Err(format!("expected no redirect, got status {status}")),
+        None => Err("no response recorded".to_string()),
+    }
+}
+
+fn then_status_is(world: &mut World, expected: u16) -> Result<(), String> {
+    match world.last_status {
+        Some(status) if status == expected => Ok(()),
+        Some(status) => Err(format!("expected status {expected}, got {status}")),
+        None => Err("no response recorded".to_string()),
+    }
+}
+
+fn dispatch_rejection_says_already(
+    world: &mut World,
+    example: &BTreeMap<String, String>,
+    caps: &regex::Captures<'_>,
+) -> Result<(), String> {
+    let name = resolve(example, &caps[1])?;
+    let body = html_body(world)?;
+    let needle = format!("{name} is already a life area");
+    if body.contains(&needle) {
+        Ok(())
+    } else {
+        Err(format!(
+            "expected {needle:?} in the rejection, got:\n{body}"
+        ))
+    }
+}
+
+fn dispatch_rejection_says_not_a_life_area(
+    world: &mut World,
+    example: &BTreeMap<String, String>,
+    caps: &regex::Captures<'_>,
+) -> Result<(), String> {
+    let name = resolve(example, &caps[1])?;
+    let body = world
+        .last_response_body
+        .as_ref()
+        .ok_or_else(|| "no rejection body recorded".to_string())?;
+    match body.get("unknown_life_area").and_then(Value::as_str) {
+        Some(actual) if actual == name => Ok(()),
+        other => Err(format!(
+            "expected the rejection to report unknown_life_area {name:?}, body reported {other:?}"
+        )),
+    }
+}
+
+fn then_life_areas_list_excludes(world: &mut World, forbidden: &str) -> Result<(), String> {
+    let section = life_areas_section(world)?;
+    if section.contains(forbidden) {
+        Err(format!(
+            "expected no {forbidden:?} in the life areas list, got:\n{section}"
+        ))
+    } else {
+        Ok(())
+    }
+}
+
+fn then_life_areas_list_contains(world: &mut World, expected: &str) -> Result<(), String> {
+    let section = life_areas_section(world)?;
+    if section.contains(expected) {
+        Ok(())
+    } else {
+        Err(format!(
+            "expected {expected:?} in the life areas list, got:\n{section}"
+        ))
+    }
+}
+
+/// Reads the current triage picker's own rendered `<select>`, the same
+/// element a real triage form offers -- checking the underlying query
+/// directly would miss a bug where the data is right and the template is
+/// not. Some scenarios reach this step with no untriaged capture left (the
+/// only one in scope has already been triaged), so there may be no picker on
+/// the page to read; a throwaway capture guarantees one without disturbing
+/// anything the scenario itself is asserting on (the task list and the
+/// life-areas list are both unaffected by one more untriaged row).
+async fn current_triage_life_area_choices(world: &mut World) -> Result<Vec<String>, String> {
+    let pool = world.pool()?.clone();
+    sqlx::query(
+        "INSERT INTO captures (raw_text, source, created_at_ms) \
+         VALUES ('__life_area_picker_probe__', 'test', 0)",
+    )
+    .execute(&pool)
+    .await
+    .map_err(|e| format!("insert probe capture: {e}"))?;
+    html_get(world, "/").await?;
+    let body = html_body(world)?;
+    let section = html::captures_section(body)?;
+    select_option_values(section, "life_area")
+}
+
+async fn dispatch_triage_choices_exactly(
+    world: &mut World,
+    example: &BTreeMap<String, String>,
+    caps: &regex::Captures<'_>,
+) -> Result<(), String> {
+    let listed = resolve(example, &caps[1])?;
+    let expected: Vec<String> = listed.split(", ").map(str::to_string).collect();
+    let actual = current_triage_life_area_choices(world).await?;
+    if actual == expected {
+        Ok(())
+    } else {
+        Err(format!(
+            "expected triage life area choices {expected:?}, got {actual:?}"
+        ))
+    }
+}
+
+async fn capture_id_by_text(world: &World, raw_text: &str) -> Result<i64, String> {
+    let pool = world.pool()?;
+    sqlx::query_scalar("SELECT id FROM captures WHERE raw_text = ? ORDER BY id DESC LIMIT 1")
+        .bind(raw_text)
+        .fetch_optional(pool)
+        .await
+        .map_err(|e| format!("query capture by text: {e}"))?
+        .ok_or_else(|| format!("no capture found with raw text {raw_text:?}"))
+}
+
+async fn triage_pool_in_life_area(
+    world: &mut World,
+    capture_id: i64,
+    life_area: &str,
+) -> Result<(), String> {
+    let uri = format!("/captures/{capture_id}/triage");
+    let response = super::app_client::post_json(
+        world,
+        &uri,
+        &json!({ "kind": "pool", "life_area": life_area }),
+    )
+    .await?;
+    world.last_status = Some(response.status);
+    world.last_response_body = response.body;
+    Ok(())
+}
+
+async fn dispatch_named_capture_triaged(
+    world: &mut World,
+    caps: &regex::Captures<'_>,
+) -> Result<(), String> {
+    let raw_text = &caps[1];
+    let life_area = &caps[2];
+    let capture_id = capture_id_by_text(world, raw_text).await?;
+    triage_pool_in_life_area(world, capture_id, life_area).await
+}
+
+async fn dispatch_capture_triaged_in_life_area(
+    world: &mut World,
+    caps: &regex::Captures<'_>,
+) -> Result<(), String> {
+    let life_area = &caps[1];
+    let capture_id = world
+        .last_capture_id
+        .ok_or_else(|| "no capture set up for this scenario".to_string())?;
+    triage_pool_in_life_area(world, capture_id, life_area).await
+}
+
+fn payload_for_kind(kind: &str) -> Result<Value, String> {
+    match kind {
+        "pool" => Ok(payloads::pool()),
+        "committed" => Ok(payloads::committed()),
+        "quota" => Ok(payloads::quota()),
+        other => Err(format!("unknown kind {other:?}")),
+    }
+}
+
+async fn dispatch_triaged_omitting_life_area(
+    world: &mut World,
+    example: &BTreeMap<String, String>,
+    caps: &regex::Captures<'_>,
+) -> Result<(), String> {
+    let kind = resolve(example, &caps[1])?;
+    let payload = payloads::without_field(payload_for_kind(&kind)?, "life_area");
+    when_triaged(world, payload).await
+}
+
+fn then_task_list_shows_tagged(
+    world: &mut World,
+    text: &str,
+    life_area: &str,
+) -> Result<(), String> {
+    let body = html_body(world)?;
+    let section = html::tasks_section(body)?;
+    let needle = format!("{text} ({life_area})");
+    if section.contains(&needle) {
+        Ok(())
+    } else {
+        Err(format!(
+            "expected {needle:?} in the task list, got:\n{section}"
+        ))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn example(pairs: &[(&str, &str)]) -> BTreeMap<String, String> {
+        pairs
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect()
+    }
+
+    #[test]
+    fn resolve_returns_a_literal_as_is() {
+        assert_eq!(resolve(&BTreeMap::new(), "Work"), Ok("Work".to_string()));
+    }
+
+    #[test]
+    fn resolve_looks_up_a_bracketed_placeholder() {
+        let ex = example(&[("name", "Side project")]);
+        assert_eq!(resolve(&ex, "<name>"), Ok("Side project".to_string()));
+    }
+
+    #[test]
+    fn resolve_errors_when_the_placeholder_is_missing_from_the_example() {
+        assert!(resolve(&BTreeMap::new(), "<name>").is_err());
+    }
+
+    #[test]
+    fn life_area_row_names_reads_names_in_document_order() {
+        let section = r#"<li id="life-area-row-1">Work <form></form></li><li id="life-area-row-2">Fitness <form></form></li>"#;
+        assert_eq!(
+            life_area_row_names(section),
+            vec!["Work".to_string(), "Fitness".to_string()]
+        );
+    }
+
+    #[test]
+    fn then_not_redirect_passes_for_a_non_redirect_status() {
+        let mut world = World::new();
+        world.last_status = Some(201);
+        assert_eq!(then_not_redirect(&mut world), Ok(()));
+    }
+
+    #[test]
+    fn then_not_redirect_errors_for_a_redirect_status() {
+        let mut world = World::new();
+        world.last_status = Some(302);
+        assert!(then_not_redirect(&mut world).is_err());
+    }
+
+    #[test]
+    fn then_status_is_passes_when_it_matches() {
+        let mut world = World::new();
+        world.last_status = Some(422);
+        assert_eq!(then_status_is(&mut world, 422), Ok(()));
+    }
+
+    #[test]
+    fn then_status_is_errors_when_it_does_not_match() {
+        let mut world = World::new();
+        world.last_status = Some(200);
+        assert!(then_status_is(&mut world, 422).is_err());
+    }
+
+    #[test]
+    fn dispatch_rejection_says_already_finds_the_message() {
+        let mut world = World::new();
+        world.last_html_body = Some("<p>Work is already a life area</p>".to_string());
+        let ex = example(&[]);
+        let caps = THEN_REJECTION_SAYS_ALREADY
+            .captures(r#"the rejection says "Work" is already a life area"#)
+            .unwrap();
+        assert_eq!(
+            dispatch_rejection_says_already(&mut world, &ex, &caps),
+            Ok(())
+        );
+    }
+
+    #[test]
+    fn dispatch_rejection_says_not_a_life_area_matches_the_json_body() {
+        let mut world = World::new();
+        world.last_response_body = Some(json!({ "unknown_life_area": "Gardening" }));
+        let ex = example(&[]);
+        let caps = THEN_REJECTION_SAYS_NOT_A_LIFE_AREA
+            .captures(r#"the rejection says "Gardening" is not a life area"#)
+            .unwrap();
+        assert_eq!(
+            dispatch_rejection_says_not_a_life_area(&mut world, &ex, &caps),
+            Ok(())
+        );
+    }
+
+    #[test]
+    fn then_task_list_shows_tagged_finds_the_text_and_life_area_together() {
+        let mut world = World::new();
+        world.last_html_body = Some(
+            r#"<ul id="tasks"><li>[pool] sketch the landing page (Learning)</li></ul>"#.to_string(),
+        );
+        assert_eq!(
+            then_task_list_shows_tagged(&mut world, "sketch the landing page", "Learning"),
+            Ok(())
+        );
+    }
+
+    #[test]
+    fn then_task_list_shows_tagged_errors_when_the_pair_does_not_match() {
+        let mut world = World::new();
+        world.last_html_body = Some(
+            r#"<ul id="tasks"><li>[pool] sketch the landing page (Home)</li></ul>"#.to_string(),
+        );
+        assert!(
+            then_task_list_shows_tagged(&mut world, "sketch the landing page", "Learning").is_err()
+        );
+    }
+
+    #[test]
+    fn payload_for_kind_names_the_kind_requested() {
+        assert_eq!(payload_for_kind("pool").unwrap()["kind"], json!("pool"));
+        assert_eq!(
+            payload_for_kind("committed").unwrap()["kind"],
+            json!("committed")
+        );
+        assert_eq!(payload_for_kind("quota").unwrap()["kind"], json!("quota"));
+    }
+
+    #[test]
+    fn payload_for_kind_errors_on_an_unknown_kind() {
+        assert!(payload_for_kind("someday").is_err());
+    }
+
+    #[tokio::test]
+    async fn when_life_areas_page_viewed_records_the_seeded_list() {
+        let mut world = migrated_world().await;
+
+        when_life_areas_page_viewed(&mut world).await.unwrap();
+
+        assert_eq!(world.last_status, Some(200));
+        assert!(html_body(&world).unwrap().contains("Work"));
+    }
+
+    #[tokio::test]
+    async fn post_life_area_form_adds_a_new_active_life_area() {
+        let mut world = migrated_world().await;
+
+        post_life_area_form(&mut world, "Side project")
+            .await
+            .unwrap();
+
+        assert_eq!(world.last_status, Some(201));
+        let pool = world.pool().unwrap();
+        assert!(
+            trellis_server::life_areas::store::find_by_name(pool, "Side project")
+                .await
+                .unwrap()
+                .is_some()
+        );
+    }
+
+    #[tokio::test]
+    async fn capture_id_by_text_finds_the_matching_capture() {
+        let mut world = migrated_world().await;
+        super::super::triage::given_capture_waiting(&mut world, "buy milk")
+            .await
+            .unwrap();
+
+        let id = capture_id_by_text(&world, "buy milk").await.unwrap();
+
+        assert_eq!(Some(id), world.last_capture_id);
+    }
+
+    #[tokio::test]
+    async fn capture_id_by_text_errors_when_no_capture_matches() {
+        let world = migrated_world().await;
+
+        assert!(capture_id_by_text(&world, "nothing here").await.is_err());
+    }
+}

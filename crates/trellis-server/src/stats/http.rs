@@ -68,7 +68,7 @@ mod tests {
         let capture_id = crate::capture::store::insert(pool, "buy milk", "web", 0)
             .await
             .unwrap();
-        crate::triage::store::insert_task(pool, capture_id, kind, created_at_ms)
+        crate::triage::store::insert_task(pool, capture_id, kind, None, created_at_ms)
             .await
             .unwrap();
     }

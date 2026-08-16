@@ -127,6 +127,7 @@ async fn dispatch_triaged_as_committed(
         "deadline": deadline,
         "deadline_type": deadline_type,
         "priority": priority,
+        "life_area": payloads::VALID_LIFE_AREA,
     });
     when_triaged(world, body).await
 }
@@ -143,6 +144,7 @@ async fn dispatch_triaged_as_quota(
         "target_count": target_count,
         "target_minutes_each": target_minutes_each,
         "period": "week",
+        "life_area": payloads::VALID_LIFE_AREA,
     });
     when_triaged(world, body).await
 }

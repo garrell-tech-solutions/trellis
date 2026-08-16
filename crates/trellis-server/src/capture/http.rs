@@ -10,7 +10,6 @@
 
 use crate::capture::store;
 use crate::inbox::view::CaptureRow;
-use crate::life_areas::store as life_areas_store;
 use crate::life_areas::view::LifeAreaOption;
 use crate::platform::clock::Clock;
 use crate::platform::request::content_type_is_json;
@@ -87,12 +86,9 @@ pub async fn create_capture(
             text: payload.raw_text,
             error: None,
         };
-        let life_areas = life_areas_store::list_active(&pool)
+        let life_areas = crate::life_areas::active_options(&pool)
             .await
-            .map_err(write_failed)?
-            .into_iter()
-            .map(LifeAreaOption::from)
-            .collect();
+            .map_err(write_failed)?;
         Ok(render_template(
             StatusCode::CREATED,
             &CaptureRowTemplate {

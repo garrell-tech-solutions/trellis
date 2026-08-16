@@ -10,7 +10,6 @@
 
 use crate::inbox::store;
 use crate::inbox::view::{CaptureRow, TaskRow};
-use crate::life_areas::store as life_areas_store;
 use crate::life_areas::view::LifeAreaOption;
 use askama::Template;
 use sqlx::SqlitePool;
@@ -45,7 +44,7 @@ pub(crate) async fn build_lists(
 ) -> Result<(Vec<CaptureRow>, Vec<TaskRow>, Vec<LifeAreaOption>), sqlx::Error> {
     let captures = build_capture_rows(pool, error).await?;
     let tasks = build_task_rows(pool).await?;
-    let life_areas = build_life_area_options(pool).await?;
+    let life_areas = crate::life_areas::active_options(pool).await?;
     Ok((captures, tasks, life_areas))
 }
 
@@ -76,18 +75,6 @@ async fn build_task_rows(pool: &SqlitePool) -> Result<Vec<TaskRow>, sqlx::Error>
             text: task.raw_text,
             life_area: task.life_area_name,
         })
-        .collect())
-}
-
-/// The triage picker's choices: every life area not yet archived
-/// (`life_areas::store::list_active` -- the same query the management page's
-/// own list uses, reused here rather than re-issued, since both need exactly
-/// "what is currently choosable").
-async fn build_life_area_options(pool: &SqlitePool) -> Result<Vec<LifeAreaOption>, sqlx::Error> {
-    Ok(life_areas_store::list_active(pool)
-        .await?
-        .into_iter()
-        .map(LifeAreaOption::from)
         .collect())
 }
 

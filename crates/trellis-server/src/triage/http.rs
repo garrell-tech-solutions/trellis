@@ -18,7 +18,7 @@ use axum::extract::{FromRequest, Path, Request, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::{Form, Json};
-use scheduler_core::task::{require_life_area, TaskKind, TriageFields, TriageRejection};
+use scheduler_core::task::{TaskKind, TriageFields, TriageRejection, WellFormedTriage};
 use serde::Deserialize;
 use serde_json::{json, Value};
 use sqlx::SqlitePool;
@@ -182,33 +182,26 @@ enum TriageOutcome {
     Rejected(Rejection),
 }
 
-/// Kind first, then whether a life area was submitted at all — both
-/// decidable without the database, and in that fixed order so a submission
-/// naming no kind still reports `unknown_kind`, not a life-area complaint,
-/// however the life area was submitted.
-fn well_formed_submission(fields: &TriageFields) -> Result<(TaskKind, String), TriageRejection> {
-    let kind = TaskKind::from_fields(fields)?;
-    let life_area_name = require_life_area(fields)?;
-    Ok((kind, life_area_name))
-}
-
-/// Only once a submission is well-formed does the database enter it: whether
-/// the submitted life-area name resolves to a real, active row. The database
-/// is not touched until there is a kind and a name worth resolving.
+/// Only once the core calls a submission well-formed does the database enter
+/// it: whether the life-area name it names resolves to a real, active row.
+/// The database is not touched until there is something worth resolving.
 async fn decide_triage(
     pool: &SqlitePool,
     fields: &TriageFields,
 ) -> Result<TriageOutcome, StatusCode> {
-    let (kind, life_area_name) = match well_formed_submission(fields) {
-        Ok(pair) => pair,
+    let submission = match WellFormedTriage::from_fields(fields) {
+        Ok(submission) => submission,
         Err(rejection) => return Ok(TriageOutcome::Rejected(Rejection::Core(rejection))),
     };
-    let life_area_id = store::find_active_life_area_id(pool, &life_area_name)
+    let life_area_id = store::find_active_life_area_id(pool, &submission.life_area_name)
         .await
         .map_err(write_failed)?;
     Ok(match life_area_id {
-        Some(life_area_id) => TriageOutcome::Accepted { kind, life_area_id },
-        None => TriageOutcome::Rejected(Rejection::UnknownLifeArea(life_area_name)),
+        Some(life_area_id) => TriageOutcome::Accepted {
+            kind: submission.kind,
+            life_area_id,
+        },
+        None => TriageOutcome::Rejected(Rejection::UnknownLifeArea(submission.life_area_name)),
     })
 }
 

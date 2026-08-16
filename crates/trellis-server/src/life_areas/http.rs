@@ -40,17 +40,10 @@ struct LifeAreasListTemplate {
     error: Option<String>,
 }
 
-async fn active_options(pool: &SqlitePool) -> Result<Vec<LifeAreaOption>, StatusCode> {
-    Ok(store::list_active(pool)
-        .await
-        .map_err(write_failed)?
-        .into_iter()
-        .map(LifeAreaOption::from)
-        .collect())
-}
-
 pub async fn show_life_areas(State(pool): State<SqlitePool>) -> Result<Response, StatusCode> {
-    let life_areas = active_options(&pool).await?;
+    let life_areas = crate::life_areas::active_options(&pool)
+        .await
+        .map_err(write_failed)?;
     Ok(render_template(
         StatusCode::OK,
         &LifeAreasTemplate {
@@ -65,7 +58,9 @@ async fn render_life_areas_list(
     status: StatusCode,
     error: Option<String>,
 ) -> Result<Response, StatusCode> {
-    let life_areas = active_options(pool).await?;
+    let life_areas = crate::life_areas::active_options(pool)
+        .await
+        .map_err(write_failed)?;
     Ok(render_template(
         status,
         &LifeAreasListTemplate { life_areas, error },

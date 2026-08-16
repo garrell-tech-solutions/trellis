@@ -1,3 +1,8 @@
+# mutation-stamp: sha256=19ae62066f6f2f2054fef4a6e91e624f175b0d841d778a85a2a70234312ca52e
+# acceptance-mutation-manifest-begin
+# {"version":1,"tested_at":"2026-08-16T14:48:13.502034780Z","feature_name":"Triage tags a task with a life area","feature_path":"features/life_area_triage.feature","background_hash":"7bc51985dd2897894c3d5dfc3b919840d9cc397ff48878073315f59557a78164","implementation_hash":"sha256:5dc73b4c014ebc91ff211ecb0be4ac092c07a1fcd31c8ad69a5f553b3d0f90a5","scenarios":[{"index":2,"name":"Triage without a life area is rejected, whatever the kind","scenario_hash":"efb3dabfa3455242837cf698fb2401c958c1177cbc861fa2d8be483536b01e30","mutation_count":3,"result":{"Total":3,"Killed":3,"Survived":0,"Errors":0},"tested_at":"2026-08-16T14:46:11.972912466Z"}]}
+# acceptance-mutation-manifest-end
+
 # life-area-triage-offers-01: triage offers every life area, including one added since the server started
 # life-area-triage-tags-02: triage tags the task with the chosen life area, and the task list shows it
 # life-area-triage-required-03: triage without a life area is rejected, whatever the kind

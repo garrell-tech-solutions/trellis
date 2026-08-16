@@ -64,31 +64,16 @@ pub async fn dispatch(
         return Some(when_stats_viewed(world).await);
     }
     if let Some(caps) = THEN_REPORTS_SHARE.captures(text) {
-        let expected = match example_value(example, &caps[1]) {
-            Ok(v) => v,
-            Err(e) => return Some(Err(e)),
-        };
-        return Some(then_body_contains(world, expected));
+        return Some(then_page_shows_example(world, example, &caps));
     }
     if let Some(caps) = THEN_REPORTS_COUNTS.captures(text) {
         return Some(then_reports_counts(world, example, &caps));
     }
     if let Some(caps) = THEN_REPORTS_IN_WINDOW.captures(text) {
-        let count = match example_value(example, &caps[1]) {
-            Ok(v) => v,
-            Err(e) => return Some(Err(e)),
-        };
-        return Some(then_body_contains(
-            world,
-            &format!("{count} tasks in the window"),
-        ));
+        return Some(then_reports_in_window(world, example, &caps));
     }
     if let Some(caps) = THEN_MARKS_SHARE.captures(text) {
-        let expected = match example_value(example, &caps[1]) {
-            Ok(v) => v,
-            Err(e) => return Some(Err(e)),
-        };
-        return Some(then_body_contains(world, expected));
+        return Some(then_page_shows_example(world, example, &caps));
     }
     if THEN_REPORTS_NO_SHARE.is_match(text) {
         return Some(then_body_excludes(world, "Committed share:"));
@@ -212,6 +197,36 @@ fn then_body_excludes(world: &mut World, forbidden: &str) -> Result<(), String> 
     }
 }
 
+/// Asserts the page shows, verbatim, the example value named by the step's
+/// single `<name>` placeholder. Two steps assert exactly that -- the committed
+/// share itself, and the over/under-the-line standing -- so they share one
+/// handler.
+///
+/// Resolving the placeholder lives here rather than in [`dispatch`] on purpose
+/// (T-complexity-8): an arm that unwraps a `Result` before delegating is a
+/// conditional that is not the match, and three of them were carrying
+/// `dispatch` six points above what the ten regex arms cost.
+fn then_page_shows_example(
+    world: &mut World,
+    example: &BTreeMap<String, String>,
+    caps: &regex::Captures<'_>,
+) -> Result<(), String> {
+    let expected = example_value(example, &caps[1])?;
+    then_body_contains(world, expected)
+}
+
+/// The in-window count is reported inside a phrase rather than on its own, so
+/// it builds its expectation the way [`then_reports_counts`] does instead of
+/// sharing [`then_page_shows_example`].
+fn then_reports_in_window(
+    world: &mut World,
+    example: &BTreeMap<String, String>,
+    caps: &regex::Captures<'_>,
+) -> Result<(), String> {
+    let count = example_value(example, &caps[1])?;
+    then_body_contains(world, &format!("{count} tasks in the window"))
+}
+
 fn then_reports_counts(
     world: &mut World,
     example: &BTreeMap<String, String>,
@@ -310,6 +325,42 @@ mod tests {
             .unwrap();
 
         assert_eq!(then_reports_counts(&mut world, &ex, &caps), Ok(()));
+    }
+
+    #[test]
+    fn then_page_shows_example_asserts_the_resolved_value_verbatim() {
+        let mut world = World::new();
+        world.last_html_body = Some("Committed share: 55%".to_string());
+        let ex = example(&[("share", "55%")]);
+        let caps = THEN_REPORTS_SHARE
+            .captures(r#"the stats page reports a committed share of "<share>""#)
+            .unwrap();
+
+        assert_eq!(then_page_shows_example(&mut world, &ex, &caps), Ok(()));
+    }
+
+    #[test]
+    fn then_page_shows_example_errors_when_the_example_lacks_the_placeholder() {
+        let mut world = World::new();
+        world.last_html_body = Some("over the line".to_string());
+        let ex = example(&[("share", "55%")]);
+        let caps = THEN_MARKS_SHARE
+            .captures(r#"the stats page marks the committed share "<standing>""#)
+            .unwrap();
+
+        assert!(then_page_shows_example(&mut world, &ex, &caps).is_err());
+    }
+
+    #[test]
+    fn then_reports_in_window_builds_the_exact_page_phrasing() {
+        let mut world = World::new();
+        world.last_html_body = Some("12 tasks in the window".to_string());
+        let ex = example(&[("in_window", "12")]);
+        let caps = THEN_REPORTS_IN_WINDOW
+            .captures("the stats page reports <in_window> tasks in the window")
+            .unwrap();
+
+        assert_eq!(then_reports_in_window(&mut world, &ex, &caps), Ok(()));
     }
 
     #[test]

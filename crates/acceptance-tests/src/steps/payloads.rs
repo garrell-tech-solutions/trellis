@@ -15,8 +15,13 @@ use serde_json::{json, Value};
 /// the core checks.
 pub const VALID_DEADLINE: &str = "2026-08-20T17:00:00Z";
 
+/// A life area every fresh, migrated database seeds -- always available, so
+/// a scenario that is not itself about life areas can name it without first
+/// adding one.
+pub const VALID_LIFE_AREA: &str = "Work";
+
 pub fn pool() -> Value {
-    json!({ "kind": "pool" })
+    json!({ "kind": "pool", "life_area": VALID_LIFE_AREA })
 }
 
 pub fn committed() -> Value {
@@ -25,6 +30,7 @@ pub fn committed() -> Value {
         "deadline": VALID_DEADLINE,
         "deadline_type": "hard",
         "priority": "P1",
+        "life_area": VALID_LIFE_AREA,
     })
 }
 
@@ -34,6 +40,7 @@ pub fn quota() -> Value {
         "target_count": 3,
         "target_minutes_each": 45,
         "period": "week",
+        "life_area": VALID_LIFE_AREA,
     })
 }
 

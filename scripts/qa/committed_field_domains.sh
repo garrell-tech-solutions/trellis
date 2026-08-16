@@ -34,7 +34,7 @@ run_deadline_round_trip() {
   local name="round-trip-$(echo "$submitted_deadline" | tr -cs 'A-Za-z0-9' '-')"
   setup_scenario "$name" || return
   local body
-  body="$(printf '{"kind":"committed","deadline":"%s","deadline_type":"hard","priority":"P1"}' "$submitted_deadline")"
+  body="$(printf '{"kind":"committed","deadline":"%s","deadline_type":"hard","priority":"P1","life_area":"Work"}' "$submitted_deadline")"
   qa_triage "$CAPTURE_ID" "$body"
   if [[ "$STATUS" != "201" ]]; then
     echo "FAIL: [$name] triage of \"$submitted_deadline\" returned status $STATUS, expected 201" >&2

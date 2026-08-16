@@ -55,7 +55,7 @@ assert_status_created() {
 
 # --- Scenario: pool ---
 if setup_scenario "pool"; then
-  assert_status_created "pool" '{"kind":"pool"}'
+  assert_status_created "pool" '{"kind":"pool","life_area":"Work"}'
   if assert_one_task "pool"; then
     IFS='|' read -r kind deadline _dt _prio target_count target_minutes_each period < <(task_row)
     [[ "$kind" == "pool" ]] || { echo "FAIL: [pool] expected kind pool, got \"$kind\"" >&2; FAILURES=1; }
@@ -77,7 +77,7 @@ run_committed_example() {
   local name="committed-$deadline_type"
   setup_scenario "$name" || return
   local body
-  body="$(printf '{"kind":"committed","deadline":"%s","deadline_type":"%s","priority":"%s"}' \
+  body="$(printf '{"kind":"committed","deadline":"%s","deadline_type":"%s","priority":"%s","life_area":"Work"}' \
     "$deadline" "$deadline_type" "$priority")"
   assert_status_created "$name" "$body"
   if assert_one_task "$name"; then
@@ -103,7 +103,7 @@ run_quota_example() {
   local name="quota-${target_count}x${target_minutes_each}"
   setup_scenario "$name" || return
   local body
-  body="$(printf '{"kind":"quota","target_count":%s,"target_minutes_each":%s,"period":"week"}' \
+  body="$(printf '{"kind":"quota","target_count":%s,"target_minutes_each":%s,"period":"week","life_area":"Work"}' \
     "$target_count" "$target_minutes_each")"
   assert_status_created "$name" "$body"
   if assert_one_task "$name"; then

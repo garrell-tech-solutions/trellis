@@ -64,12 +64,13 @@ crates/trellis-server/src/
   capture/    http.rs  store.rs
   triage/     http.rs  store.rs
   inbox/      http.rs  lists.rs  store.rs  view.rs
+  life_areas/ mod.rs  http.rs  store.rs  view.rs
   stats/      http.rs  store.rs
   platform/   app.rs  assets.rs  boundary.rs  clock.rs  db.rs  request.rs
               response.rs  test_support.rs
 ```
 
-Four capabilities and one bucket named so a reader can tell it is not one.
+Five capabilities and one bucket named so a reader can tell it is not one.
 `scheduler-core` holds the rules and names neither adapter; a domain's `http`
 turns requests into core inputs and core types into view models; its `store`
 turns core types into rows and is the only production SQL; its `view` is what
@@ -81,6 +82,18 @@ A domain has a `view` only when its page shape is its own: `inbox`'s rows are
 assembled from two queries and carry a slot for an in-flight rejection, while
 `stats` renders `scheduler_core::ratio`'s answer directly, and a struct
 copying that field for field would be a view model in name only.
+
+**A capability read by other capabilities gets one front door.** Three
+capabilities need the pickable life areas — the management page lists them,
+the inbox fragment offers them in each capture's triage forms, and a
+quick-added capture renders its own row with the same forms. They call
+`life_areas::active_options`, in that capability's `mod.rs`, rather than each
+composing `store::list_active` with `LifeAreaOption::from` themselves: a
+reader that knows which query *and* which mapping to combine is holding a
+copy of another capability's internals, and three of those drift. Reaching
+across for a *type* (`inbox::view::CaptureRow`, `life_areas::view::
+LifeAreaOption`) stays fine; it is reaching across for the recipe that does
+not.
 
 **The rule that decides what goes in the core**, and the one this tree is
 easiest to get wrong: a rule that survives changing HTTP for something else
@@ -260,16 +273,33 @@ those two contiguous free hours.
 
 ---
 
-## Life areas — specified (`T-life-areas-are-data`, #47)
+## Life areas — built (`T-life-areas-are-data`, #47)
 
 Settled 2026-08-14, resolving #36. **Life areas are user-managed rows, editable
 from the running app** — not a Rust enum, not a config file. There is no
 canonical list to ratify; there is a seed, and then it is the user's.
 
-```
-life area   { name, archived_at }        # shape TBD by #47
+```sql
+life_areas(id, name, archived_at)        -- name is UNIQUE COLLATE NOCASE
 seed        Work · Fitness · Learning · Family · Home
+tasks.life_area_id                       -- nullable column, required at triage
 ```
+
+**Two names are the same name when they match once trimmed and case-folded**,
+and the column's `UNIQUE COLLATE NOCASE` is where that is enforced — not a
+function in `scheduler_core`. "Work" and "work" as two indistinguishable
+picker entries is the failure the rule exists to prevent, and a constraint
+the database checks cannot be bypassed by a write path that forgot to call
+something. Two consequences: a database swap has to carry the collation
+across (`T-sqlite-sqlx`'s "mechanical" Postgres move needs `CITEXT` or a
+functional unique index), and if the rule ever outgrows a collation — Unicode
+folding — it moves into the core and the constraint becomes the backstop.
+
+`tasks.life_area_id` is nullable for the reason `T-quota-targets-required`
+already established: SQLite cannot add a `NOT NULL` column without a default
+to a table that may hold rows, so the requirement lives at the triage
+boundary instead. `None` therefore means "written before this migration", not
+"has no life area".
 
 The seed keeps every life area cited in a settled decision's reasoning — Fitness
 (`T-three-task-kinds`), Learning (`D-kill-means-archive`), Family
@@ -309,7 +339,17 @@ POST /captures                raw text in. JSON -> 201 JSON; form-encoded -> 201
 POST /captures/{id}/triage    capture -> task
 GET  /stats                   the committed share of the last fourteen days
                               (R2, #45). Rules in `scheduler_core::ratio`.
+GET  /life-areas              manage the set: list, add, archive (#47)
+POST /life-areas              add one. Duplicate or blank -> 422 + the list
+                              fragment carrying the message.
+POST /life-areas/{id}/archive retire one. Never deleted (D-kill-means-archive).
 ```
+
+Triage requires a life area for every kind. The name is validated in two
+steps that meet at `scheduler_core::task::WellFormedTriage`: the core decides
+kind first and then that *some* life area was named, and the adapter resolves
+that name against the `life_areas` table — a question needing the database,
+so `unknown_life_area` is the one rejection the core does not produce.
 
 Rejections are `422`. An unrecognised `kind` reports
 `{"unknown_kind": <submitted>}` (`T-unknown-kind-rejected`); a missing or empty

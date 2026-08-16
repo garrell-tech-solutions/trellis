@@ -128,7 +128,7 @@ qa_stop_server
 name="triaged-excluded"
 if qa_start_server "$BIN" "$TMP_DIR/$name.sqlite" "$TMP_DIR/$name.log"; then
   capture_id="$(qa_submit_capture "call the dentist")"
-  qa_triage "$capture_id" '{"kind":"pool"}'
+  qa_triage "$capture_id" '{"kind":"pool","life_area":"Work"}'
   if [[ "$STATUS" != "201" ]]; then
     echo "FAIL: [$name] setup triage returned status $STATUS, expected 201" >&2
     FAILURES=1

@@ -10,6 +10,7 @@
 
 use crate::capture::store;
 use crate::inbox::view::CaptureRow;
+use crate::life_areas::view::LifeAreaOption;
 use crate::platform::clock::Clock;
 use crate::platform::request::content_type_is_json;
 use crate::platform::response::{render_template, write_failed};
@@ -60,10 +61,14 @@ impl<S: Send + Sync> FromRequest<S> for CaptureInput {
     }
 }
 
+/// `life_areas` rides along for the same reason `inbox::lists::ListsTemplate`
+/// carries it: this row's own triage forms offer the picker, and the picker
+/// must reflect the current, active set on every render.
 #[derive(Template)]
 #[template(path = "capture_row.html")]
 struct CaptureRowTemplate<'a> {
     capture: &'a CaptureRow,
+    life_areas: Vec<LifeAreaOption>,
 }
 
 pub async fn create_capture(
@@ -81,9 +86,15 @@ pub async fn create_capture(
             text: payload.raw_text,
             error: None,
         };
+        let life_areas = crate::life_areas::active_options(&pool)
+            .await
+            .map_err(write_failed)?;
         Ok(render_template(
             StatusCode::CREATED,
-            &CaptureRowTemplate { capture: &capture },
+            &CaptureRowTemplate {
+                capture: &capture,
+                life_areas,
+            },
         ))
     } else {
         Ok(StatusCode::CREATED.into_response())

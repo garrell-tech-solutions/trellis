@@ -21,6 +21,7 @@ mod committed_empty_fields;
 mod committed_field_domains;
 mod html;
 mod inbox_view;
+mod life_areas;
 mod migrations;
 mod payloads;
 mod quota_triage_validation;
@@ -130,6 +131,9 @@ pub async fn dispatch(
         return outcome;
     }
     if let Some(outcome) = triage_from_page::dispatch(world, text).await {
+        return outcome;
+    }
+    if let Some(outcome) = life_areas::dispatch(world, text, example).await {
         return outcome;
     }
     if let Some(outcome) = stats_ratio::dispatch(world, text, example).await {

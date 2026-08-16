@@ -42,10 +42,16 @@
       "why": "Gherkin step dispatcher; regex chain, one-line delegation per arm."
     },
     {
+      "file": "crates/acceptance-tests/src/steps/life_areas.rs",
+      "function": "dispatch",
+      "cyclomatic_complexity": 18,
+      "why": "Gherkin step dispatcher; regex chain, one-line delegation per arm. New module for features/life_areas.feature and features/life_area_triage.feature (life-areas brief, #47); every helper it delegates to was itself kept under threshold (dispatch_archive_life_area's own request-building was extracted into life_area_id_by_name and inbox_view::html_response rather than inlined here)."
+    },
+    {
       "file": "crates/acceptance-tests/src/steps/mod.rs",
       "function": "dispatch",
-      "cyclomatic_complexity": 12,
-      "why": "Top-level step dispatcher; delegates to one step module per arm. 11 -> 12 because the stats_ratio module added one more one-line arm: a new step, not new logic."
+      "cyclomatic_complexity": 13,
+      "why": "Top-level step dispatcher; delegates to one step module per arm. 12 -> 13 because the life_areas module added one more one-line arm: a new step, not new logic."
     },
     {
       "file": "crates/acceptance-tests/src/steps/stats_ratio.rs",

@@ -10,17 +10,24 @@
 use scheduler_core::task::TaskKind;
 use sqlx::SqlitePool;
 
+/// `life_area_id` is nullable at storage for schema reasons (the same
+/// `T-quota-targets-required` pattern the quota target columns already use)
+/// even though the triage boundary requires one for every kind; callers that
+/// have already resolved a submission's life area pass `Some`, and only a
+/// fixture inserting a row directly (bypassing the boundary) would pass
+/// `None`.
 pub async fn insert_task(
     pool: &SqlitePool,
     capture_id: i64,
     kind: &TaskKind,
+    life_area_id: Option<i64>,
     created_at_ms: i64,
 ) -> Result<(), sqlx::Error> {
     let attributes = kind.attributes();
     sqlx::query(
         "INSERT INTO tasks (capture_id, kind, deadline, deadline_type, priority, \
-         target_count, target_minutes_each, period, created_at_ms) \
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+         target_count, target_minutes_each, period, life_area_id, created_at_ms) \
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(capture_id)
     .bind(attributes.kind)
@@ -30,10 +37,32 @@ pub async fn insert_task(
     .bind(attributes.target_count)
     .bind(attributes.target_minutes_each)
     .bind(attributes.period)
+    .bind(life_area_id)
     .bind(created_at_ms)
     .execute(pool)
     .await?;
     Ok(())
+}
+
+/// The life area triage needs to resolve a submission against: an id for an
+/// *active* row named `name` (case-insensitively, via the column's own
+/// collation). `None` covers both a name that names no life area at all and
+/// one that names only an archived one -- triage refuses both identically
+/// (life-area-triage-archived-05: "rejected at the boundary, not only hidden
+/// from the picker"), so one query answering "does an active choice exist"
+/// is enough; nothing downstream needs to tell the two apart.
+///
+/// This is triage's own query, not a function borrowed from `life_areas`
+/// (`T-capability-owns-its-queries`): validating a life area at the triage
+/// boundary is triage's concern even though `life_areas` owns the table.
+pub async fn find_active_life_area_id(
+    pool: &SqlitePool,
+    name: &str,
+) -> Result<Option<i64>, sqlx::Error> {
+    sqlx::query_scalar("SELECT id FROM life_areas WHERE name = ? AND archived_at IS NULL")
+        .bind(name)
+        .fetch_optional(pool)
+        .await
 }
 
 pub async fn mark_triaged(
@@ -105,7 +134,7 @@ mod tests {
         let (_dir, pool) = test_pool().await;
         let capture_id = given_a_capture(&pool, "buy milk").await;
 
-        insert_task(&pool, capture_id, &TaskKind::Pool, 7)
+        insert_task(&pool, capture_id, &TaskKind::Pool, None, 7)
             .await
             .unwrap();
 
@@ -120,7 +149,7 @@ mod tests {
         let (_dir, pool) = test_pool().await;
         let capture_id = given_a_capture(&pool, "buy milk").await;
 
-        insert_task(&pool, capture_id, &committed(), 7)
+        insert_task(&pool, capture_id, &committed(), None, 7)
             .await
             .unwrap();
 
@@ -143,7 +172,9 @@ mod tests {
         let (_dir, pool) = test_pool().await;
         let capture_id = given_a_capture(&pool, "buy milk").await;
 
-        insert_task(&pool, capture_id, &quota(), 7).await.unwrap();
+        insert_task(&pool, capture_id, &quota(), None, 7)
+            .await
+            .unwrap();
 
         assert_eq!(
             stored_task(&pool).await,
@@ -164,7 +195,7 @@ mod tests {
         let (_dir, pool) = test_pool().await;
         let capture_id = given_a_capture(&pool, "buy milk").await;
 
-        insert_task(&pool, capture_id, &TaskKind::Pool, 4242)
+        insert_task(&pool, capture_id, &TaskKind::Pool, None, 4242)
             .await
             .unwrap();
 
@@ -182,7 +213,64 @@ mod tests {
             .await
             .unwrap();
 
-        assert!(insert_task(&pool, 1, &TaskKind::Pool, 0).await.is_err());
+        assert!(insert_task(&pool, 1, &TaskKind::Pool, None, 0)
+            .await
+            .is_err());
+    }
+
+    #[tokio::test]
+    async fn a_task_stores_the_resolved_life_area_id() {
+        let (_dir, pool) = test_pool().await;
+        let capture_id = given_a_capture(&pool, "buy milk").await;
+
+        insert_task(&pool, capture_id, &TaskKind::Pool, Some(3), 7)
+            .await
+            .unwrap();
+
+        let life_area_id: Option<i64> = sqlx::query_scalar("SELECT life_area_id FROM tasks")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(life_area_id, Some(3));
+    }
+
+    #[tokio::test]
+    async fn find_active_life_area_id_resolves_a_seeded_name_case_insensitively() {
+        let (_dir, pool) = test_pool().await;
+
+        let id = find_active_life_area_id(&pool, "work").await.unwrap();
+
+        assert!(id.is_some());
+    }
+
+    #[tokio::test]
+    async fn find_active_life_area_id_is_none_for_a_name_that_does_not_exist() {
+        let (_dir, pool) = test_pool().await;
+
+        assert_eq!(
+            find_active_life_area_id(&pool, "Gardening").await.unwrap(),
+            None
+        );
+    }
+
+    #[tokio::test]
+    async fn find_active_life_area_id_is_none_for_an_archived_life_area() {
+        let (_dir, pool) = test_pool().await;
+        crate::life_areas::store::archive(
+            &pool,
+            find_active_life_area_id(&pool, "Learning")
+                .await
+                .unwrap()
+                .unwrap(),
+            1_000,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(
+            find_active_life_area_id(&pool, "Learning").await.unwrap(),
+            None
+        );
     }
 
     #[tokio::test]

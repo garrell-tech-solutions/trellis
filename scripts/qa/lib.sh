@@ -198,3 +198,26 @@ qa_assert_rejected_naming() {
   fi
   qa_assert_durable_state_unchanged "$name"
 }
+
+# The /life-areas page's own add-control endpoint, read from its markup
+# rather than assumed. Shared by life_areas.sh and life_area_triage.sh.
+qa_life_areas_add_endpoint() {
+  local page="$1"
+  python3 -c '
+import re, sys
+m = re.search(r"<form hx-post=\"([^\"]+)\" hx-target=\"#life-areas-list\"", sys.argv[1])
+print(m.group(1) if m else "")
+' "$page"
+}
+
+# Submits the add-life-area control (form-encoded) and sets STATUS and BODY.
+# --data-urlencode (not a hand-built query string) so a name carrying spaces
+# or markup round-trips exactly as typed.
+qa_add_life_area() {
+  local endpoint="$1" name="$2" response
+  response="$(curl -s -w '\n%{http_code}' -X POST "http://$ADDR$endpoint" \
+    -H 'content-type: application/x-www-form-urlencoded' \
+    --data-urlencode "name=$name")"
+  STATUS="${response##*$'\n'}"
+  BODY="${response%$'\n'*}"
+}

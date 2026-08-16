@@ -60,7 +60,7 @@ result = {}
 for form in re.findall(r"<form\b[^>]*>.*?</form>", block, re.S):
     hx_post_m = re.search(r"hx-post=\"([^\"]+)\"", form)
     endpoint = hx_post_m.group(1) if hx_post_m else None
-    if "hx-vals" in form and "\"kind\":\"pool\"" in form:
+    if "value=\"pool\"" in form:
         result["pool_endpoint"] = endpoint
     elif "value=\"committed\"" in form:
         result["committed_endpoint"] = endpoint
@@ -113,7 +113,7 @@ if qa_start_server "$BIN" "$TMP_DIR/$name.sqlite" "$TMP_DIR/$name.log"; then
     echo "FAIL: [$name] could not find the pool-triage control" >&2
     FAILURES=1
   else
-    qa_triage_form "$endpoint" "kind=pool"
+    qa_triage_form "$endpoint" "kind=pool&life_area=Work"
     if [[ "$STATUS" -ge 300 && "$STATUS" -lt 400 ]]; then
       echo "FAIL: [$name] pool triage redirected the browser (status $STATUS)" >&2
       FAILURES=1
@@ -235,7 +235,7 @@ if qa_start_server "$BIN" "$TMP_DIR/$name.sqlite" "$TMP_DIR/$name.log"; then
     echo "FAIL: [$name] could not find the pool-triage control" >&2
     FAILURES=1
   else
-    qa_triage_form "$endpoint" "kind=pool"
+    qa_triage_form "$endpoint" "kind=pool&life_area=Work"
     if [[ "$STATUS" != "201" ]]; then
       echo "FAIL: [$name] setup triage returned status $STATUS, expected 201" >&2
       FAILURES=1

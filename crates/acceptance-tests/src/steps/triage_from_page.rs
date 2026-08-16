@@ -63,7 +63,13 @@ pub async fn dispatch(world: &mut World, text: &str) -> Option<Result<(), String
         return Some(then_offers_all_kinds(world, &caps[1]));
     }
     if WHEN_TRIAGED_AS_POOL_THROUGH_PAGE.is_match(text) {
-        return Some(when_triaged_through_page(world, &[("kind", "pool")]).await);
+        return Some(
+            when_triaged_through_page(
+                world,
+                &[("kind", "pool"), ("life_area", payloads::VALID_LIFE_AREA)],
+            )
+            .await,
+        );
     }
     if THEN_PAGE_RESPONSE_NOT_REDIRECT.is_match(text) {
         return Some(then_page_response_not_redirect(world));
@@ -131,21 +137,23 @@ async fn when_triaged_through_page(
 /// A well-formed committed submission's fields as page form fields — the
 /// same values `payloads::committed` uses for the JSON API, so the two
 /// validation paths are exercised against the same canonical inputs.
-fn committed_form_fields() -> [(&'static str, &'static str); 4] {
+fn committed_form_fields() -> [(&'static str, &'static str); 5] {
     [
         ("kind", "committed"),
         ("deadline", payloads::VALID_DEADLINE),
         ("deadline_type", "hard"),
         ("priority", "P1"),
+        ("life_area", payloads::VALID_LIFE_AREA),
     ]
 }
 
-fn quota_form_fields() -> [(&'static str, &'static str); 4] {
+fn quota_form_fields() -> [(&'static str, &'static str); 5] {
     [
         ("kind", "quota"),
         ("target_count", "3"),
         ("target_minutes_each", "45"),
         ("period", "week"),
+        ("life_area", payloads::VALID_LIFE_AREA),
     ]
 }
 
@@ -254,7 +262,7 @@ fn then_task_list_excludes(world: &mut World, forbidden: &str) -> Result<(), Str
 
 /// The values every `<option value="...">` in `<select name="field_name">`
 /// carries, in document order.
-fn select_option_values(section: &str, field_name: &str) -> Result<Vec<String>, String> {
+pub(super) fn select_option_values(section: &str, field_name: &str) -> Result<Vec<String>, String> {
     let start_tag = format!(r#"<select name="{field_name}">"#);
     let select = html::between(section, &start_tag, "</select>")?;
     Ok(select
@@ -295,9 +303,12 @@ mod tests {
         let mut world = migrated_world().await;
         given_capture_waiting(&mut world, "buy milk").await.unwrap();
 
-        when_triaged_through_page(&mut world, &[("kind", "pool")])
-            .await
-            .unwrap();
+        when_triaged_through_page(
+            &mut world,
+            &[("kind", "pool"), ("life_area", payloads::VALID_LIFE_AREA)],
+        )
+        .await
+        .unwrap();
         then_page_response_not_redirect(&mut world).unwrap();
 
         world.last_html_body = None;

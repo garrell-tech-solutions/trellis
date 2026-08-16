@@ -1,0 +1,10 @@
+<div id="life-areas-list">
+{% if let Some(message) = error %}
+<p class="life-area-error">{{ message }}</p>
+{% endif %}
+<ul id="life-areas">
+{% for life_area in life_areas %}
+{% include "life_area_row.html" %}
+{% endfor %}
+</ul>
+</div>

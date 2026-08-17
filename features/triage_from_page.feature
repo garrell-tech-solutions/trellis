@@ -1,6 +1,6 @@
-# mutation-stamp: sha256=be728863e923d94455e907ac8dc0973375b17f33742cd480516dde48c323dfb1
+# mutation-stamp: sha256=c570e0768b6be31eb7825a5c0d58d5c1b237b17447cc9a13a441abb39eff677f
 # acceptance-mutation-manifest-begin
-# {"version":1,"tested_at":"2026-08-13T21:28:24.238041197Z","feature_name":"Triage happens on the page, using the same validation as the API","feature_path":"features/triage_from_page.feature","background_hash":"304f93e93e2b217b49069c091950b87589f0c7e789e2d0dc3aaa8d845450cb64","implementation_hash":"sha256:b6d2b9276eb4e11dbc0f53d54b6b417868310eea7acb7947131810fe9df8b364","scenarios":[]}
+# {"version":1,"tested_at":"2026-08-17T17:57:47.600328486Z","feature_name":"Triage happens on the page, using the same validation as the API","feature_path":"features/triage_from_page.feature","background_hash":"304f93e93e2b217b49069c091950b87589f0c7e789e2d0dc3aaa8d845450cb64","implementation_hash":"sha256:b6d2b9276eb4e11dbc0f53d54b6b417868310eea7acb7947131810fe9df8b364","scenarios":[{"index":7,"name":"The pool form asks for fewer inputs than committed or quota","scenario_hash":"575a2c45bf988f226723ea869edfe1dc2702d74c6c2d60e8d4a32284dd3d40cc","mutation_count":2,"result":{"Total":2,"Killed":2,"Survived":0,"Errors":0},"tested_at":"2026-08-17T17:57:47.600328486Z"}]}
 # acceptance-mutation-manifest-end
 
 # triage-from-page-offers-all-kinds-01: each untriaged capture offers all three triage kinds from the page

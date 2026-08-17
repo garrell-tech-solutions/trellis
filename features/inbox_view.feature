@@ -1,6 +1,6 @@
 # mutation-stamp: sha256=a4a58355133f3be42ac1f4786bd93977ee60fcf757d24d6059a3ee53e8e7ff69
 # acceptance-mutation-manifest-begin
-# {"version":1,"tested_at":"2026-08-13T18:47:49.055007414Z","feature_name":"The inbox renders the untriaged capture queue","feature_path":"features/inbox_view.feature","background_hash":"304f93e93e2b217b49069c091950b87589f0c7e789e2d0dc3aaa8d845450cb64","implementation_hash":"sha256:ca1f4e0113105ab1427f3ed3139a4d6497b8305c4f40de2e307c8a308225aa73","scenarios":[]}
+# {"version":1,"tested_at":"2026-08-17T17:57:30.316579892Z","feature_name":"The inbox renders the untriaged capture queue","feature_path":"features/inbox_view.feature","background_hash":"304f93e93e2b217b49069c091950b87589f0c7e789e2d0dc3aaa8d845450cb64","implementation_hash":"sha256:ca1f4e0113105ab1427f3ed3139a4d6497b8305c4f40de2e307c8a308225aa73","scenarios":[]}
 # acceptance-mutation-manifest-end
 
 # inbox-view-list-01: the inbox lists every untriaged capture, newest first

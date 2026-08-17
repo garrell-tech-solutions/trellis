@@ -63,20 +63,26 @@ dependency rule itself is unchanged.
 crates/trellis-server/src/
   capture/    http.rs  store.rs
   triage/     http.rs  store.rs
-  inbox/      http.rs  lists.rs  store.rs  view.rs
+  dismiss/    mod.rs  http.rs
+  inbox/      mod.rs  http.rs  lists.rs  store.rs  view.rs
   life_areas/ mod.rs  http.rs  store.rs  view.rs
   stats/      http.rs  store.rs
   platform/   app.rs  assets.rs  boundary.rs  clock.rs  db.rs  request.rs
               response.rs  test_support.rs
 ```
 
-Five capabilities and one bucket named so a reader can tell it is not one.
+Six capabilities and one bucket named so a reader can tell it is not one.
 `scheduler-core` holds the rules and names neither adapter; a domain's `http`
 turns requests into core inputs and core types into view models; its `store`
 turns core types into rows and is the only production SQL; its `view` is what
-a template renders, never a `store` row type. `capture` and `triage` reach
-into `inbox::view` and `inbox::lists` because the inbox is the surface they
-act on.
+a template renders, never a `store` row type. `capture`, `triage` and
+`dismiss` reach into the inbox because the inbox is the surface they act on.
+
+**`dismiss` has no `store`, and that is the shape rather than an omission.**
+Everything it does to the database is *take this capture out of the inbox* —
+the inbox's own fact, reached through the inbox's front door. A capability
+owns the SQL it issues; dismissal issues none, so what is left is one
+handler.
 
 A domain has a `view` only when its page shape is its own: `inbox`'s rows are
 assembled from two queries and carry a slot for an in-flight rejection, while
@@ -95,6 +101,34 @@ across for a *type* (`inbox::view::CaptureRow`, `life_areas::view::
 LifeAreaOption`) stays fine; it is reaching across for the recipe that does
 not.
 
+The **inbox** is the second capability to need one, and it needs three
+things in its door:
+
+```
+inbox::capture_is_open(pool, id)              is it still in the inbox?
+inbox::close_capture(pool, id, at_ms)         take it out, stamping when
+inbox::render_lists(pool, status, error)      the #lists fragment as a response
+inbox::CAPTURE_NOT_OPEN_MESSAGE               the prose for !capture_is_open
+```
+
+**Why membership is the inbox's and not the asker's.** The worked example
+under `T-capability-owns-its-queries` was this very table — *"`triage` stamps
+`triaged_at`"* — and it was right while the column meant "triage happened".
+Migration `0005` renamed it `left_inbox_at` and widened it to "left the
+inbox, by either exit", and the rename moved the fact: `left_inbox_at IS
+NULL` is now the definition of `list_untriaged`'s `WHERE` clause, asked about
+one row instead of all of them. Triage and dismissal ask the same question
+for the same reason, which is one fact, not the two facts that decision
+licenses separate copies of. `dismiss` shipped with a byte-identical copy of
+both the check and the write; the third exit would have made a third.
+
+`inbox::lists` is private to the inbox for the same reason: `ListsTemplate`'s
+three fields were named by two other capabilities, so adding a fourth list to
+the fragment was a four-file change. `render_lists` is also the single
+implementation of `T-forms-swap-one-fragment`'s response contract — a 422
+whose body is not the re-rendered fragment breaks the whole page, since the
+422 swap is configured globally.
+
 **The rule that decides what goes in the core**, and the one this tree is
 easiest to get wrong: a rule that survives changing HTTP for something else
 belongs in `scheduler-core`. The window's length, the sample floor, the
@@ -109,9 +143,14 @@ which is the failure `T-module-boundary` named against itself. It asserts that
 no persistence module names `axum` or `StatusCode` (the old rule); that
 nothing outside a `store.rs` or `platform/db.rs` writes production SQL (the
 half the old check never had); that no top-level directory carries a
-technical-role name; and a floor on each, so an empty walk fails rather than
-passes. It is still a substring scan over source text — defeated by a type
-alias or a macro, so treat it as a lint, not a proof.
+technical-role name; that **no capability names another capability's `store`
+in production**, which is the front-door rule above; and a floor on each, so
+an empty walk fails rather than passes. It is still a substring scan over
+source text — defeated by a type alias or a macro, so treat it as a lint, not
+a proof. The front door's *own* enforcement is stronger than the lint:
+`inbox::store::capture_is_open`, `close_capture` and the whole of
+`inbox::lists` are `pub(super)` or private, so reaching past the door does
+not compile.
 
 ## Three things are called "domain". They are unrelated.
 
@@ -165,9 +204,10 @@ group is ever populated.
 ### Schema — built
 
 ```sql
-captures(id, raw_text, source, created_at_ms, triaged_at)
+captures(id, raw_text, source, created_at_ms, left_inbox_at)
 tasks(id, capture_id, kind, deadline, deadline_type, priority,
-      target_count, target_minutes_each, period, archived_at, created_at_ms)
+      target_count, target_minutes_each, period, life_area_id,
+      archived_at, created_at_ms)
 ```
 
 `kind`, `deadline_type`, `priority` and `period` carry `CHECK` constraints.
@@ -178,7 +218,14 @@ non-HTTP write path can still store a string there. Tracked in #33.
 (`T-archived-at-only`). Nothing writes it yet — every archive route arrives at
 M8.
 
-A capture row is never deleted. Triage stamps `triaged_at`.
+A capture row is never deleted. It leaves the inbox by one of **two exits**,
+and both stamp the same `left_inbox_at` (`0005`, #48): triage, which also
+writes a `tasks` row, and dismissal, which writes nothing else. **Which exit
+it was is derivable rather than stored** — a `tasks` row references the
+capture, or it does not. A second `dismissed_at` column beside the first
+would permit a row claiming both exits at once, which is the shape
+`T-archived-at-only` exists to forbid; one column makes the impossible state
+unrepresentable instead of policing it with a `CHECK`.
 
 **Migrations are append-only** (`T-migrations-append-only`) and CI enforces it.
 SQLite has no `ALTER COLUMN`, so a type change means the table-rebuild pattern
@@ -337,6 +384,10 @@ POST /captures                raw text in. JSON -> 201 JSON; form-encoded -> 201
                               HTML fragment. One route, content-negotiated.
                               50ms budget, asserted by capture_endpoint.feature.
 POST /captures/{id}/triage    capture -> task
+POST /captures/{id}/dismiss   the inbox's "no" (#48). The capture leaves the
+                              inbox, no task is created, the row stays. No
+                              confirmation (D-three-strike), no un-dismiss and
+                              no archive view (D-kill-means-archive).
 GET  /stats                   the committed share of the last fourteen days
                               (R2, #45). Rules in `scheduler_core::ratio`.
 GET  /life-areas              manage the set: list, add, archive (#47)
@@ -351,10 +402,17 @@ kind first and then that *some* life area was named, and the adapter resolves
 that name against the `life_areas` table — a question needing the database,
 so `unknown_life_area` is the one rejection the core does not produce.
 
+The picker carries **no preselection** (`D-manual-triage-until-llm`), which is
+what makes the requirement honest: the blank option submits empty and lands
+on the `missing_field` path that already existed — no new rejection variant.
+
 Rejections are `422`. An unrecognised `kind` reports
 `{"unknown_kind": <submitted>}` (`T-unknown-kind-rejected`); a missing or empty
 required field reports `{"missing_field": <name>}` — absent and empty are the
-same submitter mistake and report identically (`T-empty-equals-absent`).
+same submitter mistake and report identically (`T-empty-equals-absent`). A
+capture that has already left the inbox, by *either* exit, reports
+`{"capture_not_open": …}` — triage and dismissal both refuse it, and neither
+says which exit it took, because nothing downstream needs to tell them apart.
 
 ### Classification — specified, **M9 only** (`T-classifier-covers-domain`, `D-manual-triage-until-llm`)
 

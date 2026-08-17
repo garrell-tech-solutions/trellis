@@ -9,10 +9,11 @@
 //! refused; a JSON request (the existing API) gets back exactly what it
 //! always has, unchanged.
 
-use crate::inbox::lists::{build_lists, ListsTemplate};
+use crate::inbox;
+use crate::inbox::CAPTURE_NOT_OPEN_MESSAGE;
 use crate::platform::clock::Clock;
 use crate::platform::request::content_type_is_json;
-use crate::platform::response::{render_template, write_failed};
+use crate::platform::response::write_failed;
 use crate::triage::store;
 use axum::extract::{FromRequest, Path, Request, State};
 use axum::http::StatusCode;
@@ -167,14 +168,15 @@ fn rejection_message(rejection: &Rejection, kind_submitted: &Value) -> String {
     }
 }
 
-/// `dismiss-capture-no-triage-after-dismissal-05`: the exact prose the
-/// scenario asserts on, kept in one place rather than typed twice into the
-/// JSON body and the page's per-row message.
-const CAPTURE_NOT_OPEN_MESSAGE: &str = "the capture is no longer in the inbox";
-
 /// The instant is passed in rather than read here: reading the clock is the
 /// handler's business, and a triage stamps the task and the capture it
 /// consumed with the same one.
+///
+/// Two writes, one of them the inbox's: triage creates the task, then asks
+/// the inbox to close the capture it consumed. Triage does not know that
+/// leaving the inbox is a `left_inbox_at` stamp, which is what lets
+/// dismissal reach the same state without a second copy of the write
+/// (`T-one-front-door-per-capability`).
 async fn write_task(
     pool: &SqlitePool,
     capture_id: i64,
@@ -185,7 +187,7 @@ async fn write_task(
     store::insert_task(pool, capture_id, kind, Some(life_area_id), created_at_ms)
         .await
         .map_err(write_failed)?;
-    store::mark_triaged(pool, capture_id, created_at_ms)
+    inbox::close_capture(pool, capture_id, created_at_ms)
         .await
         .map_err(write_failed)?;
     Ok(())
@@ -213,7 +215,7 @@ async fn decide_triage(
         Ok(submission) => submission,
         Err(rejection) => return Ok(TriageOutcome::Rejected(Rejection::Core(rejection))),
     };
-    if !store::capture_is_open(pool, capture_id)
+    if !inbox::capture_is_open(pool, capture_id)
         .await
         .map_err(write_failed)?
     {
@@ -261,15 +263,7 @@ async fn page_response(
     if let TriageOutcome::Accepted { kind, life_area_id } = outcome {
         write_task(pool, capture_id, kind, *life_area_id, created_at_ms).await?;
     }
-    let (captures, tasks, life_areas) = build_lists(pool, error).await.map_err(write_failed)?;
-    Ok(render_template(
-        status,
-        &ListsTemplate {
-            captures,
-            tasks,
-            life_areas,
-        },
-    ))
+    inbox::render_lists(pool, status, error).await
 }
 
 /// The two things every branch of [`TriageInput`] must produce: the fields

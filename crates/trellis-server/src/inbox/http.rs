@@ -1,7 +1,7 @@
 //! `GET /`: the untriaged capture queue and task list (D-visible-slices'
 //! first two slices, issues #30 and #33).
 
-use crate::inbox::lists::build_lists;
+use super::lists::build_lists;
 use crate::inbox::view::{CaptureRow, TaskRow};
 use crate::life_areas::view::LifeAreaOption;
 use crate::platform::response::{render_template, write_failed};
@@ -19,14 +19,19 @@ struct InboxTemplate {
     life_areas: Vec<LifeAreaOption>,
 }
 
+/// The full page is the only thing that is not the `#lists` fragment, so it
+/// is the only caller that takes `build_lists`' three lists apart instead
+/// of going through `lists::respond`. `inbox.html` `{% include %}`s
+/// `lists.html`, and an Askama include renders in its parent's context, so
+/// the page template has to carry the same three fields by the same names.
 pub async fn show_inbox(State(pool): State<SqlitePool>) -> Result<Response, StatusCode> {
-    let (captures, tasks, life_areas) = build_lists(&pool, None).await.map_err(write_failed)?;
+    let lists = build_lists(&pool, None).await.map_err(write_failed)?;
     Ok(render_template(
         StatusCode::OK,
         &InboxTemplate {
-            captures,
-            tasks,
-            life_areas,
+            captures: lists.captures,
+            tasks: lists.tasks,
+            life_areas: lists.life_areas,
         },
     ))
 }

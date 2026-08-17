@@ -5,30 +5,25 @@
 //! as triage does — whatever happened, the response is the current `#lists`
 //! fragment, `422` on rejection.
 
-use crate::dismiss::store;
-use crate::inbox::lists::{build_lists, ListsTemplate};
+use crate::inbox;
+use crate::inbox::CAPTURE_NOT_OPEN_MESSAGE;
 use crate::platform::clock::Clock;
-use crate::platform::response::{render_template, write_failed};
+use crate::platform::response::write_failed;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::Response;
 use sqlx::SqlitePool;
-
-/// The same prose `triage::http` reports when a capture it was asked to
-/// triage has already left the inbox -- one fact, worded once, told from
-/// whichever side asked.
-const CAPTURE_NOT_OPEN_MESSAGE: &str = "the capture is no longer in the inbox";
 
 pub async fn dismiss_capture(
     State(pool): State<SqlitePool>,
     State(clock): State<Clock>,
     Path(capture_id): Path<i64>,
 ) -> Result<Response, StatusCode> {
-    let open = store::capture_is_open(&pool, capture_id)
+    let open = inbox::capture_is_open(&pool, capture_id)
         .await
         .map_err(write_failed)?;
     let (status, error) = if open {
-        store::mark_dismissed(&pool, capture_id, clock.now_ms())
+        inbox::close_capture(&pool, capture_id, clock.now_ms())
             .await
             .map_err(write_failed)?;
         (StatusCode::OK, None)
@@ -38,15 +33,7 @@ pub async fn dismiss_capture(
             Some((capture_id, CAPTURE_NOT_OPEN_MESSAGE.to_string())),
         )
     };
-    let (captures, tasks, life_areas) = build_lists(&pool, error).await.map_err(write_failed)?;
-    Ok(render_template(
-        status,
-        &ListsTemplate {
-            captures,
-            tasks,
-            life_areas,
-        },
-    ))
+    inbox::render_lists(&pool, status, error).await
 }
 
 #[cfg(test)]
@@ -148,8 +135,8 @@ mod tests {
     /// exercised directly rather than through a rendered response, because a
     /// capture already gone from the inbox has no row left in `#lists` to
     /// carry it, the same way a triage rejection's per-row message has
-    /// nothing to attach to once its row is gone (`inbox::lists::build_lists`
-    /// only attaches an error to a capture still in `list_untriaged`).
+    /// nothing to attach to once its row is gone (the inbox only attaches an
+    /// error to a capture still in `list_untriaged`).
     #[test]
     fn the_not_open_message_names_why() {
         assert_eq!(
@@ -171,9 +158,7 @@ mod tests {
         )
         .await
         .unwrap();
-        crate::triage::store::mark_triaged(&pool, capture_id, 0)
-            .await
-            .unwrap();
+        inbox::close_capture(&pool, capture_id, 0).await.unwrap();
 
         let response = dismiss_response(&pool, capture_id).await;
 

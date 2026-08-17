@@ -1,11 +1,15 @@
-//! What an accepted triage writes: the new `tasks` row, and the `left_inbox_at`
-//! stamp that consumes the capture it came from.
+//! What an accepted triage writes and reads: the new `tasks` row, and the
+//! life-area name it must resolve before writing one.
 //!
-//! Two tables, one capability — which is the packaging rule doing its job.
-//! A capture row is never deleted (`docs/design/architecture.md`); triage
-//! marks it, and [`crate::inbox`] stops listing it. Everything here speaks
-//! `scheduler_core` types and `sqlx::Error` and must not know an HTTP server
-//! exists (`T-module-boundary`, enforced by `platform::boundary`).
+//! Consuming the capture is deliberately *not* here. Triage does not stamp
+//! the capture itself; it asks `inbox::close_capture` to take it
+//! out, because "still in the inbox" is the inbox's fact and dismissal needs
+//! the identical answer (`T-one-front-door-per-capability`). What is left is
+//! what triage alone means.
+//!
+//! Everything here speaks `scheduler_core` types and `sqlx::Error` and must
+//! not know an HTTP server exists (`T-module-boundary`, enforced by
+//! `platform::boundary`).
 
 use scheduler_core::task::TaskKind;
 use sqlx::SqlitePool;
@@ -63,39 +67,6 @@ pub async fn find_active_life_area_id(
         .bind(name)
         .fetch_optional(pool)
         .await
-}
-
-/// Whether `capture_id` is still eligible for triage: it exists and has not
-/// already left the inbox, by either exit (`dismiss::store::capture_is_open`
-/// asks the same question for dismissal's own boundary --
-/// `T-capability-owns-its-queries`: each capability owns this check against
-/// the table it touches, rather than one lending it to the other).
-pub async fn capture_is_open(pool: &SqlitePool, capture_id: i64) -> Result<bool, sqlx::Error> {
-    let count: i64 =
-        sqlx::query_scalar("SELECT COUNT(*) FROM captures WHERE id = ? AND left_inbox_at IS NULL")
-            .bind(capture_id)
-            .fetch_one(pool)
-            .await?;
-    Ok(count > 0)
-}
-
-/// Guarded by `left_inbox_at IS NULL` so a triage that raced a dismissal (or
-/// a second triage) cannot overwrite the stamp the other write already made
-/// -- the same defence-in-depth `life_areas::store::archive`'s own guard
-/// gives archiving. The eligibility check the caller already ran is what
-/// produces the rejection message; this guard is what keeps the write itself
-/// honest even without one.
-pub async fn mark_triaged(
-    pool: &SqlitePool,
-    capture_id: i64,
-    left_inbox_at_ms: i64,
-) -> Result<(), sqlx::Error> {
-    sqlx::query("UPDATE captures SET left_inbox_at = ? WHERE id = ? AND left_inbox_at IS NULL")
-        .bind(left_inbox_at_ms)
-        .bind(capture_id)
-        .execute(pool)
-        .await?;
-    Ok(())
 }
 
 #[cfg(test)]
@@ -291,79 +262,5 @@ mod tests {
             find_active_life_area_id(&pool, "Learning").await.unwrap(),
             None
         );
-    }
-
-    #[tokio::test]
-    async fn capture_is_open_is_true_for_a_freshly_inserted_capture() {
-        let (_dir, pool) = test_pool().await;
-        let capture_id = given_a_capture(&pool, "buy milk").await;
-
-        assert!(capture_is_open(&pool, capture_id).await.unwrap());
-    }
-
-    #[tokio::test]
-    async fn capture_is_open_is_false_once_triaged() {
-        let (_dir, pool) = test_pool().await;
-        let capture_id = given_a_capture(&pool, "buy milk").await;
-        mark_triaged(&pool, capture_id, 9999).await.unwrap();
-
-        assert!(!capture_is_open(&pool, capture_id).await.unwrap());
-    }
-
-    #[tokio::test]
-    async fn capture_is_open_is_false_for_an_id_naming_no_capture() {
-        let (_dir, pool) = test_pool().await;
-
-        assert!(!capture_is_open(&pool, 999).await.unwrap());
-    }
-
-    #[tokio::test]
-    async fn mark_triaged_is_a_noop_once_already_triaged() {
-        let (_dir, pool) = test_pool().await;
-        let capture_id = given_a_capture(&pool, "buy milk").await;
-        mark_triaged(&pool, capture_id, 1111).await.unwrap();
-
-        mark_triaged(&pool, capture_id, 2222).await.unwrap();
-
-        let left_inbox_at: Option<i64> =
-            sqlx::query_scalar("SELECT left_inbox_at FROM captures WHERE id = ?")
-                .bind(capture_id)
-                .fetch_one(&pool)
-                .await
-                .unwrap();
-        assert_eq!(left_inbox_at, Some(1111));
-    }
-
-    #[tokio::test]
-    async fn mark_triaged_stamps_the_named_capture() {
-        let (_dir, pool) = test_pool().await;
-        let capture_id = given_a_capture(&pool, "buy milk").await;
-
-        mark_triaged(&pool, capture_id, 9999).await.unwrap();
-
-        let left_inbox_at: Option<i64> =
-            sqlx::query_scalar("SELECT left_inbox_at FROM captures WHERE id = ?")
-                .bind(capture_id)
-                .fetch_one(&pool)
-                .await
-                .unwrap();
-        assert_eq!(left_inbox_at, Some(9999));
-    }
-
-    #[tokio::test]
-    async fn mark_triaged_leaves_other_captures_untouched() {
-        let (_dir, pool) = test_pool().await;
-        let triaged = given_a_capture(&pool, "buy milk").await;
-        let untouched = given_a_capture(&pool, "call the dentist").await;
-
-        mark_triaged(&pool, triaged, 9999).await.unwrap();
-
-        let left_inbox_at: Option<i64> =
-            sqlx::query_scalar("SELECT left_inbox_at FROM captures WHERE id = ?")
-                .bind(untouched)
-                .fetch_one(&pool)
-                .await
-                .unwrap();
-        assert_eq!(left_inbox_at, None);
     }
 }

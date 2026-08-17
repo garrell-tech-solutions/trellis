@@ -97,6 +97,103 @@ mod tests {
         assert_eq!(row, ("buy milk".to_string(), "web".to_string()));
     }
 
+    /// One exit attempt against a capture, through the real router.
+    /// `TRIAGE` and `DISMISS` are the two the inbox has.
+    async fn attempt_exit(pool: &SqlitePool, capture_id: i64, triage: bool) -> StatusCode {
+        let app = build_app(pool.clone(), Clock::system());
+        let request = if triage {
+            Request::builder()
+                .method("POST")
+                .uri(format!("/captures/{capture_id}/triage"))
+                .header("content-type", "application/json")
+                .body(Body::from(r#"{"kind":"pool","life_area":"Work"}"#))
+        } else {
+            Request::builder()
+                .method("POST")
+                .uri(format!("/captures/{capture_id}/dismiss"))
+                .body(Body::empty())
+        };
+        app.oneshot(request.unwrap()).await.unwrap().status()
+    }
+
+    async fn left_inbox_at(pool: &SqlitePool, capture_id: i64) -> Option<i64> {
+        sqlx::query_scalar("SELECT left_inbox_at FROM captures WHERE id = ?")
+            .bind(capture_id)
+            .fetch_one(pool)
+            .await
+            .unwrap()
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig { cases: 24, ..ProptestConfig::default() })]
+
+        /// **A capture leaves the inbox exactly once, and the first attempt
+        /// is the one that counts** — for any sequence of triage and
+        /// dismissal attempts, in any order, of any length.
+        ///
+        /// This property belongs here rather than in either capability
+        /// because neither can state it alone: it is about two handlers
+        /// racing for one row, and this is the module where they meet. Both
+        /// exits now write through `inbox::close_capture`, and the thing
+        /// worth pinning is that consolidating them did not make a capture
+        /// reachable by both — the failure mode `T-archived-at-only` names,
+        /// arriving through the handlers instead of through the schema.
+        ///
+        /// Four invariants in one run: the first attempt succeeds with its
+        /// own success code and every later one is refused; a `tasks` row
+        /// exists if and only if the winner was a triage; the capture row
+        /// survives all of it (`#9` AC-4); and the stamp never moves once
+        /// written.
+        #[test]
+        #[ignore]
+        fn a_capture_leaves_the_inbox_at_most_once(
+            attempts in prop::collection::vec(any::<bool>(), 1..6),
+        ) {
+            let rt = tokio::runtime::Runtime::new().unwrap();
+            let (statuses, first_stamp, final_stamp, tasks, rows) = rt.block_on(async {
+                let (_dir, pool) = test_pool().await;
+                let capture_id = crate::capture::store::insert(&pool, "buy milk", "web", 0)
+                    .await
+                    .unwrap();
+
+                let mut statuses = Vec::new();
+                let mut first_stamp = None;
+                for (index, triage) in attempts.iter().enumerate() {
+                    statuses.push(attempt_exit(&pool, capture_id, *triage).await);
+                    if index == 0 {
+                        first_stamp = left_inbox_at(&pool, capture_id).await;
+                    }
+                }
+
+                let final_stamp = left_inbox_at(&pool, capture_id).await;
+                let tasks: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM tasks")
+                    .fetch_one(&pool)
+                    .await
+                    .unwrap();
+                let rows: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM captures")
+                    .fetch_one(&pool)
+                    .await
+                    .unwrap();
+                (statuses, first_stamp, final_stamp, tasks, rows)
+            });
+
+            let winner_was_triage = attempts[0];
+            let expected_first = if winner_was_triage {
+                StatusCode::CREATED
+            } else {
+                StatusCode::OK
+            };
+            prop_assert_eq!(statuses[0], expected_first);
+            for status in &statuses[1..] {
+                prop_assert_eq!(*status, StatusCode::UNPROCESSABLE_ENTITY);
+            }
+            prop_assert_eq!(tasks, i64::from(winner_was_triage));
+            prop_assert_eq!(rows, 1);
+            prop_assert!(first_stamp.is_some());
+            prop_assert_eq!(final_stamp, first_stamp);
+        }
+    }
+
     proptest! {
         #![proptest_config(ProptestConfig { cases: 32, ..ProptestConfig::default() })]
         #[test]

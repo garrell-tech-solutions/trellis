@@ -28,6 +28,9 @@
 //! 2. Nothing *but* a persistence module writes production SQL — the other
 //!    half of the same seam, and the half the old check never had.
 //! 3. `src/` names business domains, not technical roles.
+//! 4. No capability names another capability's `store` in production.
+//!    `T-one-front-door-per-capability`: a capability that other capabilities
+//!    read exposes one function for it, in its `mod.rs`.
 //!
 //! It is a substring scan over source text, not a proof: it catches the
 //! naive import and is defeated by a type alias or a macro. Treat it as a
@@ -101,6 +104,26 @@ fn collect_rust_sources(dir: &Path, sources: &mut Vec<PathBuf>) {
 /// The modules allowed to write SQL: every business domain's `store.rs`, plus
 /// `platform/db.rs`, which owns the connection and the migrations and belongs
 /// to no capability.
+/// What "this module reaches into `<capability>`'s persistence" looks like as
+/// a path. Spelled in halves for the reason [`sql_needle`] is: this file is
+/// covered by the same walk, and a needle written out whole would match its
+/// own source.
+fn foreign_store_needle(capability: &str) -> String {
+    format!("{}::{capability}::{}", "crate", "store")
+}
+
+/// The capability a module belongs to: its first path component under `src/`.
+/// `lib.rs` and `main.rs` belong to none, which is why this is an `Option`
+/// and not a `String` with an empty case.
+fn capability_of(path: &Path) -> Option<String> {
+    path.strip_prefix(src_dir())
+        .ok()?
+        .components()
+        .next()
+        .map(|component| component.as_os_str().to_string_lossy().into_owned())
+        .filter(|first| src_dir().join(first).is_dir())
+}
+
 fn is_persistence(path: &Path) -> bool {
     path.file_name().is_some_and(|name| name == "store.rs") || path.ends_with("platform/db.rs")
 }
@@ -274,6 +297,56 @@ fn only_a_persistence_module_writes_production_sql() {
         checked >= 8,
         "only {checked} non-persistence modules were checked; the walk has \
          stopped covering the delivery side"
+    );
+}
+
+/// `T-one-front-door-per-capability`, checked. A capability may name another
+/// capability's *types* — `inbox::view::CaptureRow`, `life_areas::view::
+/// LifeAreaOption` — but not its `store`. Reaching for a type is borrowing a
+/// shape; reaching for a query is holding a copy of how that capability works,
+/// and copies drift.
+///
+/// **Production only, on purpose.** A test that sets up "a triaged capture"
+/// by calling the capability that writes one is the right fixture: retyping
+/// its `INSERT` would be a second copy of the schema, which is the worse
+/// failure. The rule is about what the shipped code depends on.
+///
+/// The failure this catches is not hypothetical. `dismiss` arrived with its
+/// own `store` holding a byte-identical copy of `triage`'s "is this capture
+/// still open" query and its `left_inbox_at` write, each defensible on its
+/// own as `T-capability-owns-its-queries`. Both moved behind
+/// `inbox::capture_is_open` and `inbox::close_capture`; this is what stops
+/// the third exit from making a third copy.
+#[test]
+fn no_capability_names_another_capabilitys_store() {
+    let capabilities = top_level_dirs();
+    assert!(
+        capabilities.len() >= 5,
+        "only {} capabilities found, so this check covers almost nothing: {capabilities:?}",
+        capabilities.len()
+    );
+    let mut checked = 0;
+    for path in rust_sources() {
+        let own = capability_of(&path);
+        let source = production_source(&read(&path));
+        for capability in &capabilities {
+            if own.as_deref() == Some(capability.as_str()) {
+                continue;
+            }
+            checked += 1;
+            assert!(
+                !source.contains(&foreign_store_needle(capability)),
+                "{} names {capability}'s store. Ask that capability for what you \
+                 need through its mod.rs front door, the way triage and dismiss \
+                 ask inbox::capture_is_open (T-one-front-door-per-capability)",
+                path.display()
+            );
+        }
+    }
+    assert!(
+        checked >= 40,
+        "only {checked} module/capability pairs were checked; the walk has \
+         stopped covering the tree"
     );
 }
 

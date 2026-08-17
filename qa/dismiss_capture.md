@@ -103,10 +103,12 @@ a project API.
   the whole point of the slice: the row feeds M8's reckoning ("47 archived
   this quarter, 31 Learning" is real signal), which a deleted row cannot.
 - The tasks table holds **one** row — the triaged one only.
-- Each capture row records which door it left by: the triaged one carries a
-  triage stamp and no dismissal stamp, the dismissed one the reverse. Read
-  the column names off the schema (`PRAGMA table_info(captures)`); do not
-  assume them.
+- Which door each capture left by is **derivable**: both carry the stamp that
+  records leaving, and the triaged one — and only the triaged one — is
+  referenced by a `tasks` row. Read the stamp column's name off the schema
+  (`PRAGMA table_info(captures)`); do not assume it. As shipped that is one
+  column, `left_inbox_at`, and the `tasks` reference is the whole of the
+  discriminator; the procedure is written to hold either way.
 
 ## Procedure — a capture leaves the inbox exactly once
 
@@ -130,9 +132,12 @@ a project API.
   **No rejected second exit created, deleted, or re-stamped anything.**
 - This is what makes the impossible state impossible in practice rather than
   on paper. `T-archived-at-only` warns that two fields for one state give
-  every path two chances to set one and forget the other; the boundary check
-  here and the schema `CHECK` behind it are the two answers to that, and this
-  procedure exercises the first.
+  every path two chances to set one and forget the other — and the shipped
+  schema answers it by having only one field: a capture cannot be stamped
+  both triaged and dismissed when there is a single stamp for leaving. What
+  this procedure exercises is the remaining question that no schema can
+  answer — that the **first** exit wins and every later one is refused,
+  rather than the second quietly overwriting the first.
 
 ## Procedure — a dismissed capture stays gone across a restart
 

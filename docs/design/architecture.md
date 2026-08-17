@@ -356,14 +356,24 @@ Rejections are `422`. An unrecognised `kind` reports
 required field reports `{"missing_field": <name>}` — absent and empty are the
 same submitter mistake and report identically (`T-empty-equals-absent`).
 
-### Classification — specified (`T-classifier-covers-domain`)
+### Classification — specified, **M9 only** (`T-classifier-covers-domain`, `D-manual-triage-until-llm`)
 
-One trait, two implementations: keyword at M1, LLM at M9. Output covers `kind`,
-`deadline`, `priority`, `domain` and `title`, each with per-field confidence.
+**Nothing classifies a capture before M9. Triage is fully manual until then**,
+and the life-area picker carries no preselection — a default that is merely
+first-by-id is a silent wrong answer the user never chose
+(`D-manual-triage-until-llm`, 2026-08-17). The keyword implementation
+`T-classifier-covers-domain` scheduled for M1 is cancelled, not deferred.
 
-Invoked by a **background worker between capture and triage** — not inside
-`POST /captures`, which has a 50ms budget no LLM round trip fits, and not
-synchronously at triage, which would put the wait in front of the user.
+What lands at M9: one trait, output covering `kind`, `deadline`, `priority`,
+`domain` and `title`, each with per-field confidence. Invoked by a **background
+worker between capture and triage** — not inside `POST /captures`, which has a
+50ms budget no LLM round trip fits, and not synchronously at triage, which
+would put the wait in front of the user. Failure or timeout falls back to
+**empty fields and manual triage**, which is the shipped M1 product rather than
+a second classifier nobody validated.
+
+`captures` therefore carries no classification columns and gains none until M9 —
+a schema element with no observable behaviour has nothing to specify against.
 
 ---
 

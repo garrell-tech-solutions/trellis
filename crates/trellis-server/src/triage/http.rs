@@ -222,13 +222,23 @@ async fn decide_triage(
     let life_area_id = store::find_active_life_area_id(pool, &submission.life_area_name)
         .await
         .map_err(write_failed)?;
-    Ok(match life_area_id {
+    Ok(outcome_for_resolved_life_area(submission, life_area_id))
+}
+
+/// Once a life-area name has been looked up, whether it resolved decides the
+/// rest of the outcome: an id accepts the submission, its absence rejects it
+/// by the name that failed to resolve.
+fn outcome_for_resolved_life_area(
+    submission: WellFormedTriage,
+    life_area_id: Option<i64>,
+) -> TriageOutcome {
+    match life_area_id {
         Some(life_area_id) => TriageOutcome::Accepted {
             kind: submission.kind,
             life_area_id,
         },
         None => TriageOutcome::Rejected(Rejection::UnknownLifeArea(submission.life_area_name)),
-    })
+    }
 }
 
 /// The page-originated response: whatever happened, re-render `#lists` from

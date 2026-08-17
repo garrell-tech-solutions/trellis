@@ -135,29 +135,15 @@ pub(super) fn urlencode(value: &str) -> String {
 }
 
 fn then_not_redirect(world: &mut World) -> Result<(), String> {
-    match world.last_status {
-        Some(status) if !(300..400).contains(&status) => Ok(()),
-        Some(status) => Err(format!("expected no redirect, got status {status}")),
-        None => Err("no quick-add response recorded".to_string()),
-    }
+    super::then_not_redirect(world, "no quick-add response recorded")
 }
 
 fn html_body(world: &World) -> Result<&str, String> {
-    world
-        .last_html_body
-        .as_deref()
-        .ok_or_else(|| "no HTML response recorded".to_string())
+    super::html_body(world, "no HTML response recorded")
 }
 
 fn then_html_body_contains(world: &mut World, expected: &str) -> Result<(), String> {
-    let body = html_body(world)?;
-    if body.contains(expected) {
-        Ok(())
-    } else {
-        Err(format!(
-            "expected {expected:?} in the response, got:\n{body}"
-        ))
-    }
+    super::then_html_body_contains(world, expected, "no HTML response recorded")
 }
 
 fn captures_section(world: &World) -> Result<&str, String> {

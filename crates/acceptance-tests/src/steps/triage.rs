@@ -347,14 +347,24 @@ pub async fn then_task_has_priority(world: &World, expected: &str) -> Result<(),
     }
 }
 
+fn parse_quota_target(
+    expected_count: &str,
+    expected_minutes_each: &str,
+) -> Result<(i64, i64), String> {
+    Ok((
+        parse_i64("expected target_count", expected_count)?,
+        parse_i64("expected target_minutes_each", expected_minutes_each)?,
+    ))
+}
+
 pub async fn then_task_has_quota_target(
     world: &World,
     expected_count: &str,
     expected_minutes_each: &str,
 ) -> Result<(), String> {
     let row = task_row(world).await?;
-    let expected_count = parse_i64("expected target_count", expected_count)?;
-    let expected_minutes_each = parse_i64("expected target_minutes_each", expected_minutes_each)?;
+    let (expected_count, expected_minutes_each) =
+        parse_quota_target(expected_count, expected_minutes_each)?;
     if row.target_count == Some(expected_count)
         && row.target_minutes_each == Some(expected_minutes_each)
         && row.period.as_deref() == Some("week")
@@ -386,24 +396,32 @@ pub fn then_triage_is_rejected(world: &mut World) -> Result<(), String> {
 /// failing row (`"{field} is required"`). Both paths report the same fact
 /// ("triage-from-page brief: the page and the API share one validation
 /// contract"), just through the shape each transport actually returns.
+fn rejection_names_in_json(body: &Value, expected_field: &str) -> Result<(), String> {
+    match body.get("missing_field").and_then(Value::as_str) {
+        Some(field) if field == expected_field => Ok(()),
+        other => Err(format!(
+            "expected rejection to name {expected_field}, body reported {other:?}"
+        )),
+    }
+}
+
+fn rejection_names_in_html(html: &str, expected_field: &str) -> Result<(), String> {
+    let needle = format!("{expected_field} is required");
+    if html.contains(&needle) {
+        Ok(())
+    } else {
+        Err(format!(
+            "expected the page's rejection to say {needle:?}, got:\n{html}"
+        ))
+    }
+}
+
 pub fn then_rejection_names(world: &mut World, expected_field: &str) -> Result<(), String> {
     if let Some(body) = world.last_response_body.clone() {
-        return match body.get("missing_field").and_then(Value::as_str) {
-            Some(field) if field == expected_field => Ok(()),
-            other => Err(format!(
-                "expected rejection to name {expected_field}, body reported {other:?}"
-            )),
-        };
+        return rejection_names_in_json(&body, expected_field);
     }
     if let Some(html) = world.last_html_body.clone() {
-        let needle = format!("{expected_field} is required");
-        return if html.contains(&needle) {
-            Ok(())
-        } else {
-            Err(format!(
-                "expected the page's rejection to say {needle:?}, got:\n{html}"
-            ))
-        };
+        return rejection_names_in_html(&html, expected_field);
     }
     Err("no rejection response recorded".to_string())
 }

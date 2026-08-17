@@ -119,18 +119,50 @@ async fn then_offers_to_dismiss(world: &mut World, raw_text: &str) -> Result<(),
 }
 
 fn then_not_redirect(world: &mut World) -> Result<(), String> {
-    match world.last_status {
-        Some(status) if !(300..400).contains(&status) => Ok(()),
-        Some(status) => Err(format!("expected no redirect, got status {status}")),
-        None => Err("no dismissal response recorded".to_string()),
-    }
+    super::then_not_redirect(world, "no dismissal response recorded")
 }
 
 fn then_status_is(world: &mut World, expected: u16) -> Result<(), String> {
-    match world.last_status {
-        Some(status) if status == expected => Ok(()),
-        Some(status) => Err(format!("expected status {expected}, got {status}")),
-        None => Err("no dismissal response recorded".to_string()),
+    super::then_status_is(world, expected, "no dismissal response recorded")
+}
+
+fn parse_expected_count(
+    example: &BTreeMap<String, String>,
+    caps: &regex::Captures<'_>,
+    parse_noun: &str,
+) -> Result<i64, String> {
+    example_value(example, &caps[1])?
+        .parse()
+        .map_err(|e| format!("bad {parse_noun}: {e}"))
+}
+
+/// `table` is always one of this module's own two literals, never submitted
+/// text, so building the query with it carries no injection risk.
+async fn table_count(world: &mut World, table: &str) -> Result<i64, String> {
+    let pool = world.pool()?;
+    let query = format!("SELECT COUNT(*) FROM {table}");
+    sqlx::query_scalar(&query)
+        .fetch_one(pool)
+        .await
+        .map_err(|e| format!("count {table}: {e}"))
+}
+
+/// Shared by [`dispatch_row_count_is`] and [`dispatch_task_count_is`]: parse
+/// the expected count, query the named table, and compare.
+async fn assert_table_count(
+    world: &mut World,
+    example: &BTreeMap<String, String>,
+    caps: &regex::Captures<'_>,
+    table: &str,
+    parse_noun: &str,
+    count_noun: &str,
+) -> Result<(), String> {
+    let expected = parse_expected_count(example, caps, parse_noun)?;
+    let actual = table_count(world, table).await?;
+    if actual == expected {
+        Ok(())
+    } else {
+        Err(format!("expected {expected} {count_noun}, got {actual}"))
     }
 }
 
@@ -139,19 +171,15 @@ async fn dispatch_row_count_is(
     example: &BTreeMap<String, String>,
     caps: &regex::Captures<'_>,
 ) -> Result<(), String> {
-    let expected: i64 = example_value(example, &caps[1])?
-        .parse()
-        .map_err(|e| format!("bad row count: {e}"))?;
-    let pool = world.pool()?;
-    let actual: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM captures")
-        .fetch_one(pool)
-        .await
-        .map_err(|e| format!("count captures: {e}"))?;
-    if actual == expected {
-        Ok(())
-    } else {
-        Err(format!("expected {expected} capture rows, got {actual}"))
-    }
+    assert_table_count(
+        world,
+        example,
+        caps,
+        "captures",
+        "row count",
+        "capture rows",
+    )
+    .await
 }
 
 async fn dispatch_task_count_is(
@@ -159,19 +187,7 @@ async fn dispatch_task_count_is(
     example: &BTreeMap<String, String>,
     caps: &regex::Captures<'_>,
 ) -> Result<(), String> {
-    let expected: i64 = example_value(example, &caps[1])?
-        .parse()
-        .map_err(|e| format!("bad task count: {e}"))?;
-    let pool = world.pool()?;
-    let actual: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM tasks")
-        .fetch_one(pool)
-        .await
-        .map_err(|e| format!("count tasks: {e}"))?;
-    if actual == expected {
-        Ok(())
-    } else {
-        Err(format!("expected {expected} tasks, got {actual}"))
-    }
+    assert_table_count(world, example, caps, "tasks", "task count", "tasks").await
 }
 
 /// Checks the reason for a dismissal-adjacent rejection wherever it landed:
@@ -206,21 +222,11 @@ fn then_rejection_says_not_in_inbox(world: &mut World) -> Result<(), String> {
 }
 
 fn html_body(world: &World) -> Result<&str, String> {
-    world
-        .last_html_body
-        .as_deref()
-        .ok_or_else(|| "no HTML response recorded".to_string())
+    super::html_body(world, "no HTML response recorded")
 }
 
 fn then_html_body_contains(world: &mut World, expected: &str) -> Result<(), String> {
-    let body = html_body(world)?;
-    if body.contains(expected) {
-        Ok(())
-    } else {
-        Err(format!(
-            "expected {expected:?} in the response, got:\n{body}"
-        ))
-    }
+    super::then_html_body_contains(world, expected, "no HTML response recorded")
 }
 
 fn then_html_body_excludes(world: &mut World, forbidden: &str) -> Result<(), String> {
@@ -239,6 +245,16 @@ mod tests {
     use super::super::triage::given_capture_waiting;
     use super::*;
 
+    /// The captures section as it reads immediately after a `GET /` reload,
+    /// the assertion setup shared by every test that dismisses a capture and
+    /// then checks who is left in the inbox.
+    async fn captures_section_after_reload(world: &mut World) -> String {
+        let request = Request::builder().uri("/").body(Body::empty()).unwrap();
+        html_response(world, request).await.unwrap();
+        let body = html_body(&*world).unwrap();
+        html::captures_section(body).unwrap().to_string()
+    }
+
     #[tokio::test]
     async fn when_dismissed_removes_the_capture_from_the_inbox() {
         let mut world = migrated_world().await;
@@ -247,10 +263,7 @@ mod tests {
         when_dismissed(&mut world).await.unwrap();
 
         then_not_redirect(&mut world).unwrap();
-        let request = Request::builder().uri("/").body(Body::empty()).unwrap();
-        html_response(&mut world, request).await.unwrap();
-        let body = html_body(&world).unwrap();
-        let section = html::captures_section(body).unwrap();
+        let section = captures_section_after_reload(&mut world).await;
         assert!(!section.contains("asdfgh"));
     }
 
@@ -262,10 +275,7 @@ mod tests {
 
         when_named_dismissed(&mut world, "asdfgh").await.unwrap();
 
-        let request = Request::builder().uri("/").body(Body::empty()).unwrap();
-        html_response(&mut world, request).await.unwrap();
-        let body = html_body(&world).unwrap();
-        let section = html::captures_section(body).unwrap();
+        let section = captures_section_after_reload(&mut world).await;
         assert!(!section.contains("asdfgh"));
         assert!(section.contains("buy milk"));
     }

@@ -232,10 +232,7 @@ async fn dispatch_archive_life_area(
 }
 
 fn html_body(world: &World) -> Result<&str, String> {
-    world
-        .last_html_body
-        .as_deref()
-        .ok_or_else(|| "no HTML response recorded".to_string())
+    super::html_body(world, "no HTML response recorded")
 }
 
 fn life_areas_section(world: &World) -> Result<&str, String> {
@@ -273,19 +270,11 @@ fn dispatch_life_areas_listed_exactly(
 }
 
 fn then_not_redirect(world: &mut World) -> Result<(), String> {
-    match world.last_status {
-        Some(status) if !(300..400).contains(&status) => Ok(()),
-        Some(status) => Err(format!("expected no redirect, got status {status}")),
-        None => Err("no response recorded".to_string()),
-    }
+    super::then_not_redirect(world, "no response recorded")
 }
 
 fn then_status_is(world: &mut World, expected: u16) -> Result<(), String> {
-    match world.last_status {
-        Some(status) if status == expected => Ok(()),
-        Some(status) => Err(format!("expected status {expected}, got {status}")),
-        None => Err("no response recorded".to_string()),
-    }
+    super::then_status_is(world, expected, "no response recorded")
 }
 
 fn dispatch_rejection_says_already(
@@ -305,6 +294,15 @@ fn dispatch_rejection_says_already(
     }
 }
 
+fn rejection_reports_unknown_life_area(body: &Value, name: &str) -> Result<(), String> {
+    match body.get("unknown_life_area").and_then(Value::as_str) {
+        Some(actual) if actual == name => Ok(()),
+        other => Err(format!(
+            "expected the rejection to report unknown_life_area {name:?}, body reported {other:?}"
+        )),
+    }
+}
+
 fn dispatch_rejection_says_not_a_life_area(
     world: &mut World,
     example: &BTreeMap<String, String>,
@@ -315,12 +313,7 @@ fn dispatch_rejection_says_not_a_life_area(
         .last_response_body
         .as_ref()
         .ok_or_else(|| "no rejection body recorded".to_string())?;
-    match body.get("unknown_life_area").and_then(Value::as_str) {
-        Some(actual) if actual == name => Ok(()),
-        other => Err(format!(
-            "expected the rejection to report unknown_life_area {name:?}, body reported {other:?}"
-        )),
-    }
+    rejection_reports_unknown_life_area(body, &name)
 }
 
 fn then_life_areas_list_excludes(world: &mut World, forbidden: &str) -> Result<(), String> {
@@ -354,6 +347,17 @@ fn then_life_areas_list_contains(world: &mut World, expected: &str) -> Result<()
 /// anything the scenario itself is asserting on (the task list and the
 /// life-areas list are both unaffected by one more untriaged row).
 async fn current_triage_life_area_choices(world: &mut World) -> Result<Vec<String>, String> {
+    insert_probe_capture(world).await?;
+    html_get(world, "/").await?;
+    let body = html_body(world)?;
+    let section = html::captures_section(body)?;
+    let options = select_option_values(section, "life_area")?;
+    Ok(exclude_blank_placeholder(options))
+}
+
+/// The throwaway capture [`current_triage_life_area_choices`] needs to
+/// guarantee a picker is on the page; not meaningful on its own.
+async fn insert_probe_capture(world: &World) -> Result<(), String> {
     let pool = world.pool()?.clone();
     sqlx::query(
         "INSERT INTO captures (raw_text, source, created_at_ms) \
@@ -362,11 +366,7 @@ async fn current_triage_life_area_choices(world: &mut World) -> Result<Vec<Strin
     .execute(&pool)
     .await
     .map_err(|e| format!("insert probe capture: {e}"))?;
-    html_get(world, "/").await?;
-    let body = html_body(world)?;
-    let section = html::captures_section(body)?;
-    let options = select_option_values(section, "life_area")?;
-    Ok(exclude_blank_placeholder(options))
+    Ok(())
 }
 
 /// The picker's unselected placeholder (`<option value="">`,
@@ -499,17 +499,20 @@ fn then_quick_add_pool_preselects_none(world: &mut World) -> Result<(), String> 
     then_form_preselects_no_life_area(body, "pool")
 }
 
+fn without_life_area(
+    fields: impl IntoIterator<Item = (&'static str, &'static str)>,
+) -> Vec<(&'static str, &'static str)> {
+    fields
+        .into_iter()
+        .filter(|(name, _)| *name != "life_area")
+        .collect()
+}
+
 fn form_fields_without_life_area(kind: &str) -> Result<Vec<(&'static str, &'static str)>, String> {
-    let fields: Vec<(&str, &str)> = match kind {
+    let fields = match kind {
         "pool" => vec![("kind", "pool")],
-        "committed" => committed_form_fields()
-            .into_iter()
-            .filter(|(name, _)| *name != "life_area")
-            .collect(),
-        "quota" => quota_form_fields()
-            .into_iter()
-            .filter(|(name, _)| *name != "life_area")
-            .collect(),
+        "committed" => without_life_area(committed_form_fields()),
+        "quota" => without_life_area(quota_form_fields()),
         other => return Err(format!("unknown kind {other:?}")),
     };
     Ok(fields)

@@ -201,12 +201,18 @@ async fn dispatch_quota_omitting(
     when_triaged_through_page(world, &fields).await
 }
 
-fn then_offers_all_kinds(world: &mut World, raw_text: &str) -> Result<(), String> {
+/// The captures section of the last HTML response, mirroring
+/// [`task_list_section`] for the row a page-originated triage acts on.
+fn captures_list_section(world: &World) -> Result<&str, String> {
     let body = world
         .last_html_body
         .as_deref()
         .ok_or_else(|| "no HTML response recorded".to_string())?;
-    let section = html::captures_section(body)?;
+    html::captures_section(body)
+}
+
+fn then_offers_all_kinds(world: &mut World, raw_text: &str) -> Result<(), String> {
+    let section = captures_list_section(world)?;
     for expected in [raw_text, "Pool", "Committed", "Quota"] {
         if !section.contains(expected) {
             return Err(format!(
@@ -232,11 +238,7 @@ fn then_page_response_not_redirect(world: &mut World) -> Result<(), String> {
 }
 
 fn then_inbox_does_not_list(world: &mut World, raw_text: &str) -> Result<(), String> {
-    let body = world
-        .last_html_body
-        .as_deref()
-        .ok_or_else(|| "no HTML response recorded".to_string())?;
-    let section = html::captures_section(body)?;
+    let section = captures_list_section(world)?;
     if section.contains(raw_text) {
         Err(format!(
             "expected {raw_text:?} to be gone from the inbox, got:\n{section}"
@@ -293,14 +295,16 @@ pub(super) fn select_option_values(section: &str, field_name: &str) -> Result<Ve
 /// before the row's first `<details>` (D-pool-is-default keeps it outside
 /// any expanding control), committed's and quota's are each scoped to their
 /// own `<details>` block by its `<summary>` text.
+fn pool_form_section(section: &str) -> Result<&str, String> {
+    let end = section
+        .find("<details")
+        .ok_or_else(|| format!("no <details> found in:\n{section}"))?;
+    Ok(&section[..end])
+}
+
 pub(super) fn form_section<'a>(section: &'a str, kind: &str) -> Result<&'a str, String> {
     match kind {
-        "pool" => {
-            let end = section
-                .find("<details")
-                .ok_or_else(|| format!("no <details> found in:\n{section}"))?;
-            Ok(&section[..end])
-        }
+        "pool" => pool_form_section(section),
         "committed" => html::between(section, "<summary>Committed</summary>", "</details>"),
         "quota" => html::between(section, "<summary>Quota</summary>", "</details>"),
         other => Err(format!("unknown triage kind {other:?}")),
@@ -314,11 +318,7 @@ pub(super) fn field_count(section: &str) -> usize {
 }
 
 fn then_pool_not_behind_control(world: &mut World) -> Result<(), String> {
-    let body = world
-        .last_html_body
-        .as_deref()
-        .ok_or_else(|| "no HTML response recorded".to_string())?;
-    let section = html::captures_section(body)?;
+    let section = captures_list_section(world)?;
     let pool_section = form_section(section, "pool")?;
     if pool_section.contains(r#"name="kind" value="pool""#) {
         Ok(())
@@ -339,11 +339,7 @@ fn dispatch_pool_fewer_inputs(
 }
 
 fn then_pool_fewer_inputs(world: &mut World, other_kind: &str) -> Result<(), String> {
-    let body = world
-        .last_html_body
-        .as_deref()
-        .ok_or_else(|| "no HTML response recorded".to_string())?;
-    let section = html::captures_section(body)?;
+    let section = captures_list_section(world)?;
     let pool_count = field_count(form_section(section, "pool")?);
     let other_count = field_count(form_section(section, other_kind)?);
     if pool_count < other_count {
@@ -361,11 +357,7 @@ fn then_select_offers_exactly(
     field_name: &str,
     expected: &[&str],
 ) -> Result<(), String> {
-    let body = world
-        .last_html_body
-        .as_deref()
-        .ok_or_else(|| "no HTML response recorded".to_string())?;
-    let section = html::captures_section(body)?;
+    let section = captures_list_section(world)?;
     let actual = select_option_values(section, field_name)?;
     if actual == expected {
         Ok(())

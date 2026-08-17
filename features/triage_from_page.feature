@@ -9,6 +9,13 @@
 # triage-from-page-committed-closed-choices-04: the committed form offers deadline type and priority as fixed choices, not free text
 # triage-from-page-quota-rejected-05: triaging as quota through the page with a required field omitted is rejected the same way as the API
 # triage-from-page-escapes-hostile-text-06: hostile capture text stays escaped in the task list
+# triage-from-page-pool-needs-no-form-07: pool triage is submitted straight from the row, with nothing to open first
+# triage-from-page-pool-is-cheapest-08: the pool form asks for fewer inputs than committed or quota
+#
+# 07 and 08 are #9's AC-2 as amended 2026-08-17: pool is the cheapest path,
+# stated as the relation it always stood for rather than a literal input
+# count. Its other half is triage-from-page-pool-02 above, which pins that
+# pool triage moves the capture without a full reload.
 Feature: Triage happens on the page, using the same validation as the API
 
   Background:
@@ -60,3 +67,20 @@ Feature: Triage happens on the page, using the same validation as the API
     And the inbox is viewed
     Then the task list does not contain an unescaped "<script>" tag
     And the task list contains the word "boom"
+
+  # triage-from-page-pool-needs-no-form-07: pool triage is submitted straight from the row, with nothing to open first
+  Scenario: Pool triage is submitted straight from the row, with nothing to open first
+    Given a capture with raw text "buy milk" is waiting in the untriaged queue
+    When the inbox is viewed
+    Then the pool triage form is not behind a control that must be opened first
+
+  # triage-from-page-pool-is-cheapest-08: the pool form asks for fewer inputs than committed or quota
+  Scenario: The pool form asks for fewer inputs than committed or quota
+    Given a capture with raw text "buy milk" is waiting in the untriaged queue
+    When the inbox is viewed
+    Then the pool triage form asks for fewer inputs than the <kind> form
+
+    Examples:
+      | kind      |
+      | committed |
+      | quota     |

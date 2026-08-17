@@ -9,6 +9,14 @@
 # life-area-triage-unknown-04: triage naming a life area that does not exist is rejected
 # life-area-triage-archived-05: triage into an archived life area is rejected at the boundary, not only hidden from the picker
 # life-area-triage-escapes-hostile-text-06: a hostile life area name stays escaped where the task row renders it
+# life-area-triage-no-preselection-07: the life area picker preselects nothing, whatever the kind
+# life-area-triage-quick-add-picker-08: a row rendered by the quick-add box carries the same unselected picker
+# life-area-triage-page-required-09: triage submitted from the page with no life area chosen is refused on that row
+#
+# The picker's unselected placeholder is not a life area, so "the triage life
+# area choices are exactly ..." above keeps naming only real life areas.
+# D-manual-triage-until-llm: nothing chooses for the user, and a default that
+# is merely first-by-id is that same silent wrong default one layer down.
 Feature: Triage tags a task with a life area
 
   Background:
@@ -66,3 +74,33 @@ Feature: Triage tags a task with a life area
     And the inbox is viewed
     Then the task list does not contain an unescaped "<script>" tag
     And the task list contains the word "boom"
+
+  # life-area-triage-no-preselection-07: the life area picker preselects nothing, whatever the kind
+  Scenario: The life area picker preselects nothing, whatever the kind
+    When the inbox is viewed
+    Then the <kind> triage form preselects no life area
+
+    Examples:
+      | kind      |
+      | pool      |
+      | committed |
+      | quota     |
+
+  # life-area-triage-quick-add-picker-08: a row rendered by the quick-add box carries the same unselected picker
+  Scenario: A row rendered by the quick-add box carries the same unselected picker
+    When the quick-add box submits a capture with raw text "buy milk"
+    Then the quick-add response's pool triage form preselects no life area
+
+  # life-area-triage-page-required-09: triage submitted from the page with no life area chosen is refused on that row
+  Scenario: Triage submitted from the page with no life area chosen is refused on that row
+    When the capture is triaged as a <kind> task through the page with no life area chosen
+    Then the triage is rejected
+    And the rejection message on the capture's row names "life_area"
+    And the task list is still empty
+    And the capture is still waiting in the untriaged queue
+
+    Examples:
+      | kind      |
+      | pool      |
+      | committed |
+      | quota     |

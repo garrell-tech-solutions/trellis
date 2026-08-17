@@ -127,6 +127,23 @@ were discussing different subjects.
 
 Bare "domain" is always the life area. If you mean packaging, write both words.
 
+## And "window" is not used at all
+
+The fourth overloaded word, caught before M2 wrote it into code rather than
+after. It was already ambiguous inside M2's own acceptance criteria — a mask in
+`free_intervals(window, range)`, a rolling time span in "14-day capacity view",
+and a time span again in `/stats`.
+
+| Term | Means |
+|---|---|
+| **guardrail** | A life area's weekly mask: the hours in which its work may be scheduled (`D-life-area-owns-its-time`). |
+| **range** | A span of time — the 14 days a capacity view covers, the fortnight `/stats` counts over. |
+| ~~window~~ | **Do not use.** Say which of the two you mean. |
+
+The signature is `free_intervals(guardrail, range)`. `allowed_windows` keeps its
+name for now because it is the field #6 and #11 both cite; when it is built it
+should be `borrowed_guardrails` or similar.
+
 ---
 
 ### The clock — built
@@ -239,14 +256,45 @@ is in the way".
 ### Guardrails and free time — specified (M2, #10)
 
 ```
-free_intervals(window, range) -> disjoint, sorted intervals
-                                 each a subset of (mask - busy - pins - buffers)
+free_intervals(guardrail, range) -> disjoint, sorted intervals
+                                    each a subset of (mask - busy - pins - buffers)
 ```
 
+**Each life area carries one guardrail** — the hours its work may be scheduled
+in (`D-life-area-owns-its-time`). A task goes in its own life area's hours by
+default and may not go outside them; borrowing another's is an explicit
+per-task permission. **Guardrails may overlap in clock time**, and where they
+do their life areas compete, resolved by deadline and priority. A life area
+with no guardrail must be marked **pool-only** — never placed, only offered by
+the menu (`T-life-areas-are-data`'s well-formedness rule, made concrete).
+
+Reservation is the default and sharing is opt-in, which is what lets one
+mechanism serve both jobs the settled decisions demand: **containment**, since
+`D-guardrails-never-yield` means a P1 hard deadline against a full guardrail
+raises a conflict rather than breaching the wall; and **reservation**, since
+`T-three-task-kinds` warns that *a Fitness guardrail nothing is scheduled into
+is a wall protecting an empty room*. Fitness's 06:00 is protected by nothing
+having claimed it, not by a protection rule.
+
 Guardrails are civil wall-clock, so DST gaps and folds are real cases, not edge
-cases (`T-jiff-epoch-millis`). Guardrails never yield to deadlines
-(`D-guardrails-never-yield`): a P1 hard deadline against full windows raises a
-conflict, it does not breach the wall.
+cases (`T-jiff-epoch-millis`).
+
+### Capacity — specified (M2, #10; `T-capacity-two-axes`)
+
+**Consumed from the guardrail occupied, attributed to the task's life area.**
+
+```
+Work: 5h of 8h used — 2h of that is Learning you allowed in.
+Learning: 2h done this week.
+```
+
+Two numbers because there are two questions: *how much of this wall is left* is
+about the clock, *how much Learning did I do* is about the work. Charging a
+borrowed hour to only one of them makes the other lie — and the availability
+lie is the expensive one, since it reports free time that is physically
+occupied. Quota demand **counts** toward capacity (`T-three-task-kinds`); pool
+consumes **nothing**, because pool is never placed
+(`D-no-pool-on-calendar`).
 
 ---
 
@@ -385,7 +433,7 @@ Everything above marked **GAP**, in the order it blocks work:
 |---|---|---|
 | Invariants 1, 3, 4 undefined | M3 cannot be specified | #11 |
 | ~~Which five domains, and one concept or two~~ | ~~M1 S4, M9~~ | **closed** — `T-life-areas-are-data`, #47 |
-| Per-life-area capacity vs `allowed_windows` | M2 | #6 |
+| ~~Per-life-area capacity vs `allowed_windows`~~ | ~~M2~~ | **closed** — `T-capacity-two-axes` + `D-life-area-owns-its-time`, #6 |
 | `Block::missed` unreachable under silence-means-done | M6 | #4 |
 | U2 / U3 / U4 — hard vs soft, backward-pass input, window crossing | M3 | #7 |
 | ~~Crate layout ratification~~ | ~~nothing; cost grows~~ | **closed** — `T-package-by-business-domain`, #44 |

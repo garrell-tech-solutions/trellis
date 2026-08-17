@@ -17,7 +17,7 @@ pub struct UntriagedCapture {
 
 /// Untriaged captures, newest first — the inbox's contents.
 pub async fn list_untriaged(pool: &SqlitePool) -> Result<Vec<UntriagedCapture>, sqlx::Error> {
-    sqlx::query_as("SELECT id, raw_text FROM captures WHERE triaged_at IS NULL ORDER BY id DESC")
+    sqlx::query_as("SELECT id, raw_text FROM captures WHERE left_inbox_at IS NULL ORDER BY id DESC")
         .fetch_all(pool)
         .await
 }
@@ -204,26 +204,35 @@ mod tests {
         #![proptest_config(ProptestConfig { cases: 32, ..ProptestConfig::default() })]
 
         /// The listing is a *partition*: exactly the untriaged captures, in
-        /// exactly newest-first order. The example tests above sample two
-        /// captures and one triaged one; this pins both halves — the `WHERE`
-        /// and the `ORDER BY` — against any queue and any triaged subset of
-        /// it, which is the shape the inbox actually meets.
+        /// exactly newest-first order, whichever of the inbox's two exits
+        /// (triage or dismissal, `dismiss-capture-keeps-the-row-03`, #48) a
+        /// capture took. Extended to cover dismissal here rather than as a
+        /// second property (the brief's open question 2): both exits stamp
+        /// the same `left_inbox_at` column, so one property already exercises
+        /// both `WHERE` clauses this query could get wrong.
+        ///
+        /// Also pins `#9` AC-4's row-count property in the same run: the
+        /// total row count never moves, for any queue and any split of it
+        /// across untriaged, triaged and dismissed — a capture row is never
+        /// deleted by either exit.
         #[test]
         #[ignore]
         fn list_untriaged_returns_exactly_the_untriaged_captures_newest_first(
-            queue in prop::collection::vec((".{0,40}", any::<bool>()), 0..12),
+            queue in prop::collection::vec((".{0,40}", 0..3u8), 0..12),
         ) {
             let rt = tokio::runtime::Runtime::new().unwrap();
-            let (expected, listed) = rt.block_on(async {
+            let (expected, listed, row_count) = rt.block_on(async {
                 let (_dir, pool) = test_pool().await;
 
                 let mut expected: Vec<String> = Vec::new();
-                for (raw_text, triaged) in &queue {
+                for (raw_text, exit) in &queue {
                     let id = given_a_capture(&pool, raw_text).await;
-                    if *triaged {
-                        mark_triaged(&pool, id, 9999).await.unwrap();
-                    } else {
-                        expected.push(raw_text.clone());
+                    match exit {
+                        1 => mark_triaged(&pool, id, 9999).await.unwrap(),
+                        2 => crate::dismiss::store::mark_dismissed(&pool, id, 9999)
+                            .await
+                            .unwrap(),
+                        _ => expected.push(raw_text.clone()),
                     }
                 }
                 expected.reverse();
@@ -234,10 +243,15 @@ mod tests {
                     .into_iter()
                     .map(|capture| capture.raw_text)
                     .collect();
-                (expected, listed)
+                let row_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM captures")
+                    .fetch_one(&pool)
+                    .await
+                    .unwrap();
+                (expected, listed, row_count)
             });
 
             prop_assert_eq!(expected, listed);
+            prop_assert_eq!(row_count as usize, queue.len());
         }
     }
 }

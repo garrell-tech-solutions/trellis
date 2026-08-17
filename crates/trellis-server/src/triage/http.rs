@@ -114,6 +114,12 @@ impl<S: Send + Sync> FromRequest<S> for TriageInput {
 enum Rejection {
     Core(TriageRejection),
     UnknownLifeArea(String),
+    /// The capture named by the URL has already left the inbox -- by triage
+    /// or by dismissal, either of which needs the database to know
+    /// (`dismiss-capture-no-triage-after-dismissal-05`). Which of the two it
+    /// was is not reported: the rejection is the same either way, "not open
+    /// for business", and nothing downstream needs to tell them apart.
+    CaptureNotOpen,
 }
 
 /// The rejection contract: a client error whose body names what was wrong.
@@ -135,6 +141,9 @@ fn rejected(rejection: &Rejection, kind_submitted: &Value) -> (StatusCode, Json<
         }
         Rejection::Core(TriageRejection::UnknownKind) => json!({ "unknown_kind": kind_submitted }),
         Rejection::UnknownLifeArea(name) => json!({ "unknown_life_area": name }),
+        Rejection::CaptureNotOpen => {
+            json!({ "capture_not_open": CAPTURE_NOT_OPEN_MESSAGE })
+        }
     };
     (StatusCode::UNPROCESSABLE_ENTITY, Json(body))
 }
@@ -154,8 +163,14 @@ fn rejection_message(rejection: &Rejection, kind_submitted: &Value) -> String {
             format!("unrecognised kind: {kind_submitted}")
         }
         Rejection::UnknownLifeArea(name) => format!("{name} is not a life area"),
+        Rejection::CaptureNotOpen => CAPTURE_NOT_OPEN_MESSAGE.to_string(),
     }
 }
+
+/// `dismiss-capture-no-triage-after-dismissal-05`: the exact prose the
+/// scenario asserts on, kept in one place rather than typed twice into the
+/// JSON body and the page's per-row message.
+const CAPTURE_NOT_OPEN_MESSAGE: &str = "the capture is no longer in the inbox";
 
 /// The instant is passed in rather than read here: reading the clock is the
 /// handler's business, and a triage stamps the task and the capture it
@@ -183,16 +198,27 @@ enum TriageOutcome {
 }
 
 /// Only once the core calls a submission well-formed does the database enter
-/// it: whether the life-area name it names resolves to a real, active row.
-/// The database is not touched until there is something worth resolving.
+/// it: first, whether the capture named by the URL is still open
+/// (`dismiss-capture-no-second-triage-07`, `-no-triage-after-dismissal-05`) —
+/// cheaper than resolving a life area, and logically prior, since a
+/// submission naming a life area that is fine in the abstract still cannot
+/// land on a capture that has already left. Then whether the life-area name
+/// it names resolves to a real, active row.
 async fn decide_triage(
     pool: &SqlitePool,
+    capture_id: i64,
     fields: &TriageFields,
 ) -> Result<TriageOutcome, StatusCode> {
     let submission = match WellFormedTriage::from_fields(fields) {
         Ok(submission) => submission,
         Err(rejection) => return Ok(TriageOutcome::Rejected(Rejection::Core(rejection))),
     };
+    if !store::capture_is_open(pool, capture_id)
+        .await
+        .map_err(write_failed)?
+    {
+        return Ok(TriageOutcome::Rejected(Rejection::CaptureNotOpen));
+    }
     let life_area_id = store::find_active_life_area_id(pool, &submission.life_area_name)
         .await
         .map_err(write_failed)?;
@@ -262,7 +288,7 @@ pub async fn create_triage(
     let (fields, kind_submitted) = fields_from_input(input);
     let created_at_ms = clock.now_ms();
 
-    let outcome = decide_triage(&pool, &fields).await?;
+    let outcome = decide_triage(&pool, capture_id, &fields).await?;
 
     if from_page {
         return page_response(&pool, capture_id, &outcome, &kind_submitted, created_at_ms).await;
@@ -466,6 +492,50 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn triaging_an_already_triaged_capture_is_rejected_and_leaves_one_task() {
+        let (_dir, pool) = test_pool().await;
+        let capture_id = insert_untriaged_capture(&pool, "buy milk").await;
+        triage_response(
+            &pool,
+            capture_id,
+            json!({ "kind": "pool", "life_area": "Work" }),
+        )
+        .await;
+
+        let response = triage_response(
+            &pool,
+            capture_id,
+            json!({ "kind": "pool", "life_area": "Home" }),
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+        assert_eq!(
+            response_json(response).await,
+            json!({ "capture_not_open": "the capture is no longer in the inbox" })
+        );
+        let task_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM tasks")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(task_count, 1, "the second triage must not add a task");
+    }
+
+    #[tokio::test]
+    async fn triaging_a_capture_that_does_not_exist_is_rejected_as_not_open() {
+        let (_dir, pool) = test_pool().await;
+
+        let response =
+            triage_response(&pool, 999, json!({ "kind": "pool", "life_area": "Work" })).await;
+
+        assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+        assert_eq!(
+            response_json(response).await,
+            json!({ "capture_not_open": "the capture is no longer in the inbox" })
+        );
+    }
+
+    #[tokio::test]
     async fn an_accepted_triage_stamps_the_capture_as_triaged() {
         let (_dir, pool) = test_pool().await;
         let capture_id = insert_untriaged_capture(&pool, "buy milk").await;
@@ -477,14 +547,14 @@ mod tests {
         )
         .await;
 
-        let triaged_at: Option<i64> =
-            sqlx::query_scalar("SELECT triaged_at FROM captures WHERE id = ?")
+        let left_inbox_at: Option<i64> =
+            sqlx::query_scalar("SELECT left_inbox_at FROM captures WHERE id = ?")
                 .bind(capture_id)
                 .fetch_one(&pool)
                 .await
                 .unwrap();
         assert!(
-            triaged_at.is_some(),
+            left_inbox_at.is_some(),
             "an accepted triage consumes the capture"
         );
     }
@@ -518,14 +588,14 @@ mod tests {
                 "a rejected triage must not leave a task behind"
             );
 
-            let triaged_at: Option<i64> =
-                sqlx::query_scalar("SELECT triaged_at FROM captures WHERE id = ?")
+            let left_inbox_at: Option<i64> =
+                sqlx::query_scalar("SELECT left_inbox_at FROM captures WHERE id = ?")
                     .bind(capture_id)
                     .fetch_one(&pool)
                     .await
                     .unwrap();
             assert_eq!(
-                triaged_at, None,
+                left_inbox_at, None,
                 "a rejected triage must not consume the capture"
             );
         }

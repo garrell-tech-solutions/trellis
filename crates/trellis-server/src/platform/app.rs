@@ -17,6 +17,7 @@ use axum::Router;
 use sqlx::SqlitePool;
 
 use crate::capture::http::create_capture;
+use crate::dismiss::http::dismiss_capture;
 use crate::inbox::http::show_inbox;
 use crate::life_areas::http::{archive_life_area, create_life_area, show_life_areas};
 use crate::platform::assets::htmx_js;
@@ -51,6 +52,7 @@ pub fn build_app(pool: SqlitePool, clock: Clock) -> Router {
         .route("/static/htmx.min.js", get(htmx_js))
         .route("/captures", post(create_capture))
         .route("/captures/{id}/triage", post(create_triage))
+        .route("/captures/{id}/dismiss", post(dismiss_capture))
         .route("/stats", get(show_stats))
         .route("/life-areas", get(show_life_areas).post(create_life_area))
         .route("/life-areas/{id}/archive", post(archive_life_area))

@@ -93,7 +93,7 @@ mod tests {
     async fn the_inbox_excludes_a_triaged_capture() {
         let (_dir, pool) = test_pool().await;
         let capture_id = insert_untriaged_capture(&pool, "call the dentist").await;
-        sqlx::query("UPDATE captures SET triaged_at = 1 WHERE id = ?")
+        sqlx::query("UPDATE captures SET left_inbox_at = 1 WHERE id = ?")
             .bind(capture_id)
             .execute(&pool)
             .await

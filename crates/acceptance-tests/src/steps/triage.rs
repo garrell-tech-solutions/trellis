@@ -443,13 +443,13 @@ pub async fn then_task_list_is_empty(world: &World) -> Result<(), String> {
 pub async fn then_capture_still_waiting(world: &World) -> Result<(), String> {
     let pool = world.pool()?;
     let capture_id = capture_id(world)?;
-    let triaged_at: Option<i64> =
-        sqlx::query_scalar("SELECT triaged_at FROM captures WHERE id = ?")
+    let left_inbox_at: Option<i64> =
+        sqlx::query_scalar("SELECT left_inbox_at FROM captures WHERE id = ?")
             .bind(capture_id)
             .fetch_one(pool)
             .await
             .map_err(|e| format!("query capture: {e}"))?;
-    if triaged_at.is_none() {
+    if left_inbox_at.is_none() {
         Ok(())
     } else {
         Err("expected the capture to still be untriaged".to_string())

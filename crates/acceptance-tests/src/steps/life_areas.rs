@@ -17,7 +17,10 @@
 use super::html;
 use super::payloads;
 use super::triage::{then_rejection_names, when_triaged};
-use super::triage_from_page::select_option_values;
+use super::triage_from_page::{
+    committed_form_fields, form_section, quota_form_fields, select_option_values,
+    when_triaged_through_page,
+};
 use super::*;
 use axum::body::Body;
 use axum::http::Request;
@@ -45,6 +48,9 @@ static THEN_REJECTION_SAYS_NOT_A_LIFE_AREA: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r#"^the rejection says "([^"]+)" is not a life area$"#).unwrap());
 static THEN_REJECTION_NAMES_LITERAL: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r#"^the rejection names "([^"]+)"$"#).unwrap());
+static THEN_ROW_REJECTION_NAMES: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r#"^the rejection message on the capture's row names "([^"]+)"$"#).unwrap()
+});
 static THEN_LIFE_AREAS_LIST_NO_SCRIPT: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r#"^the life areas list does not contain an unescaped "<script>" tag$"#).unwrap()
 });
@@ -61,6 +67,17 @@ static WHEN_CAPTURE_TRIAGED_IN_LIFE_AREA: LazyLock<Regex> = LazyLock::new(|| {
 });
 static WHEN_TRIAGED_OMITTING_LIFE_AREA: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r#"^the capture is triaged as a (\S+) task with "life_area" omitted$"#).unwrap()
+});
+static THEN_KIND_FORM_PRESELECTS_NONE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^the <(\w+)> triage form preselects no life area$").unwrap());
+static THEN_QUICK_ADD_POOL_PRESELECTS_NONE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"^the quick-add response's pool triage form preselects no life area$").unwrap()
+});
+static WHEN_TRIAGED_THROUGH_PAGE_NO_LIFE_AREA: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(
+        r"^the capture is triaged as a <(\w+)> task through the page with no life area chosen$",
+    )
+    .unwrap()
 });
 static THEN_TASK_LIST_SHOWS_TAGGED: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r#"^the task list shows "([^"]+)" tagged "([^"]+)"$"#).unwrap());
@@ -102,6 +119,9 @@ pub async fn dispatch(
     if let Some(caps) = THEN_REJECTION_NAMES_LITERAL.captures(text) {
         return Some(then_rejection_names(world, &caps[1]));
     }
+    if let Some(caps) = THEN_ROW_REJECTION_NAMES.captures(text) {
+        return Some(then_rejection_names(world, &caps[1]));
+    }
     if THEN_LIFE_AREAS_LIST_NO_SCRIPT.is_match(text) {
         return Some(then_life_areas_list_excludes(world, "<script>"));
     }
@@ -122,6 +142,15 @@ pub async fn dispatch(
     }
     if let Some(caps) = THEN_TASK_LIST_SHOWS_TAGGED.captures(text) {
         return Some(then_task_list_shows_tagged(world, &caps[1], &caps[2]));
+    }
+    if let Some(caps) = THEN_KIND_FORM_PRESELECTS_NONE.captures(text) {
+        return Some(dispatch_kind_form_preselects_none(world, example, &caps));
+    }
+    if THEN_QUICK_ADD_POOL_PRESELECTS_NONE.is_match(text) {
+        return Some(then_quick_add_pool_preselects_none(world));
+    }
+    if let Some(caps) = WHEN_TRIAGED_THROUGH_PAGE_NO_LIFE_AREA.captures(text) {
+        return Some(dispatch_triaged_through_page_no_life_area(world, example, &caps).await);
     }
     None
 }
@@ -336,7 +365,18 @@ async fn current_triage_life_area_choices(world: &mut World) -> Result<Vec<Strin
     html_get(world, "/").await?;
     let body = html_body(world)?;
     let section = html::captures_section(body)?;
-    select_option_values(section, "life_area")
+    let options = select_option_values(section, "life_area")?;
+    Ok(exclude_blank_placeholder(options))
+}
+
+/// The picker's unselected placeholder (`<option value="">`,
+/// `D-manual-triage-until-llm`) is not a life area choice -- dropped so "the
+/// triage life area choices are exactly ..." keeps naming only real ones.
+fn exclude_blank_placeholder(options: Vec<String>) -> Vec<String> {
+    options
+        .into_iter()
+        .filter(|value| !value.is_empty())
+        .collect()
 }
 
 async fn dispatch_triage_choices_exactly(
@@ -356,7 +396,7 @@ async fn dispatch_triage_choices_exactly(
     }
 }
 
-async fn capture_id_by_text(world: &World, raw_text: &str) -> Result<i64, String> {
+pub(super) async fn capture_id_by_text(world: &World, raw_text: &str) -> Result<i64, String> {
     let pool = world.pool()?;
     sqlx::query_scalar("SELECT id FROM captures WHERE raw_text = ? ORDER BY id DESC LIMIT 1")
         .bind(raw_text)
@@ -421,6 +461,68 @@ async fn dispatch_triaged_omitting_life_area(
     let kind = resolve(example, &caps[1])?;
     let payload = payloads::without_field(payload_for_kind(&kind)?, "life_area");
     when_triaged(world, payload).await
+}
+
+/// Whether `form`'s (pool/committed/quota) rendered `life_area` picker
+/// preselects nothing -- the first `<option>` is the blank placeholder
+/// (`D-manual-triage-until-llm`), which is what "preselects nothing" means
+/// for a `<select>` with no `selected` attribute anywhere in it.
+fn then_form_preselects_no_life_area(section: &str, kind: &str) -> Result<(), String> {
+    let form = form_section(section, kind)?;
+    let options = select_option_values(form, "life_area")?;
+    if options.first().map(String::as_str) == Some("") {
+        Ok(())
+    } else {
+        Err(format!(
+            "expected the {kind} form's life_area picker to preselect nothing, got {options:?}"
+        ))
+    }
+}
+
+fn dispatch_kind_form_preselects_none(
+    world: &mut World,
+    example: &BTreeMap<String, String>,
+    caps: &regex::Captures<'_>,
+) -> Result<(), String> {
+    let kind = example_value(example, &caps[1])?;
+    let body = html_body(world)?;
+    let section = html::captures_section(body)?;
+    then_form_preselects_no_life_area(section, kind)
+}
+
+/// The quick-add response is the capture row's own markup (`capture_row.html`
+/// rendered directly, without a `<ul id="captures">` wrapper around it), so
+/// this reads the body itself rather than scoping through
+/// `html::captures_section` the way an inbox-page response would.
+fn then_quick_add_pool_preselects_none(world: &mut World) -> Result<(), String> {
+    let body = html_body(world)?;
+    then_form_preselects_no_life_area(body, "pool")
+}
+
+fn form_fields_without_life_area(kind: &str) -> Result<Vec<(&'static str, &'static str)>, String> {
+    let fields: Vec<(&str, &str)> = match kind {
+        "pool" => vec![("kind", "pool")],
+        "committed" => committed_form_fields()
+            .into_iter()
+            .filter(|(name, _)| *name != "life_area")
+            .collect(),
+        "quota" => quota_form_fields()
+            .into_iter()
+            .filter(|(name, _)| *name != "life_area")
+            .collect(),
+        other => return Err(format!("unknown kind {other:?}")),
+    };
+    Ok(fields)
+}
+
+async fn dispatch_triaged_through_page_no_life_area(
+    world: &mut World,
+    example: &BTreeMap<String, String>,
+    caps: &regex::Captures<'_>,
+) -> Result<(), String> {
+    let kind = example_value(example, &caps[1])?;
+    let fields = form_fields_without_life_area(kind)?;
+    when_triaged_through_page(world, &fields).await
 }
 
 fn then_task_list_shows_tagged(
@@ -615,5 +717,108 @@ mod tests {
         let world = migrated_world().await;
 
         assert!(capture_id_by_text(&world, "nothing here").await.is_err());
+    }
+
+    fn row_with_pool_life_area_options(options: &[&str]) -> String {
+        let opts: String = std::iter::once(r#"<option value="">— choose —</option>"#.to_string())
+            .chain(
+                options
+                    .iter()
+                    .map(|v| format!(r#"<option value="{v}">{v}</option>"#)),
+            )
+            .collect();
+        format!(
+            r#"<li><form><select name="life_area">{opts}</select></form><details></details></li>"#
+        )
+    }
+
+    #[test]
+    fn then_form_preselects_no_life_area_passes_when_the_first_option_is_blank() {
+        let row = row_with_pool_life_area_options(&["Work", "Home"]);
+        assert_eq!(then_form_preselects_no_life_area(&row, "pool"), Ok(()));
+    }
+
+    #[test]
+    fn then_form_preselects_no_life_area_errors_when_the_first_option_is_a_real_choice() {
+        let row = format!(
+            r#"<li><form><select name="life_area">{}</select></form><details></details></li>"#,
+            r#"<option value="Work">Work</option>"#
+        );
+        assert!(then_form_preselects_no_life_area(&row, "pool").is_err());
+    }
+
+    #[tokio::test]
+    async fn dispatch_kind_form_preselects_none_reads_the_kind_from_the_example() {
+        let mut world = World::new();
+        world.last_html_body = Some(format!(
+            r#"<ul id="captures">{}</ul>"#,
+            row_with_pool_life_area_options(&["Work"])
+        ));
+        let ex = example(&[("kind", "pool")]);
+        let re = Regex::new(r"^the <(\w+)> triage form preselects no life area$").unwrap();
+        let caps = re
+            .captures("the <kind> triage form preselects no life area")
+            .unwrap();
+
+        assert_eq!(
+            dispatch_kind_form_preselects_none(&mut world, &ex, &caps),
+            Ok(())
+        );
+    }
+
+    #[test]
+    fn then_quick_add_pool_preselects_none_reads_the_body_directly_with_no_ul_wrapper() {
+        let mut world = World::new();
+        world.last_html_body = Some(row_with_pool_life_area_options(&["Work"]));
+
+        assert_eq!(then_quick_add_pool_preselects_none(&mut world), Ok(()));
+    }
+
+    #[test]
+    fn form_fields_without_life_area_drops_life_area_from_committed() {
+        let fields = form_fields_without_life_area("committed").unwrap();
+        assert!(!fields.iter().any(|(name, _)| *name == "life_area"));
+        assert!(fields.iter().any(|(name, _)| *name == "deadline"));
+    }
+
+    #[test]
+    fn form_fields_without_life_area_drops_life_area_from_quota() {
+        let fields = form_fields_without_life_area("quota").unwrap();
+        assert!(!fields.iter().any(|(name, _)| *name == "life_area"));
+        assert!(fields.iter().any(|(name, _)| *name == "target_count"));
+    }
+
+    #[test]
+    fn form_fields_without_life_area_for_pool_is_just_the_kind() {
+        assert_eq!(
+            form_fields_without_life_area("pool").unwrap(),
+            vec![("kind", "pool")]
+        );
+    }
+
+    #[test]
+    fn form_fields_without_life_area_errors_for_an_unknown_kind() {
+        assert!(form_fields_without_life_area("banana").is_err());
+    }
+
+    #[tokio::test]
+    async fn triaging_through_the_page_with_no_life_area_chosen_is_rejected_naming_it() {
+        let mut world = migrated_world().await;
+        super::super::triage::given_capture_waiting(&mut world, "buy milk")
+            .await
+            .unwrap();
+
+        dispatch_triaged_through_page_no_life_area(
+            &mut world,
+            &example(&[("kind", "pool")]),
+            &WHEN_TRIAGED_THROUGH_PAGE_NO_LIFE_AREA
+                .captures("the capture is triaged as a <kind> task through the page with no life area chosen")
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(world.last_status, Some(422));
+        then_rejection_names(&mut world, "life_area").unwrap();
     }
 }

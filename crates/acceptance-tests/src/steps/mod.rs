@@ -19,6 +19,7 @@ mod build;
 mod capture;
 mod committed_empty_fields;
 mod committed_field_domains;
+mod dismiss;
 mod html;
 mod inbox_view;
 mod life_areas;
@@ -130,10 +131,13 @@ pub async fn dispatch(
     if let Some(outcome) = inbox_view::dispatch(world, text).await {
         return outcome;
     }
-    if let Some(outcome) = triage_from_page::dispatch(world, text).await {
+    if let Some(outcome) = triage_from_page::dispatch(world, text, example).await {
         return outcome;
     }
     if let Some(outcome) = life_areas::dispatch(world, text, example).await {
+        return outcome;
+    }
+    if let Some(outcome) = dismiss::dispatch(world, text, example).await {
         return outcome;
     }
     if let Some(outcome) = stats_ratio::dispatch(world, text, example).await {

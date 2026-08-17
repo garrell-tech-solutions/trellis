@@ -45,16 +45,11 @@ qa_get_inbox() {
 # deadline_type/priority <select> options. Per qa/triage_from_page.md's
 # "Independent of Implementation" note.
 qa_extract_controls() {
-  local page="$1" capture_id="$2"
+  local page="$1" capture_id="$2" block
+  block="$(qa_capture_row_block "$page" "$capture_id")"
   python3 -c '
 import re, json, sys
-
-page, capture_id = sys.argv[1], sys.argv[2]
-m = re.search(r"<li id=\"capture-row-" + re.escape(capture_id) + r"\">(.*?)</li>", page, re.S)
-if not m:
-    print(json.dumps({}))
-    sys.exit()
-block = m.group(1)
+block = sys.argv[1]
 
 result = {}
 for form in re.findall(r"<form\b[^>]*>.*?</form>", block, re.S):
@@ -72,18 +67,39 @@ for form in re.findall(r"<form\b[^>]*>.*?</form>", block, re.S):
         result["quota_endpoint"] = endpoint
 
 print(json.dumps(result))
-' "$page" "$capture_id"
+' "$block"
 }
 
-# POSTs a form-encoded triage submission (as the page's controls would) and
-# sets STATUS and BODY.
-qa_triage_form() {
-  local endpoint="$1" data="$2" response
-  response="$(curl -s -w '\n%{http_code}' -X POST "http://$ADDR$endpoint" \
-    -H 'content-type: application/x-www-form-urlencoded' \
-    -d "$data")"
-  STATUS="${response##*$'\n'}"
-  BODY="${response%$'\n'*}"
+# For capture_id's pool/committed/quota triage forms: whether the form sits
+# inside a <details> (something that must be opened first), and how many
+# fields a user must touch to submit it -- every non-hidden <input> and
+# <select>, excluding the hidden kind input and the submit button, which
+# qa/triage_from_page.md's "pool is the cheapest path" explicitly says not
+# to count.
+qa_extract_form_shapes() {
+  local page="$1" capture_id="$2" block
+  block="$(qa_capture_row_block "$page" "$capture_id")"
+  python3 -c '
+import re, json, sys
+block = sys.argv[1]
+details_blocks = re.findall(r"<details\b.*?</details>", block, re.S)
+
+result = {}
+for kind in ("pool", "committed", "quota"):
+    form_m = re.search(r"<form\b[^>]*>(?:(?!</form>).)*?value=\"" + kind + r"\"(?:(?!</form>).)*?</form>", block, re.S)
+    if not form_m:
+        result[kind] = {"in_details": None, "field_count": None}
+        continue
+    form = form_m.group(0)
+    inputs = [i for i in re.findall(r"<input\b[^>]*>", form) if "type=\"hidden\"" not in i]
+    selects = re.findall(r"<select\b[^>]*>", form)
+    result[kind] = {
+        "in_details": any(form in details for details in details_blocks),
+        "field_count": len(inputs) + len(selects),
+    }
+
+print(json.dumps(result))
+' "$block"
 }
 
 # --- Procedure: the inbox offers all three kinds ---
@@ -250,6 +266,29 @@ if qa_start_server "$BIN" "$TMP_DIR/$name.sqlite" "$TMP_DIR/$name.log"; then
       FAILURES=1
     fi
   fi
+else
+  FAILURES=1
+fi
+qa_stop_server
+
+# --- Procedure: pool is the cheapest path ---
+name="pool-is-cheapest"
+if qa_start_server "$BIN" "$TMP_DIR/$name.sqlite" "$TMP_DIR/$name.log"; then
+  capture_id="$(qa_submit_capture "buy milk")"
+  shapes="$(qa_extract_form_shapes "$(qa_get_inbox)" "$capture_id")"
+  pool_in_details="$(python3 -c 'import json,sys; print(json.loads(sys.argv[1])["pool"]["in_details"])' "$shapes")"
+  if [[ "$pool_in_details" != "False" ]]; then
+    echo "FAIL: [$name] expected the pool control to be submittable straight from the row, not behind a control that must be opened first" >&2
+    FAILURES=1
+  fi
+  pool_count="$(python3 -c 'import json,sys; print(json.loads(sys.argv[1])["pool"]["field_count"])' "$shapes")"
+  for kind in committed quota; do
+    kind_count="$(python3 -c 'import json,sys; print(json.loads(sys.argv[1])["'"$kind"'"]["field_count"])' "$shapes")"
+    if [[ -z "$pool_count" || -z "$kind_count" || "$pool_count" -ge "$kind_count" ]]; then
+      echo "FAIL: [$name] expected pool ($pool_count inputs) to ask for strictly fewer inputs than $kind ($kind_count inputs)" >&2
+      FAILURES=1
+    fi
+  done
 else
   FAILURES=1
 fi

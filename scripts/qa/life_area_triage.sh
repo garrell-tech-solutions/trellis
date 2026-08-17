@@ -35,16 +35,11 @@ qa_get_inbox() {
 # The pool triage control's hx-post endpoint and its life_area <select>
 # options, for capture_id, read from the page's own markup.
 qa_extract_pool_control() {
-  local page="$1" capture_id="$2"
+  local page="$1" capture_id="$2" block
+  block="$(qa_capture_row_block "$page" "$capture_id")"
   python3 -c '
 import re, json, sys
-
-page, capture_id = sys.argv[1], sys.argv[2]
-m = re.search(r"<li id=\"capture-row-" + re.escape(capture_id) + r"\">(.*?)</li>", page, re.S)
-if not m:
-    print(json.dumps({}))
-    sys.exit()
-block = m.group(1)
+block = sys.argv[1]
 
 result = {}
 for form in re.findall(r"<form\b[^>]*>.*?</form>", block, re.S):
@@ -56,17 +51,62 @@ for form in re.findall(r"<form\b[^>]*>.*?</form>", block, re.S):
     result["life_area_options"] = re.findall(r"<option value=\"([^\"]+)\"", la.group(1)) if la else []
 
 print(json.dumps(result))
-' "$page" "$capture_id"
+' "$block"
 }
 
-# POSTs a form-encoded triage submission and sets STATUS and BODY.
-qa_triage_form() {
-  local endpoint="$1" data="$2" response
-  response="$(curl -s -w '\n%{http_code}' -X POST "http://$ADDR$endpoint" \
-    -H 'content-type: application/x-www-form-urlencoded' \
-    -d "$data")"
-  STATUS="${response##*$'\n'}"
-  BODY="${response%$'\n'*}"
+# For capture_id's pool/committed/quota triage forms: the form's hx-post
+# endpoint, and whether its life_area <select> preselects anything -- the
+# value of its first <option> (the placeholder) and whether any <option>
+# anywhere in the select carries `selected`. A blank first option with no
+# `selected` anywhere is what "preselects nothing" means -- absent an
+# explicit `selected`, a browser defaults to the first <option> in document
+# order, so the placeholder being first is what makes that default carry no
+# life area.
+qa_extract_life_area_shapes() {
+  local page="$1" capture_id="$2" block
+  block="$(qa_capture_row_block "$page" "$capture_id")"
+  python3 -c '
+import re, json, sys
+block = sys.argv[1]
+
+result = {}
+for kind in ("pool", "committed", "quota"):
+    form_m = re.search(r"<form\b[^>]*>(?:(?!</form>).)*?value=\"" + kind + r"\"(?:(?!</form>).)*?</form>", block, re.S)
+    if not form_m:
+        result[kind] = None
+        continue
+    form = form_m.group(0)
+    hx = re.search(r"hx-post=\"([^\"]+)\"", form)
+    select_m = re.search(r"<select name=\"life_area\">(.*?)</select>", form, re.S)
+    if not select_m:
+        result[kind] = None
+        continue
+    options = re.findall(r"<option value=\"([^\"]*)\"([^>]*)>", select_m.group(1))
+    result[kind] = {
+        "endpoint": hx.group(1) if hx else None,
+        "first_option_value": options[0][0] if options else None,
+        "any_selected": any("selected" in attrs for _, attrs in options),
+        "life_area_options": [value for value, _ in options if value != ""],
+    }
+
+print(json.dumps(result))
+' "$block"
+}
+
+# Reads one field for `kind` out of qa_extract_life_area_shapes' JSON.
+# Prints "MISSING" if the form itself was not found, so a caller comparing
+# against an expected value fails loudly instead of matching an empty string.
+qa_shape_field() {
+  local shapes="$1" kind="$2" field="$3"
+  python3 -c '
+import json, sys
+d = json.loads(sys.argv[1]).get(sys.argv[2])
+if d is None:
+    print("MISSING")
+    sys.exit()
+value = d.get(sys.argv[3])
+print(",".join(value) if isinstance(value, list) else value)
+' "$shapes" "$kind" "$field"
 }
 
 # --- Procedure: triage offers every life area ---
@@ -265,6 +305,108 @@ $tasks" >&2
   else
     FAILURES=1
   fi
+else
+  FAILURES=1
+fi
+qa_stop_server
+
+# --- Procedure: the picker chooses nothing for the user ---
+name="picker-preselects-nothing"
+if qa_start_server "$BIN" "$TMP_DIR/$name.sqlite" "$TMP_DIR/$name.log"; then
+  capture_id="$(qa_submit_capture "buy milk")"
+  shapes="$(qa_extract_life_area_shapes "$(qa_get_inbox)" "$capture_id")"
+  for kind in pool committed quota; do
+    first="$(qa_shape_field "$shapes" "$kind" first_option_value)"
+    if [[ "$first" != "" ]]; then
+      echo "FAIL: [$name] expected the $kind form's life area picker to start on a blank placeholder, first option was \"$first\"" >&2
+      FAILURES=1
+    fi
+    selected="$(qa_shape_field "$shapes" "$kind" any_selected)"
+    if [[ "$selected" != "False" ]]; then
+      echo "FAIL: [$name] expected no <option> in the $kind form's life area picker to carry selected" >&2
+      FAILURES=1
+    fi
+    options="$(qa_shape_field "$shapes" "$kind" life_area_options)"
+    if [[ "$options" != "Work,Fitness,Learning,Family,Home" ]]; then
+      echo "FAIL: [$name] expected the $kind form to offer exactly Work,Fitness,Learning,Family,Home (the placeholder is not a life area), got: $options" >&2
+      FAILURES=1
+    fi
+  done
+
+  quick_add_response="$(curl -s -X POST "http://$ADDR/captures" \
+    -H 'content-type: application/x-www-form-urlencoded' \
+    --data-urlencode "raw_text=call the dentist" --data-urlencode "source=web")"
+  quick_add_id="$(sqlite3 "$DB_PATH" "SELECT id FROM captures WHERE raw_text = 'call the dentist';")"
+  quick_shapes="$(qa_extract_life_area_shapes "$quick_add_response" "$quick_add_id")"
+  first="$(qa_shape_field "$quick_shapes" pool first_option_value)"
+  selected="$(qa_shape_field "$quick_shapes" pool any_selected)"
+  if [[ "$first" != "" || "$selected" != "False" ]]; then
+    echo "FAIL: [$name] expected the quick-added row's pool picker to preselect nothing (first=\"$first\", any_selected=$selected)" >&2
+    FAILURES=1
+  fi
+else
+  FAILURES=1
+fi
+qa_stop_server
+
+# --- Procedure: submitting without choosing is refused on that row ---
+name="page-requires-a-choice"
+if qa_start_server "$BIN" "$TMP_DIR/$name.sqlite" "$TMP_DIR/$name.log"; then
+  pool_id="$(qa_submit_capture "buy milk")"
+  pool_endpoint="$(qa_shape_field "$(qa_extract_life_area_shapes "$(qa_get_inbox)" "$pool_id")" pool endpoint)"
+  qa_triage_form "$pool_endpoint" "kind=pool&life_area="
+  if [[ "$STATUS" != "422" ]]; then
+    echo "FAIL: [$name-pool] expected 422, got $STATUS" >&2
+    FAILURES=1
+  fi
+  if [[ "$BODY" != *'id="lists"'* ]]; then
+    echo "FAIL: [$name-pool] expected the re-rendered #lists fragment, got:
+$BODY" >&2
+    FAILURES=1
+  fi
+  if [[ "$BODY" != *"life_area is required"* ]]; then
+    echo "FAIL: [$name-pool] expected the rejection to name life_area on the row, got:
+$BODY" >&2
+    FAILURES=1
+  fi
+
+  committed_id="$(qa_submit_capture "call the dentist")"
+  committed_endpoint="$(qa_shape_field "$(qa_extract_life_area_shapes "$(qa_get_inbox)" "$committed_id")" committed endpoint)"
+  qa_triage_form "$committed_endpoint" "kind=committed&deadline=2026-08-20T17%3A00%3A00Z&deadline_type=hard&priority=P1&life_area="
+  if [[ "$STATUS" != "422" ]]; then
+    echo "FAIL: [$name-committed] expected 422, got $STATUS" >&2
+    FAILURES=1
+  fi
+  if [[ "$BODY" != *"life_area is required"* ]]; then
+    echo "FAIL: [$name-committed] expected the rejection to name life_area on the row, got:
+$BODY" >&2
+    FAILURES=1
+  fi
+
+  quota_id="$(qa_submit_capture "go to the gym")"
+  quota_endpoint="$(qa_shape_field "$(qa_extract_life_area_shapes "$(qa_get_inbox)" "$quota_id")" quota endpoint)"
+  qa_triage_form "$quota_endpoint" "kind=quota&target_count=3&target_minutes_each=45&period=week&life_area="
+  if [[ "$STATUS" != "422" ]]; then
+    echo "FAIL: [$name-quota] expected 422, got $STATUS" >&2
+    FAILURES=1
+  fi
+  if [[ "$BODY" != *"life_area is required"* ]]; then
+    echo "FAIL: [$name-quota] expected the rejection to name life_area on the row, got:
+$BODY" >&2
+    FAILURES=1
+  fi
+
+  task_count="$(qa_task_count)"
+  if [[ "$task_count" != "0" ]]; then
+    echo "FAIL: [$name] expected no tasks after three no-life-area rejections, found $task_count" >&2
+    FAILURES=1
+  fi
+  for cid in "$pool_id" "$committed_id" "$quota_id"; do
+    if ! qa_capture_untriaged "$cid"; then
+      echo "FAIL: [$name] expected capture $cid to still be untriaged" >&2
+      FAILURES=1
+    fi
+  done
 else
   FAILURES=1
 fi

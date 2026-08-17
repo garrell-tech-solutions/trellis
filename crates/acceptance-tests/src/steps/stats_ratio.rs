@@ -169,10 +169,7 @@ async fn when_stats_viewed(world: &mut World) -> Result<(), String> {
 }
 
 fn html_body(world: &World) -> Result<&str, String> {
-    world
-        .last_html_body
-        .as_deref()
-        .ok_or_else(|| "no stats page response recorded".to_string())
+    super::html_body(world, "no stats page response recorded")
 }
 
 fn then_body_contains(world: &mut World, expected: &str) -> Result<(), String> {

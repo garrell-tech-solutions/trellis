@@ -11,41 +11,75 @@
 use crate::inbox::store;
 use crate::inbox::view::{CaptureRow, TaskRow};
 use crate::life_areas::view::LifeAreaOption;
+use crate::platform::response::{render_template, write_failed};
 use askama::Template;
+use axum::http::StatusCode;
+use axum::response::Response;
 use sqlx::SqlitePool;
 
-/// The `#lists` fragment on its own — what a page-originated triage response
-/// swaps in. Kept separate from the full-page template (rather than making
-/// that template the triage response) because a triage response is not a
-/// page: it has no `<head>`, no quick-add form, nothing but the two lists
-/// htmx is replacing.
+/// The `#lists` fragment on its own — what a page-originated triage or
+/// dismissal swaps in. Kept separate from the full-page template (rather than
+/// making that template the response) because such a response is not a page:
+/// it has no `<head>`, no quick-add form, nothing but the two lists htmx is
+/// replacing.
 ///
 /// `life_areas` rides along beside `captures` and `tasks` because the
 /// triage forms inside `capture_row.html` are part of this same fragment —
 /// the picker they offer must reflect the current, active set on every
 /// render, the same "no restart" requirement the management page itself
 /// has.
+///
+/// **`pub(super)`, which is the point of [`respond`].** Two other
+/// capabilities used to name these three fields to build one of these
+/// themselves; what the fragment is made of is the inbox's business, and a
+/// fourth list joining it should not be a four-file change. It stays visible
+/// inside `inbox` because [`super::http`] wraps the same three lists in the
+/// full page.
 #[derive(Template)]
 #[template(path = "lists.html")]
-pub(crate) struct ListsTemplate {
-    pub(crate) captures: Vec<CaptureRow>,
-    pub(crate) tasks: Vec<TaskRow>,
-    pub(crate) life_areas: Vec<LifeAreaOption>,
+pub(super) struct ListsTemplate {
+    pub(super) captures: Vec<CaptureRow>,
+    pub(super) tasks: Vec<TaskRow>,
+    pub(super) life_areas: Vec<LifeAreaOption>,
+}
+
+/// `T-forms-swap-one-fragment`'s response contract, implemented once:
+/// whatever happened, re-render `#lists` from current state at `status`,
+/// carrying `error` on the row that caused it.
+///
+/// This is what the inbox's two exits ask for. Neither builds the fragment:
+/// triage decided the outcome and dismissal decided the outcome, and the
+/// shape of the answer is the inbox's (`T-one-front-door-per-capability`).
+/// The contract is easy to half-implement — a 422 whose body is *not* the
+/// re-rendered fragment breaks the whole page, since the 422 swap is
+/// configured globally in `inbox.html` — so it is worth having exactly one
+/// implementation of it.
+pub(super) async fn respond(
+    pool: &SqlitePool,
+    status: StatusCode,
+    error: Option<(i64, String)>,
+) -> Result<Response, StatusCode> {
+    let lists = build_lists(pool, error).await.map_err(write_failed)?;
+    Ok(render_template(status, &lists))
 }
 
 /// Fetches the current inbox, task list and triage picker, attaching `error`
 /// to whichever capture's triage attempt just failed (if any). Shared by the
-/// inbox page and the triage handler's page-originated response: "the page
-/// and `POST /captures/{id}/triage` are one code path" extends to what gets
-/// rendered afterward, not just to how the write itself happens.
-pub(crate) async fn build_lists(
+/// inbox page and [`respond`]: "the page and `POST /captures/{id}/triage` are
+/// one code path" extends to what gets rendered afterward, not just to how
+/// the write itself happens.
+///
+/// `pub(super)` because `inbox::http` wraps the same three lists in the full
+/// page; everyone else goes through [`respond`].
+pub(super) async fn build_lists(
     pool: &SqlitePool,
     error: Option<(i64, String)>,
-) -> Result<(Vec<CaptureRow>, Vec<TaskRow>, Vec<LifeAreaOption>), sqlx::Error> {
-    let captures = build_capture_rows(pool, error).await?;
-    let tasks = build_task_rows(pool).await?;
-    let life_areas = crate::life_areas::active_options(pool).await?;
-    Ok((captures, tasks, life_areas))
+) -> Result<ListsTemplate, sqlx::Error> {
+    Ok(ListsTemplate {
+        captures: build_capture_rows(pool, error).await?,
+        tasks: build_task_rows(pool).await?,
+        life_areas: crate::life_areas::active_options(pool).await?,
+    })
 }
 
 async fn build_capture_rows(
@@ -93,13 +127,12 @@ mod tests {
             .unwrap();
         let other_id = insert_capture(&pool, "buy milk", "web", 1).await.unwrap();
 
-        let (captures, _tasks, _life_areas) =
-            build_lists(&pool, Some((failed_id, "deadline is required".to_string())))
-                .await
-                .unwrap();
+        let lists = build_lists(&pool, Some((failed_id, "deadline is required".to_string())))
+            .await
+            .unwrap();
 
-        let failed_row = captures.iter().find(|c| c.id == failed_id).unwrap();
-        let other_row = captures.iter().find(|c| c.id == other_id).unwrap();
+        let failed_row = lists.captures.iter().find(|c| c.id == failed_id).unwrap();
+        let other_row = lists.captures.iter().find(|c| c.id == other_id).unwrap();
         assert_eq!(failed_row.error.as_deref(), Some("deadline is required"));
         assert_eq!(other_row.error, None);
     }
@@ -112,7 +145,7 @@ mod tests {
             .await
             .unwrap();
 
-        let (_captures, tasks, _life_areas) = build_lists(&pool, None).await.unwrap();
+        let tasks = build_lists(&pool, None).await.unwrap().tasks;
 
         assert_eq!(tasks.len(), 1);
         assert_eq!(tasks[0].kind, "pool");
@@ -123,7 +156,7 @@ mod tests {
     async fn the_life_area_options_are_the_active_seed() {
         let (_dir, pool) = test_pool().await;
 
-        let (_captures, _tasks, life_areas) = build_lists(&pool, None).await.unwrap();
+        let life_areas = build_lists(&pool, None).await.unwrap().life_areas;
 
         assert_eq!(
             life_areas
@@ -145,7 +178,7 @@ mod tests {
             .await
             .unwrap();
 
-        let (_captures, _tasks, life_areas) = build_lists(&pool, None).await.unwrap();
+        let life_areas = build_lists(&pool, None).await.unwrap().life_areas;
 
         assert!(!life_areas.iter().any(|a| a.name == "Learning"));
     }

@@ -66,11 +66,11 @@ mod tests {
 
         insert(&pool, "buy milk", "web", 1234).await.unwrap();
 
-        let triaged_at: Option<i64> = sqlx::query_scalar("SELECT triaged_at FROM captures")
+        let left_inbox_at: Option<i64> = sqlx::query_scalar("SELECT left_inbox_at FROM captures")
             .fetch_one(&pool)
             .await
             .unwrap();
-        assert_eq!(triaged_at, None);
+        assert_eq!(left_inbox_at, None);
     }
 
     #[tokio::test]

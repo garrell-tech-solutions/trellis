@@ -17,9 +17,51 @@ pub struct UntriagedCapture {
 
 /// Untriaged captures, newest first — the inbox's contents.
 pub async fn list_untriaged(pool: &SqlitePool) -> Result<Vec<UntriagedCapture>, sqlx::Error> {
-    sqlx::query_as("SELECT id, raw_text FROM captures WHERE triaged_at IS NULL ORDER BY id DESC")
+    sqlx::query_as("SELECT id, raw_text FROM captures WHERE left_inbox_at IS NULL ORDER BY id DESC")
         .fetch_all(pool)
         .await
+}
+
+/// [`list_untriaged`]'s `WHERE` clause asked about one row: is this capture
+/// still in the inbox? An id naming no capture answers no, which is the same
+/// answer a caller wants for it.
+///
+/// `pub(super)` on purpose. Both this and [`close_capture`] are reached
+/// through [`super::capture_is_open`] and [`super::close_capture`], and the
+/// visibility is what makes that a rule rather than a request
+/// (`T-one-front-door-per-capability`).
+pub(super) async fn capture_is_open(
+    pool: &SqlitePool,
+    capture_id: i64,
+) -> Result<bool, sqlx::Error> {
+    let count: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM captures WHERE id = ? AND left_inbox_at IS NULL")
+            .bind(capture_id)
+            .fetch_one(pool)
+            .await?;
+    Ok(count > 0)
+}
+
+/// Takes `capture_id` out of the inbox, recording when it left. The row is
+/// never deleted (`D-kill-means-archive`); this is the whole of what leaving
+/// means.
+///
+/// Guarded by `left_inbox_at IS NULL` so that two exits racing cannot
+/// overwrite each other's stamp — whichever arrives first is the one that
+/// sticks, the same defence-in-depth `life_areas::store::archive` gives
+/// archiving. The caller's eligibility check is what produces a rejection
+/// message; this guard is what keeps the write honest without one.
+pub(super) async fn close_capture(
+    pool: &SqlitePool,
+    capture_id: i64,
+    left_inbox_at_ms: i64,
+) -> Result<(), sqlx::Error> {
+    sqlx::query("UPDATE captures SET left_inbox_at = ? WHERE id = ? AND left_inbox_at IS NULL")
+        .bind(left_inbox_at_ms)
+        .bind(capture_id)
+        .execute(pool)
+        .await?;
+    Ok(())
 }
 
 /// A row of [`list_tasks`]: a task, alongside the text of the capture it was
@@ -51,7 +93,7 @@ pub async fn list_tasks(pool: &SqlitePool) -> Result<Vec<TaskWithCaptureText>, s
 mod tests {
     use super::*;
     use crate::platform::test_support::test_pool;
-    use crate::triage::store::{insert_task, mark_triaged};
+    use crate::triage::store::insert_task;
     use proptest::prelude::*;
     use scheduler_core::task::TaskKind;
 
@@ -100,16 +142,97 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn list_untriaged_excludes_a_triaged_capture() {
+    async fn list_untriaged_excludes_a_capture_that_has_left_the_inbox() {
         let (_dir, pool) = test_pool().await;
         given_a_capture(&pool, "buy milk").await;
-        let triaged = given_a_capture(&pool, "call the dentist").await;
-        mark_triaged(&pool, triaged, 9999).await.unwrap();
+        let gone = given_a_capture(&pool, "call the dentist").await;
+        close_capture(&pool, gone, 9999).await.unwrap();
 
         let captures = list_untriaged(&pool).await.unwrap();
 
         assert_eq!(captures.len(), 1);
         assert_eq!(captures[0].raw_text, "buy milk");
+    }
+
+    #[tokio::test]
+    async fn capture_is_open_is_true_for_a_freshly_inserted_capture() {
+        let (_dir, pool) = test_pool().await;
+        let capture_id = given_a_capture(&pool, "buy milk").await;
+
+        assert!(capture_is_open(&pool, capture_id).await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn capture_is_open_is_false_once_it_has_left_the_inbox() {
+        let (_dir, pool) = test_pool().await;
+        let capture_id = given_a_capture(&pool, "buy milk").await;
+        close_capture(&pool, capture_id, 9999).await.unwrap();
+
+        assert!(!capture_is_open(&pool, capture_id).await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn capture_is_open_is_false_for_an_id_naming_no_capture() {
+        let (_dir, pool) = test_pool().await;
+
+        assert!(!capture_is_open(&pool, 999).await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn close_capture_stamps_the_named_capture() {
+        let (_dir, pool) = test_pool().await;
+        let capture_id = given_a_capture(&pool, "buy milk").await;
+
+        close_capture(&pool, capture_id, 4242).await.unwrap();
+
+        assert_eq!(left_inbox_at(&pool, capture_id).await, Some(4242));
+    }
+
+    #[tokio::test]
+    async fn close_capture_leaves_other_captures_in_the_inbox() {
+        let (_dir, pool) = test_pool().await;
+        let closed = given_a_capture(&pool, "buy milk").await;
+        let untouched = given_a_capture(&pool, "call the dentist").await;
+
+        close_capture(&pool, closed, 9999).await.unwrap();
+
+        assert_eq!(left_inbox_at(&pool, untouched).await, None);
+    }
+
+    #[tokio::test]
+    async fn close_capture_does_not_delete_the_row() {
+        let (_dir, pool) = test_pool().await;
+        let capture_id = given_a_capture(&pool, "buy milk").await;
+
+        close_capture(&pool, capture_id, 9999).await.unwrap();
+
+        let row_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM captures WHERE id = ?")
+            .bind(capture_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(row_count, 1);
+    }
+
+    /// The guard, stated from the side that matters: a second exit arriving
+    /// after the first does not move the stamp the first one wrote.
+    #[tokio::test]
+    async fn close_capture_is_a_noop_once_the_capture_has_already_left() {
+        let (_dir, pool) = test_pool().await;
+        let capture_id = given_a_capture(&pool, "buy milk").await;
+        close_capture(&pool, capture_id, 1111).await.unwrap();
+
+        close_capture(&pool, capture_id, 2222).await.unwrap();
+
+        assert_eq!(left_inbox_at(&pool, capture_id).await, Some(1111));
+    }
+
+    async fn left_inbox_at(pool: &SqlitePool, capture_id: i64) -> Option<i64> {
+        sqlx::query_scalar("SELECT left_inbox_at FROM captures WHERE id = ?")
+            .bind(capture_id)
+            .fetch_one(pool)
+            .await
+            .unwrap()
     }
 
     #[tokio::test]
@@ -204,26 +327,44 @@ mod tests {
         #![proptest_config(ProptestConfig { cases: 32, ..ProptestConfig::default() })]
 
         /// The listing is a *partition*: exactly the untriaged captures, in
-        /// exactly newest-first order. The example tests above sample two
-        /// captures and one triaged one; this pins both halves — the `WHERE`
-        /// and the `ORDER BY` — against any queue and any triaged subset of
-        /// it, which is the shape the inbox actually meets.
+        /// exactly newest-first order, whichever of the inbox's two exits
+        /// (triage or dismissal, `dismiss-capture-keeps-the-row-03`, #48) a
+        /// capture took. Extended to cover dismissal here rather than as a
+        /// second property (the brief's open question 2): both exits close
+        /// the capture the same way, so one property already exercises both
+        /// `WHERE` clauses this query could get wrong.
+        ///
+        /// The two exits are told apart by what actually distinguishes them —
+        /// a triage leaves a `tasks` row behind, a dismissal leaves none —
+        /// rather than by which module wrote the stamp, which is now one
+        /// function for both. That is the stronger statement anyway: a
+        /// capture that has become a task and one that was thrown away are
+        /// equally gone from this listing, and neither disturbs the row
+        /// count.
+        ///
+        /// Also pins `#9` AC-4's row-count property in the same run: the
+        /// total row count never moves, for any queue and any split of it
+        /// across untriaged, triaged and dismissed — a capture row is never
+        /// deleted by either exit.
         #[test]
         #[ignore]
         fn list_untriaged_returns_exactly_the_untriaged_captures_newest_first(
-            queue in prop::collection::vec((".{0,40}", any::<bool>()), 0..12),
+            queue in prop::collection::vec((".{0,40}", 0..3u8), 0..12),
         ) {
             let rt = tokio::runtime::Runtime::new().unwrap();
-            let (expected, listed) = rt.block_on(async {
+            let (expected, listed, row_count) = rt.block_on(async {
                 let (_dir, pool) = test_pool().await;
 
                 let mut expected: Vec<String> = Vec::new();
-                for (raw_text, triaged) in &queue {
+                for (raw_text, exit) in &queue {
                     let id = given_a_capture(&pool, raw_text).await;
-                    if *triaged {
-                        mark_triaged(&pool, id, 9999).await.unwrap();
-                    } else {
-                        expected.push(raw_text.clone());
+                    match exit {
+                        1 => {
+                            insert_task(&pool, id, &TaskKind::Pool, None, 9999).await.unwrap();
+                            close_capture(&pool, id, 9999).await.unwrap();
+                        }
+                        2 => close_capture(&pool, id, 9999).await.unwrap(),
+                        _ => expected.push(raw_text.clone()),
                     }
                 }
                 expected.reverse();
@@ -234,10 +375,15 @@ mod tests {
                     .into_iter()
                     .map(|capture| capture.raw_text)
                     .collect();
-                (expected, listed)
+                let row_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM captures")
+                    .fetch_one(&pool)
+                    .await
+                    .unwrap();
+                (expected, listed, row_count)
             });
 
             prop_assert_eq!(expected, listed);
+            prop_assert_eq!(row_count as usize, queue.len());
         }
     }
 }

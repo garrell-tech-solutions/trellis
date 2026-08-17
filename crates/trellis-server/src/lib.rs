@@ -4,6 +4,7 @@
 //!
 //! - [`capture`] — raw text in, fast enough to use mid-thought.
 //! - [`triage`] — a capture becomes a typed task.
+//! - [`dismiss`] — the inbox's other exit: a capture leaves with no task.
 //! - [`inbox`] — what is still waiting, and what has already become a task.
 //! - [`life_areas`] — user-managed rows a task is tagged with at triage.
 //! - [`stats`] — the rolling committed:pool ratio, R2's instrumentation.
@@ -38,6 +39,7 @@
 //! it ever stops covering anything.
 
 pub mod capture;
+pub mod dismiss;
 pub mod inbox;
 pub mod life_areas;
 pub mod platform;

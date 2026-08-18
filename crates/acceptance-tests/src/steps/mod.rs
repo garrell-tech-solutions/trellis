@@ -21,6 +21,7 @@ mod capture;
 mod committed_empty_fields;
 mod committed_field_domains;
 mod dismiss;
+mod exceptions;
 mod free_time;
 mod guardrails;
 mod html;
@@ -263,6 +264,9 @@ pub async fn dispatch(
         return outcome;
     }
     if let Some(outcome) = free_time::dispatch(world, text, example).await {
+        return outcome;
+    }
+    if let Some(outcome) = exceptions::dispatch(world, text, example).await {
         return outcome;
     }
 

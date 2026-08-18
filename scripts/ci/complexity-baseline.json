@@ -48,6 +48,12 @@
       "why": "Gherkin step dispatcher; regex chain, one-line delegation per arm. New module for features/dismiss_capture.feature (dismiss-capture brief, #48)."
     },
     {
+      "file": "crates/acceptance-tests/src/steps/exceptions.rs",
+      "function": "dispatch",
+      "cyclomatic_complexity": 11,
+      "why": "Gherkin step dispatcher; regex chain, one-line delegation per arm. New module for features/exceptions.feature (exceptions brief, #61)."
+    },
+    {
       "file": "crates/acceptance-tests/src/steps/free_time.rs",
       "function": "dispatch",
       "cyclomatic_complexity": 9,
@@ -74,8 +80,8 @@
     {
       "file": "crates/acceptance-tests/src/steps/mod.rs",
       "function": "dispatch",
-      "cyclomatic_complexity": 17,
-      "why": "Top-level step dispatcher; delegates to one step module per arm. 16 -> 17 for the new free_time module's arm (free-time brief, #60): a new step, not new logic."
+      "cyclomatic_complexity": 18,
+      "why": "Top-level step dispatcher; delegates to one step module per arm. 17 -> 18 for the new exceptions module's arm (exceptions brief, #61): a new step, not new logic."
     },
     {
       "file": "crates/acceptance-tests/src/steps/stats_ratio.rs",

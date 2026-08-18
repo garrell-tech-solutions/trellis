@@ -5,6 +5,8 @@
 //! - [`capture`] — raw text in, fast enough to use mid-thought.
 //! - [`triage`] — a capture becomes a typed task.
 //! - [`dismiss`] — the inbox's other exit: a capture leaves with no task.
+//! - [`exceptions`] — how the owner narrows a guardrail for specific dates,
+//!   for one life area or all of them.
 //! - [`free_time`] — when each life area's guardrail is actually free, over
 //!   the next fourteen days.
 //! - [`inbox`] — what is still waiting, and what has already become a task.
@@ -44,6 +46,7 @@
 
 pub mod capture;
 pub mod dismiss;
+pub mod exceptions;
 pub mod free_time;
 pub mod inbox;
 pub mod life_areas;

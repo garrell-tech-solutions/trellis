@@ -64,6 +64,7 @@ crates/trellis-server/src/
   capture/    http.rs  store.rs
   triage/     http.rs  store.rs
   dismiss/    mod.rs  http.rs
+  free_time/  mod.rs  http.rs
   inbox/      mod.rs  http.rs  lists.rs  store.rs  view.rs
   life_areas/ mod.rs  http/mod.rs  http/guardrail.rs  store.rs  view.rs
   settings/   mod.rs  http.rs  store.rs
@@ -72,18 +73,20 @@ crates/trellis-server/src/
               request.rs  response.rs  test_support.rs
 ```
 
-Seven capabilities and one bucket named so a reader can tell it is not one.
+Eight capabilities and one bucket named so a reader can tell it is not one.
 `scheduler-core` holds the rules and names neither adapter; a domain's `http`
 turns requests into core inputs and core types into view models; its `store`
 turns core types into rows and is the only production SQL; its `view` is what
 a template renders, never a `store` row type. `capture`, `triage` and
 `dismiss` reach into the inbox because the inbox is the surface they act on.
 
-**`dismiss` has no `store`, and that is the shape rather than an omission.**
-Everything it does to the database is *take this capture out of the inbox* —
-the inbox's own fact, reached through the inbox's front door. A capability
-owns the SQL it issues; dismissal issues none, so what is left is one
-handler.
+**Two capabilities have no `store`, and that is the shape rather than an
+omission.** Everything `dismiss` does to the database is *take this capture
+out of the inbox* — the inbox's own fact, reached through the inbox's front
+door. `free_time` stores nothing at all: it computes what it shows from
+`life_areas::guardrails` and `settings::current_timezone` plus the clock. A
+capability owns the SQL it issues; these two issue none, so what is left of
+each is one handler.
 
 A domain has a `view` only when its page shape is its own: `inbox`'s rows are
 assembled from two queries and carry a slot for an in-flight rejection, while
@@ -361,15 +364,28 @@ it raises are unanswered: which chunk a pin binds when a task splits, and
 whether a pin ever expires. The reason enum above has no code for "a stale pin
 is in the way".
 
-### Guardrails — built (M2 slice 1, `#59`); free time still specified (`#60`)
+### Guardrails and free time — built (M2 slices 1–2, `#59`, `#60`)
 
 ```
 free_intervals(guardrail, range) -> disjoint, sorted intervals
                                     each a subset of (mask - busy - pins - buffers)
 ```
 
-`free_intervals` is `#60`'s and does not exist. What exists is the mask it
-will read:
+`free_intervals` exists, in `scheduler_core::free_time`, and today subtracts
+nothing: busy, pins and buffers arrive with the calendar and the scheduler,
+so what it projects now is the mask itself, resolved to instants. A
+`Guardrail` is bands **plus a zone**, bundled because a band with no zone is
+not yet something work could be placed into; a `Range` is civil dates,
+half-open, and its length is the caller's — `/stats`'s fortnight and this
+one's are the same number by coincidence, not by rule, so neither module
+owns a constant the other reads.
+
+`Interval` is instants (`start_ms`, `end_ms`), not civil times, because
+intervals that are adjacent or overlapping only make sense compared as
+instants — a DST transition can reorder civil clock readings. That is the
+type M3's `schedule()` will consume and M4's calendar sync will produce.
+
+The mask it reads:
 
 ```sql
 guardrail_bands(id, life_area_id, weekday, start_minutes, end_minutes)
@@ -429,14 +445,23 @@ the menu (`T-life-areas-are-data`'s well-formedness rule, made concrete).
 > This is the shape `T-archived-at-only` and `T-capture-leaves-inbox-once`
 > both legislated against, arriving from the other direction: not two fields
 > spelling one state, but two states with no rule saying they exclude each
-> other. It reaches `#60` directly — `free_intervals` reads
-> `guardrail_bands`, and a pool-only life area with bands would project free
-> time it is not supposed to have.
+> other.
 >
-> **Left open deliberately.** Which write yields is a product call — marking
-> pool-only could clear the bands, adding a band could clear the column, or
-> either could be refused — and choosing one is the specifier's, not an
-> architectural tidy-up. Needs a decision before `#60`.
+> **The reader side is closed; the authoring side is not.** It was predicted
+> to reach `#60` and did: `life_areas::guardrails` handed out the stored
+> bands regardless of the column, on a doc comment asserting that a pool-only
+> life area's bands "is always empty", and `/free-time` reported **32h** for
+> a life area the owner had marked never scheduled. `guardrails` now applies
+> `D-life-area-owns-its-time`'s "pool-only means never placed" itself, in the
+> one place every reader passes through, so no reader has to remember a
+> second field. That is the front door made true to its own contract, not a
+> product decision.
+>
+> **What is still open** is how the state is reachable at all, and it is a
+> product call: marking pool-only could clear the bands, adding a band could
+> clear the column, or either could be refused. Choosing one is the
+> specifier's. Until then the impossible state is representable, and only
+> the reader-side rule stops it being visible.
 
 Reservation is the default and sharing is opt-in, which is what lets one
 mechanism serve both jobs the settled decisions demand: **containment**, since
@@ -561,6 +586,9 @@ POST /captures/{id}/dismiss   the inbox's "no" (#48). The capture leaves the
                               no archive view (D-kill-means-archive).
 GET  /stats                   the committed share of the last fourteen days
                               (R2, #45). Rules in `scheduler_core::ratio`.
+GET  /free-time               what each life area's guardrail projects to over
+                              the next fourteen civil days (#60). Computes only;
+                              stores nothing.
 GET  /life-areas              manage the set: list, add, archive (#47)
 POST /life-areas              add one. Duplicate or blank -> 422 + the list
                               fragment carrying the message.
@@ -616,7 +644,7 @@ Everything above marked **GAP**, in the order it blocks work:
 
 | Gap | Blocks | Tracked |
 |---|---|---|
-| Walled and pool-only are not exclusive; pool-only cannot be un-marked | #60 — free time would be projected for a life area marked never-scheduled | #59 |
+| Walled and pool-only are not exclusive; pool-only cannot be un-marked | ~~#60~~ — the free-time reader now applies the rule; the state stays representable | #59 |
 | Invariants 1, 3, 4 undefined | M3 cannot be specified | #11 |
 | ~~Which five domains, and one concept or two~~ | ~~M1 S4, M9~~ | **closed** — `T-life-areas-are-data`, #47 |
 | ~~Per-life-area capacity vs `allowed_windows`~~ | ~~M2~~ | **closed** — `T-capacity-two-axes` + `D-life-area-owns-its-time`, #6 |

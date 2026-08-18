@@ -42,9 +42,20 @@ pub(crate) async fn active_options(pool: &SqlitePool) -> Result<Vec<LifeAreaOpti
 
 /// One life area's guardrail, as a reader outside this capability needs it:
 /// enough to compute free time from, nothing about how it is stored.
-/// `pool_only` needs no field of its own here -- a pool-only life area's
-/// `bands` is always empty, which already projects to zero free time, the
-/// same answer a life area that simply has no guardrail yet reports.
+///
+/// `pool_only` has no field of its own because it is **resolved before a
+/// reader sees it**: a pool-only life area reports no bands, which projects
+/// to zero free time -- the same answer a life area with no guardrail yet
+/// gives. `D-life-area-owns-its-time` settles that pool-only means never
+/// placed, so no reader should have to remember to check a second field to
+/// honour it.
+///
+/// It says "resolved" rather than "always empty" on purpose. Empty is what
+/// the stored rows *ought* to be and currently need not be: nothing forbids
+/// a life area from being marked pool-only while it still holds bands (the
+/// GAP in `docs/design/architecture.md`), and before [`guardrails`] began
+/// applying the rule, `/free-time` reported 32h for a life area the owner
+/// had marked never scheduled.
 pub(crate) struct LifeAreaGuardrail {
     pub(crate) id: i64,
     pub(crate) name: String,
@@ -68,11 +79,17 @@ pub(crate) async fn guardrails(pool: &SqlitePool) -> Result<Vec<LifeAreaGuardrai
     let rows = store::list_active(pool).await?;
     let mut guardrails = Vec::with_capacity(rows.len());
     for row in rows {
-        let bands = store::list_guardrail_bands(pool, row.id)
-            .await?
-            .into_iter()
-            .map(to_band)
-            .collect();
+        // Pool-only wins over whatever bands the row happens to carry. One
+        // place applies it, so no reader can forget to.
+        let bands = if row.pool_only {
+            Vec::new()
+        } else {
+            store::list_guardrail_bands(pool, row.id)
+                .await?
+                .into_iter()
+                .map(to_band)
+                .collect()
+        };
         guardrails.push(LifeAreaGuardrail {
             id: row.id,
             name: row.name,
@@ -86,6 +103,57 @@ pub(crate) async fn guardrails(pool: &SqlitePool) -> Result<Vec<LifeAreaGuardrai
 mod tests {
     use super::*;
     use crate::platform::test_support::test_pool;
+
+    /// The reader-side half of `D-life-area-owns-its-time`'s "no guardrail
+    /// means pool-only": a life area the owner marked never scheduled
+    /// projects nothing, whatever bands its row still holds.
+    ///
+    /// The setup reaches a state the page cannot show and the model does
+    /// not want to exist -- marked pool-only *and* carrying bands -- which
+    /// is exactly why the assertion is worth having. Nothing forbids that
+    /// state yet (the GAP in `docs/design/architecture.md`); until
+    /// something does, this is what keeps it from reaching `#60`'s page as
+    /// free hours.
+    /// "Work, holding one band", as the front door reports it -- the setup
+    /// both assertions below start from, differing only in whether the
+    /// pool-only column is set.
+    async fn work_as_reported(pool: &SqlitePool, pool_only: bool) -> LifeAreaGuardrail {
+        let work = store::find_by_name(pool, "Work").await.unwrap().unwrap();
+        store::insert_guardrail_band(pool, work.id, "Mon", 540, 1020)
+            .await
+            .unwrap();
+        if pool_only {
+            store::set_pool_only(pool, work.id, true).await.unwrap();
+        }
+        guardrails(pool)
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|area| area.id == work.id)
+            .expect("an active life area is reported")
+    }
+
+    #[tokio::test]
+    async fn a_pool_only_life_area_offers_no_guardrail_even_holding_bands() {
+        let (_dir, pool) = test_pool().await;
+
+        let work = work_as_reported(&pool, true).await;
+
+        assert!(
+            work.bands.is_empty(),
+            "a never-scheduled life area offered {} band(s) to project free time from",
+            work.bands.len()
+        );
+    }
+
+    #[tokio::test]
+    async fn a_walled_life_area_still_offers_its_bands() {
+        let (_dir, pool) = test_pool().await;
+
+        let work = work_as_reported(&pool, false).await;
+
+        assert_eq!(work.bands.len(), 1);
+    }
 
     #[tokio::test]
     async fn the_choices_are_the_active_life_areas_in_listing_order() {

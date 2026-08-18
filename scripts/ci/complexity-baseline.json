@@ -48,6 +48,12 @@
       "why": "Gherkin step dispatcher; regex chain, one-line delegation per arm. New module for features/dismiss_capture.feature (dismiss-capture brief, #48)."
     },
     {
+      "file": "crates/acceptance-tests/src/steps/guardrails.rs",
+      "function": "dispatch",
+      "cyclomatic_complexity": 22,
+      "why": "Gherkin step dispatcher; regex chain, one-line delegation per arm. New module for features/guardrails.feature and features/timezone_setting.feature (guardrails brief, #59) -- one module for both since the timezone setting only exists to make guardrails meaningful. Every helper it delegates to was itself kept under threshold (day_field_name's lookup uses a table rather than a match, and dispatch_every_shows delegates its own loop body to row_shows, for the same reason life_areas.rs's dispatch_archive_life_area does)."
+    },
+    {
       "file": "crates/acceptance-tests/src/steps/inbox_view.rs",
       "function": "dispatch",
       "cyclomatic_complexity": 11,
@@ -62,8 +68,8 @@
     {
       "file": "crates/acceptance-tests/src/steps/mod.rs",
       "function": "dispatch",
-      "cyclomatic_complexity": 15,
-      "why": "Top-level step dispatcher; delegates to one step module per arm. 14 -> 15 for the new app_shell module's arm (app-shell brief, #58): a new step, not new logic."
+      "cyclomatic_complexity": 16,
+      "why": "Top-level step dispatcher; delegates to one step module per arm. 15 -> 16 for the new guardrails module's arm (guardrails brief, #59): a new step, not new logic."
     },
     {
       "file": "crates/acceptance-tests/src/steps/stats_ratio.rs",

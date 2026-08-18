@@ -1,6 +1,43 @@
 <li id="life-area-row-{{ life_area.id }}">
-{{ life_area.name }}
+<span class="life-area-name">{{ life_area.name }}</span>
+{% if life_area.pool_only %}
+<span>never scheduled - menu only</span>
+{% else if life_area.bands.is_empty() %}
+<span>no guardrail</span>
+{% else %}
+<div class="guardrail-bands">
+{% for band in life_area.bands %}
+<div>{{ band.label }}
+<form style="display:inline" hx-post="/guardrail-bands/{{ band.id }}/remove" hx-target="#life-areas-list" hx-swap="outerHTML">
+<button type="submit">Remove</button>
+</form>
+</div>
+{% endfor %}
+</div>
+{% endif %}
+<details style="display:inline-block">
+<summary>Guardrail</summary>
+<form hx-post="/life-areas/{{ life_area.id }}/guardrail" hx-target="#life-areas-list" hx-swap="outerHTML">
+<label><input type="checkbox" name="mon" value="on"> Mon</label>
+<label><input type="checkbox" name="tue" value="on"> Tue</label>
+<label><input type="checkbox" name="wed" value="on"> Wed</label>
+<label><input type="checkbox" name="thu" value="on"> Thu</label>
+<label><input type="checkbox" name="fri" value="on"> Fri</label>
+<label><input type="checkbox" name="sat" value="on"> Sat</label>
+<label><input type="checkbox" name="sun" value="on"> Sun</label>
+<label>Start <input type="text" name="start" placeholder="09:00"></label>
+<label>End <input type="text" name="end" placeholder="17:00"></label>
+<button type="submit">Add band</button>
+</form>
+<form hx-post="/life-areas/{{ life_area.id }}/guardrail" hx-target="#life-areas-list" hx-swap="outerHTML">
+<label><input type="checkbox" name="pool_only" value="on"> Never scheduled - menu only</label>
+<button type="submit">Save</button>
+</form>
+</details>
 <form style="display:inline" hx-post="/life-areas/{{ life_area.id }}/archive" hx-target="#life-areas-list" hx-swap="outerHTML">
 <button type="submit">Archive</button>
 </form>
+{% if let Some(message) = life_area.error %}
+<p class="guardrail-error">{{ message }}</p>
+{% endif %}
 </li>

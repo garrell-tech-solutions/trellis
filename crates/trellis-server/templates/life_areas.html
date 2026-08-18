@@ -2,6 +2,7 @@
 {% block title %}Trellis — Life areas{% endblock %}
 {% block content %}
 <h1>Life areas</h1>
+{% include "timezone.html" %}
 <form hx-post="/life-areas" hx-target="#life-areas-list" hx-swap="outerHTML" hx-on::after-request="this.reset()">
 <input type="text" name="name" placeholder="Add a life area" required>
 <button type="submit">Add</button>

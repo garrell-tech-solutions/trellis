@@ -21,6 +21,7 @@ mod capture;
 mod committed_empty_fields;
 mod committed_field_domains;
 mod dismiss;
+mod guardrails;
 mod html;
 mod inbox_view;
 mod life_areas;
@@ -208,6 +209,9 @@ pub async fn dispatch(
         return outcome;
     }
     if let Some(outcome) = app_shell::dispatch(world, text, example).await {
+        return outcome;
+    }
+    if let Some(outcome) = guardrails::dispatch(world, text, example).await {
         return outcome;
     }
 

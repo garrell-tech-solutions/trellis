@@ -274,6 +274,21 @@ mod tests {
         days
     }
 
+    #[test]
+    fn parse_minutes_adds_the_hour_and_minute_components() {
+        assert_eq!(parse_minutes("09:30"), Some(570));
+    }
+
+    #[test]
+    fn parse_minutes_rejects_an_hour_outside_0_24_even_with_valid_minutes() {
+        assert_eq!(parse_minutes("24:00"), None);
+    }
+
+    #[test]
+    fn parse_minutes_rejects_a_minute_outside_0_60_even_with_a_valid_hour() {
+        assert_eq!(parse_minutes("09:60"), None);
+    }
+
     proptest! {
         #![proptest_config(ProptestConfig { cases: 24, ..ProptestConfig::default() })]
 

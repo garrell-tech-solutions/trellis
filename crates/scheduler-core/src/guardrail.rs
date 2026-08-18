@@ -460,6 +460,12 @@ mod tests {
     }
 
     #[test]
+    fn overlaps_is_false_for_bands_that_only_touch_in_the_other_order() {
+        let existing = [band(Weekday::Mon, 720, 900)];
+        assert!(!overlaps(&existing, &band(Weekday::Mon, 540, 720)));
+    }
+
+    #[test]
     fn overlaps_is_false_for_the_same_hours_on_a_different_day() {
         let existing = [band(Weekday::Mon, 540, 720)];
         assert!(!overlaps(&existing, &band(Weekday::Tue, 540, 720)));

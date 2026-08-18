@@ -258,6 +258,20 @@ mod tests {
         store::find_by_name(pool, name).await.unwrap().unwrap().id
     }
 
+    /// The markup for one life area's own `<li>`, scoped by its row id so a
+    /// message attached to one row can't be mistaken for a message on
+    /// another -- `row_error`'s whole job is telling those apart.
+    fn row_of(body: &str, life_area_id: i64) -> &str {
+        let marker = format!(r#"id="life-area-row-{life_area_id}""#);
+        let start = body
+            .find(&marker)
+            .unwrap_or_else(|| panic!("no row for life area {life_area_id} in:\n{body}"));
+        let end = body[start..]
+            .find("</li>")
+            .unwrap_or_else(|| panic!("row {life_area_id} is not closed in:\n{body}"));
+        &body[start..start + end]
+    }
+
     async fn post_guardrail(
         pool: &SqlitePool,
         life_area_id: i64,
@@ -510,6 +524,26 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_rejected_guardrail_names_only_the_life_area_it_was_submitted_for() {
+        let (_dir, pool) = test_pool().await;
+        let work_id = life_area_id(&pool, "Work").await;
+        let fitness_id = life_area_id(&pool, "Fitness").await;
+
+        let response = post_guardrail(&pool, work_id, &[]).await;
+
+        assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+        let body = body_string(response).await;
+        assert!(
+            row_of(&body, work_id).contains("guardrail-error"),
+            "got:\n{body}"
+        );
+        assert!(
+            !row_of(&body, fitness_id).contains("guardrail-error"),
+            "Fitness carried Work's rejection:\n{body}"
+        );
+    }
+
+    #[tokio::test]
     async fn a_band_whose_end_does_not_follow_its_start_is_rejected() {
         let (_dir, pool) = test_pool().await;
         let id = life_area_id(&pool, "Work").await;
@@ -610,7 +644,15 @@ mod tests {
 
         assert_eq!(response.status(), StatusCode::OK);
         let body = body_string(response).await;
+        assert!(body.contains("Work"), "not a re-rendered list:\n{body}");
         assert!(!body.contains("09:00-17:00"), "got:\n{body}");
+        assert!(
+            store::list_guardrail_bands(&pool, id)
+                .await
+                .unwrap()
+                .is_empty(),
+            "the band was not removed from storage"
+        );
     }
 
     #[tokio::test]

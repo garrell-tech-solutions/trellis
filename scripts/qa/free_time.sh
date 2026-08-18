@@ -37,55 +37,6 @@ qa_get_life_areas() {
   curl -s "http://$ADDR/life-areas"
 }
 
-# The free time page's own URL, read from the header of any page (the
-# header is shared, per app_shell) -- not assumed.
-qa_free_time_url() {
-  local page="$1"
-  python3 -c '
-import re, sys
-page = sys.argv[1]
-m = re.search(r"<a href=\"([^\"]*)\"[^>]*>Free time</a>", page)
-print(m.group(1) if m else "")
-' "$page"
-}
-
-qa_get_free_time() {
-  local url
-  url="$(qa_free_time_url "$(curl -s "http://$ADDR/")")"
-  curl -s "http://$ADDR$url"
-}
-
-# The markup inside <div id="free-time-row-ID">...</div> whose
-# <span class="life-area-name"> exactly matches `name`, or "" if no row
-# matches.
-qa_free_time_row_block() {
-  qa_named_row_block "$1" div "free-time-row-" "$2"
-}
-
-# The total hours name's row reports, or "" if the row cannot be found.
-qa_free_time_hours() {
-  local page="$1" name="$2" block
-  block="$(qa_free_time_row_block "$page" "$name")"
-  python3 -c '
-import re, sys
-block = sys.argv[1]
-m = re.search(r"— (\d+)h", block)
-print(m.group(1) if m else "")
-' "$block"
-}
-
-# The intervals listed on name's row, one per line, in document order.
-qa_free_time_intervals() {
-  local page="$1" name="$2" block
-  block="$(qa_free_time_row_block "$page" "$name")"
-  python3 -c '
-import re, sys
-block = sys.argv[1]
-for m in re.finditer(r"<li>([^<]*)</li>", block):
-    print(m.group(1))
-' "$block"
-}
-
 # --- Procedure: a guardrail projects across the range ---
 name="guardrail-projects-across-range"
 if qa_start_server "$BIN" "$TMP_DIR/$name.sqlite" "$TMP_DIR/$name.log"; then

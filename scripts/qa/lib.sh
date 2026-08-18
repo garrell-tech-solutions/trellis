@@ -171,27 +171,36 @@ qa_row_control_endpoint() {
   qa_block_control_endpoint "$(qa_capture_row_block "$page" "$capture_id")" "$marker"
 }
 
-# The markup inside <li id="life-area-row-ID">...</li> whose
+# The markup inside <tag id="id_prefix-ID">...</tag> whose
 # <span class="life-area-name"> exactly matches `name`, read from a rendered
-# page -- or from a response that already is that li -- or "" if no row
-# matches. Keyed by name rather than id because that is what every caller
-# has in hand; life_area_row.html's guardrail markup means a row's first
-# <form> is no longer reliably the one a caller wants, so control lookups go
-# through this and qa_life_area_control_endpoint rather than assuming which
-# form comes first.
-qa_life_area_row_block() {
-  local page="$1" name="$2"
+# page -- or from a response that already is that element -- or "" if no
+# row matches. Keyed by name rather than id because that is what every
+# caller has in hand. Shared by every per-life-area row a page renders
+# (life_area_row.html's <li>, free_time.html's <div>), so a third such row
+# is one more call rather than one more near-identical parser.
+qa_named_row_block() {
+  local page="$1" tag="$2" id_prefix="$3" name="$4"
   python3 -c '
 import re, sys
-page, name = sys.argv[1], sys.argv[2]
-for m in re.finditer(r"<li id=\"life-area-row-\d+\">(.*?)</li>", page, re.S):
+page, tag, id_prefix, name = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
+pattern = r"<" + tag + r" id=\"" + id_prefix + r"\d+\">(.*?)</" + tag + r">"
+for m in re.finditer(pattern, page, re.S):
     block = m.group(1)
     nm = re.search(r"<span class=\"life-area-name\">([^<]*)</span>", block)
     if nm and nm.group(1) == name:
         print(block)
         sys.exit()
 print("")
-' "$page" "$name"
+' "$page" "$tag" "$id_prefix" "$name"
+}
+
+# The markup inside <li id="life-area-row-ID">...</li> whose
+# <span class="life-area-name"> exactly matches `name`. life_area_row.html's
+# guardrail markup means a row's first <form> is no longer reliably the one
+# a caller wants, so control lookups go through this and
+# qa_life_area_control_endpoint rather than assuming which form comes first.
+qa_life_area_row_block() {
+  qa_named_row_block "$1" li "life-area-row-" "$2"
 }
 
 # The hx-post endpoint of the control in name's life-area row whose <form>
@@ -201,6 +210,86 @@ print("")
 qa_life_area_control_endpoint() {
   local page="$1" name="$2" marker="$3"
   qa_block_control_endpoint "$(qa_life_area_row_block "$page" "$name")" "$marker"
+}
+
+# The state text a life area's own row shows: "no guardrail",
+# "never scheduled - menu only", or "" if it carries bands instead (a row
+# with bands shows the bands themselves, not a state sentence).
+qa_life_area_state() {
+  local page="$1" name="$2" block
+  block="$(qa_life_area_row_block "$page" "$name")"
+  python3 -c '
+import re, sys
+block = sys.argv[1]
+m = re.search(r"<span>([^<]*)</span>", block)
+print(m.group(1) if m else "")
+' "$block"
+}
+
+# The guardrail bands listed on name's row, one label per line, in document
+# order -- "" (no lines) if the row carries none.
+qa_guardrail_band_labels() {
+  local page="$1" name="$2" block
+  block="$(qa_life_area_row_block "$page" "$name")"
+  python3 -c '
+import re, sys
+block = sys.argv[1]
+for m in re.finditer(r"<div>([^<]*)\n<form", block):
+    print(m.group(1).strip())
+' "$block"
+}
+
+# POSTs name's guardrail band form (weekday checkboxes on "<days>", a
+# comma-separated list of Mon/Tue/.../Sun) and sets STATUS and BODY.
+qa_save_guardrail_band() {
+  local page="$1" name="$2" days="$3" start="$4" end="$5" endpoint data response
+  endpoint="$(qa_life_area_control_endpoint "$page" "$name" '>Add band<')"
+  data="start=$(python3 -c 'import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1]))' "$start")"
+  data="$data&end=$(python3 -c 'import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1]))' "$end")"
+  IFS=',' read -ra day_list <<< "$days"
+  for day in "${day_list[@]}"; do
+    day="$(echo "$day" | tr -d ' ' | tr '[:upper:]' '[:lower:]')"
+    [[ -z "$day" ]] && continue
+    data="$data&$day=on"
+  done
+  response="$(curl -s -w '\n%{http_code}' -X POST "http://$ADDR$endpoint" \
+    -H 'content-type: application/x-www-form-urlencoded' \
+    -d "$data")"
+  STATUS="${response##*$'\n'}"
+  BODY="${response%$'\n'*}"
+}
+
+# POSTs name's pool-only form and sets STATUS and BODY.
+qa_save_pool_only() {
+  local page="$1" name="$2" endpoint response
+  endpoint="$(qa_life_area_control_endpoint "$page" "$name" '>Save<')"
+  response="$(curl -s -w '\n%{http_code}' -X POST "http://$ADDR$endpoint" \
+    -H 'content-type: application/x-www-form-urlencoded' \
+    -d "pool_only=on")"
+  STATUS="${response##*$'\n'}"
+  BODY="${response%$'\n'*}"
+}
+
+# The #timezone fragment's own hx-post endpoint, read from the page's
+# markup -- not assumed.
+qa_timezone_endpoint() {
+  local page="$1"
+  python3 -c '
+import re, sys
+page = sys.argv[1]
+m = re.search(r"<div id=\"timezone\">.*?<form hx-post=\"([^\"]+)\"", page, re.S)
+print(m.group(1) if m else "")
+' "$page"
+}
+
+# POSTs the timezone control with zone and sets STATUS and BODY.
+qa_set_timezone() {
+  local endpoint="$1" zone="$2" response
+  response="$(curl -s -w '\n%{http_code}' -X POST "http://$ADDR$endpoint" \
+    -H 'content-type: application/x-www-form-urlencoded' \
+    --data-urlencode "zone=$zone")"
+  STATUS="${response##*$'\n'}"
+  BODY="${response%$'\n'*}"
 }
 
 # Extracts the contents of <ul id="html_id">...</ul> from a page, or prints

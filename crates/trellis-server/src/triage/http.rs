@@ -40,6 +40,7 @@ fn triage_fields(payload: &Value) -> TriageFields {
         deadline: string_field(payload, "deadline"),
         deadline_type: string_field(payload, "deadline_type"),
         priority: string_field(payload, "priority"),
+        estimated_minutes: payload.get("estimated_minutes").and_then(Value::as_i64),
         target_count: payload.get("target_count").and_then(Value::as_i64),
         target_minutes_each: payload.get("target_minutes_each").and_then(Value::as_i64),
         period: string_field(payload, "period"),
@@ -57,6 +58,7 @@ pub struct TriageFormRequest {
     deadline: Option<String>,
     deadline_type: Option<String>,
     priority: Option<String>,
+    estimated_minutes: Option<i64>,
     target_count: Option<i64>,
     target_minutes_each: Option<i64>,
     period: Option<String>,
@@ -70,6 +72,7 @@ impl From<TriageFormRequest> for TriageFields {
             deadline: form.deadline,
             deadline_type: form.deadline_type,
             priority: form.priority,
+            estimated_minutes: form.estimated_minutes,
             target_count: form.target_count,
             target_minutes_each: form.target_minutes_each,
             period: form.period,
@@ -393,7 +396,8 @@ mod tests {
             "kind": "committed",
             "deadline": "2026-08-20T17:00:00Z",
             "deadline_type": "hard",
-            "priority": "P1"
+            "priority": "P1",
+            "estimated_minutes": 180
         });
         payload.as_object_mut().unwrap().remove(field);
         payload
@@ -428,7 +432,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn triaging_as_committed_records_deadline_deadline_type_and_priority() {
+    async fn triaging_as_committed_records_deadline_deadline_type_priority_and_estimate() {
         let (_dir, pool) = test_pool().await;
         let capture_id = insert_untriaged_capture(&pool, "buy milk").await;
 
@@ -440,25 +444,35 @@ mod tests {
                 "deadline": "2026-08-20T17:00:00Z",
                 "deadline_type": "hard",
                 "priority": "P1",
+                "estimated_minutes": 180,
                 "life_area": "Work"
             }),
         )
         .await;
 
         assert_eq!(response.status(), StatusCode::CREATED);
-        let row: (String, Option<i64>, Option<String>, Option<String>, Option<i64>) =
-            sqlx::query_as(
-                "SELECT kind, deadline, deadline_type, priority, target_count FROM tasks WHERE capture_id = ?",
-            )
-            .bind(capture_id)
-            .fetch_one(&pool)
-            .await
-            .unwrap();
+        type CommittedRow = (
+            String,
+            Option<i64>,
+            Option<String>,
+            Option<String>,
+            Option<i64>,
+            Option<i64>,
+        );
+        let row: CommittedRow = sqlx::query_as(
+            "SELECT kind, deadline, deadline_type, priority, estimated_minutes, target_count \
+             FROM tasks WHERE capture_id = ?",
+        )
+        .bind(capture_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
         assert_eq!(row.0, "committed");
         assert_eq!(row.1, Some(1787245200000));
         assert_eq!(row.2.as_deref(), Some("hard"));
         assert_eq!(row.3.as_deref(), Some("P1"));
-        assert_eq!(row.4, None, "committed task must have no quota target");
+        assert_eq!(row.4, Some(180));
+        assert_eq!(row.5, None, "committed task must have no quota target");
     }
 
     #[tokio::test]
@@ -565,7 +579,7 @@ mod tests {
 
     #[tokio::test]
     async fn triaging_as_committed_without_a_required_field_is_rejected_and_creates_nothing() {
-        for field in ["deadline", "deadline_type", "priority"] {
+        for field in ["deadline", "deadline_type", "priority", "estimated_minutes"] {
             let (_dir, pool) = test_pool().await;
             let capture_id = insert_untriaged_capture(&pool, "call the dentist").await;
 
@@ -608,7 +622,7 @@ mod tests {
     #[tokio::test]
     async fn triaging_as_committed_with_a_required_field_left_empty_is_rejected_the_same_as_absent()
     {
-        for field in ["deadline", "deadline_type", "priority"] {
+        for field in ["deadline", "deadline_type", "priority", "estimated_minutes"] {
             let (_dir, pool) = test_pool().await;
             let capture_id = insert_untriaged_capture(&pool, "call the dentist").await;
 
@@ -617,6 +631,7 @@ mod tests {
                 "deadline": "2026-08-20T17:00:00Z",
                 "deadline_type": "hard",
                 "priority": "P1",
+                "estimated_minutes": 180,
             });
             payload[field] = json!("");
 
@@ -645,6 +660,7 @@ mod tests {
                 "deadline": "banana",
                 "deadline_type": "hard",
                 "priority": "P1",
+                "estimated_minutes": 180,
             }),
         )
         .await;
@@ -669,6 +685,7 @@ mod tests {
                 "deadline": "2026-08-20T17:00:00Z",
                 "deadline_type": "squishy",
                 "priority": "P1",
+                "estimated_minutes": 180,
             }),
         )
         .await;
@@ -693,6 +710,7 @@ mod tests {
                 "deadline": "2026-08-20T17:00:00Z",
                 "deadline_type": "hard",
                 "priority": "P9",
+                "estimated_minutes": 180,
             }),
         )
         .await;
@@ -702,6 +720,46 @@ mod tests {
             response_json(response).await,
             json!({ "invalid_field": "priority" })
         );
+    }
+
+    #[tokio::test]
+    async fn triaging_as_committed_with_a_zero_estimate_is_rejected_naming_it_invalid() {
+        let (_dir, pool) = test_pool().await;
+        let capture_id = insert_untriaged_capture(&pool, "call the dentist").await;
+
+        let response = triage_response(
+            &pool,
+            capture_id,
+            json!({
+                "kind": "committed",
+                "deadline": "2026-08-20T17:00:00Z",
+                "deadline_type": "hard",
+                "priority": "P1",
+                "estimated_minutes": 0,
+            }),
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+        assert_eq!(
+            response_json(response).await,
+            json!({ "invalid_field": "estimated_minutes" })
+        );
+    }
+
+    #[tokio::test]
+    async fn triaging_as_pool_does_not_require_an_estimate() {
+        let (_dir, pool) = test_pool().await;
+        let capture_id = insert_untriaged_capture(&pool, "buy milk").await;
+
+        let response = triage_response(
+            &pool,
+            capture_id,
+            json!({ "kind": "pool", "life_area": "Work" }),
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::CREATED);
     }
 
     #[tokio::test]
@@ -890,6 +948,7 @@ mod tests {
             "deadline": "2026-08-20T17:00:00Z",
             "deadline_type": "hard",
             "priority": "P1",
+            "estimated_minutes": 180,
             "target_count": 3,
             "target_minutes_each": 45,
             "period": "week",
@@ -903,6 +962,7 @@ mod tests {
                 deadline: Some("2026-08-20T17:00:00Z".to_string()),
                 deadline_type: Some("hard".to_string()),
                 priority: Some("P1".to_string()),
+                estimated_minutes: Some(180),
                 target_count: Some(3),
                 target_minutes_each: Some(45),
                 period: Some("week".to_string()),
@@ -986,6 +1046,10 @@ mod tests {
             fields.deadline_type.clone().map(Value::from),
         );
         put("priority", fields.priority.clone().map(Value::from));
+        put(
+            "estimated_minutes",
+            fields.estimated_minutes.map(Value::from),
+        );
         put("target_count", fields.target_count.map(Value::from));
         put(
             "target_minutes_each",
@@ -1002,6 +1066,7 @@ mod tests {
             deadline: fields.deadline.clone(),
             deadline_type: fields.deadline_type.clone(),
             priority: fields.priority.clone(),
+            estimated_minutes: fields.estimated_minutes,
             target_count: fields.target_count,
             target_minutes_each: fields.target_minutes_each,
             period: fields.period.clone(),
@@ -1026,6 +1091,7 @@ mod tests {
             deadline in proptest::option::of(".{0,30}"),
             deadline_type in proptest::option::of(".{0,10}"),
             priority in proptest::option::of(".{0,6}"),
+            estimated_minutes in proptest::option::of(any::<i64>()),
             target_count in proptest::option::of(any::<i64>()),
             target_minutes_each in proptest::option::of(any::<i64>()),
             period in proptest::option::of(".{0,10}"),
@@ -1036,6 +1102,7 @@ mod tests {
                 deadline,
                 deadline_type,
                 priority,
+                estimated_minutes,
                 target_count,
                 target_minutes_each,
                 period,

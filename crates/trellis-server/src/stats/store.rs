@@ -78,6 +78,7 @@ mod tests {
                 deadline: 1787245200000,
                 deadline_type: scheduler_core::task::DeadlineType::Hard,
                 priority: scheduler_core::task::Priority::P1,
+                estimated_minutes: 180,
             },
             100,
         )
@@ -156,6 +157,7 @@ mod tests {
                 deadline: 1787245200000,
                 deadline_type: scheduler_core::task::DeadlineType::Hard,
                 priority: scheduler_core::task::Priority::P1,
+                estimated_minutes: 180,
             },
             _ => TaskKind::Quota {
                 target_count: 3,

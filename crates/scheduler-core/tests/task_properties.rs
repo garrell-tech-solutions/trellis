@@ -24,15 +24,25 @@ fn any_fields() -> impl Strategy<Value = TriageFields> {
         proptest::option::of(".{0,40}"),
         proptest::option::of(any::<i64>()),
         proptest::option::of(any::<i64>()),
+        proptest::option::of(any::<i64>()),
         proptest::option::of(".{0,40}"),
     )
         .prop_map(
-            |(deadline, deadline_type, priority, target_count, target_minutes_each, period)| {
+            |(
+                deadline,
+                deadline_type,
+                priority,
+                estimated_minutes,
+                target_count,
+                target_minutes_each,
+                period,
+            )| {
                 TriageFields {
                     kind: None,
                     deadline,
                     deadline_type,
                     priority,
+                    estimated_minutes,
                     target_count,
                     target_minutes_each,
                     period,
@@ -135,6 +145,7 @@ fn valid_committed() -> TriageFields {
         deadline: Some(VALID_DEADLINE.to_string()),
         deadline_type: Some("hard".to_string()),
         priority: Some("P1".to_string()),
+        estimated_minutes: Some(180),
         ..TriageFields::default()
     }
 }
@@ -193,6 +204,7 @@ proptest! {
             deadline: Some(deadline_text.to_string()),
             deadline_type: Some(deadline_type.to_string()),
             priority: Some(priority.to_string()),
+            estimated_minutes: Some(180),
             ..with_kind(fields, COMMITTED)
         };
 
@@ -251,6 +263,7 @@ proptest! {
             deadline: Some("2026-08-20T17:00:00Z".to_string()),
             deadline_type: Some("hard".to_string()),
             priority: Some("P1".to_string()),
+            estimated_minutes: Some(180),
             target_count: Some(3),
             target_minutes_each: Some(45),
             period: Some("week".to_string()),
@@ -271,16 +284,22 @@ proptest! {
     #[ignore]
     fn a_committed_submission_is_rejected_naming_the_first_required_field_it_omits(
         fields in any_fields(),
-        present in proptest::collection::vec(any::<bool>(), 3..=3),
+        present in proptest::collection::vec(any::<bool>(), 4..=4),
     ) {
         let fields = TriageFields {
             deadline: present[0].then(|| "2026-08-20T17:00:00Z".to_string()),
             deadline_type: present[1].then(|| "hard".to_string()),
             priority: present[2].then(|| "P1".to_string()),
+            estimated_minutes: present[3].then_some(180),
             ..with_kind(fields, COMMITTED)
         };
 
-        let expected = [Field::Deadline, Field::DeadlineType, Field::Priority]
+        let expected = [
+            Field::Deadline,
+            Field::DeadlineType,
+            Field::Priority,
+            Field::EstimatedMinutes,
+        ]
             .into_iter()
             .zip(&present)
             .find(|(_, supplied)| !**supplied)
@@ -329,6 +348,7 @@ proptest! {
             deadline: Some(VALID_DEADLINE.to_string()),
             deadline_type: Some(deadline_type.to_string()),
             priority: Some(priority.to_string()),
+            estimated_minutes: Some(180),
             ..with_kind(fields.clone(), COMMITTED)
         })
         .unwrap()
@@ -456,6 +476,7 @@ proptest! {
                 deadline: Some(text.to_string()),
                 deadline_type: Some("hard".to_string()),
                 priority: Some("P1".to_string()),
+                estimated_minutes: Some(180),
                 ..TriageFields::default()
             })
             .map(|kind| kind.attributes().deadline)

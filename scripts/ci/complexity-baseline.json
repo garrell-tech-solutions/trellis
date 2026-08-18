@@ -36,6 +36,12 @@
       "why": "Gherkin step dispatcher; regex chain, one-line delegation per arm. New module for features/app_shell.feature (app-shell brief, #58)."
     },
     {
+      "file": "crates/acceptance-tests/src/steps/capacity.rs",
+      "function": "dispatch",
+      "cyclomatic_complexity": 11,
+      "why": "Gherkin step dispatcher; regex chain, one-line delegation per arm. New module for features/capacity.feature (capacity brief, #62). Every helper it delegates to was itself kept under threshold (dispatch_committed_task and dispatch_quota_task's own resolve-then-parse was extracted into resolved_i64)."
+    },
+    {
       "file": "crates/acceptance-tests/src/steps/capture.rs",
       "function": "dispatch",
       "cyclomatic_complexity": 14,
@@ -80,8 +86,8 @@
     {
       "file": "crates/acceptance-tests/src/steps/mod.rs",
       "function": "dispatch",
-      "cyclomatic_complexity": 18,
-      "why": "Top-level step dispatcher; delegates to one step module per arm. 17 -> 18 for the new exceptions module's arm (exceptions brief, #61): a new step, not new logic."
+      "cyclomatic_complexity": 19,
+      "why": "Top-level step dispatcher; delegates to one step module per arm. 18 -> 19 for the new capacity module's arm (capacity brief, #62): a new step, not new logic."
     },
     {
       "file": "crates/acceptance-tests/src/steps/stats_ratio.rs",

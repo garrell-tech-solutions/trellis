@@ -153,12 +153,13 @@ pub(super) async fn when_triaged_through_page(
 /// A well-formed committed submission's fields as page form fields — the
 /// same values `payloads::committed` uses for the JSON API, so the two
 /// validation paths are exercised against the same canonical inputs.
-pub(super) fn committed_form_fields() -> [(&'static str, &'static str); 5] {
+pub(super) fn committed_form_fields() -> [(&'static str, &'static str); 6] {
     [
         ("kind", "committed"),
         ("deadline", payloads::VALID_DEADLINE),
         ("deadline_type", "hard"),
         ("priority", "P1"),
+        ("estimated_minutes", "180"),
         ("life_area", payloads::VALID_LIFE_AREA),
     ]
 }

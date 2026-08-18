@@ -16,6 +16,7 @@ use axum::routing::{get, post};
 use axum::Router;
 use sqlx::SqlitePool;
 
+use crate::capacity::http::show_capacity;
 use crate::capture::http::create_capture;
 use crate::dismiss::http::dismiss_capture;
 use crate::exceptions::http::{add_exception, remove_exception};
@@ -67,6 +68,7 @@ pub fn build_app(pool: SqlitePool, clock: Clock) -> Router {
         .route("/free-time", get(show_free_time))
         .route("/exceptions", post(add_exception))
         .route("/exceptions/{id}/remove", post(remove_exception))
+        .route("/capacity", get(show_capacity))
         .with_state(AppState { pool, clock })
 }
 

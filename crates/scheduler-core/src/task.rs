@@ -27,6 +27,11 @@ pub struct TriageFields {
     pub target_count: Option<i64>,
     pub target_minutes_each: Option<i64>,
     pub period: Option<String>,
+    /// Required for a committed task only (#62's capacity number cannot
+    /// count what committed work asks for otherwise). Pool is never placed
+    /// (`D-no-pool-on-calendar`) and quota already carries
+    /// `target_minutes_each`, so neither needs this field.
+    pub estimated_minutes: Option<i64>,
     /// The life area submitted by name, required for every kind
     /// (`T-quota-targets-required`'s reasoning: a field the downstream
     /// cannot function without belongs required at the boundary). Whether
@@ -43,24 +48,36 @@ pub enum Field {
     Deadline,
     DeadlineType,
     Priority,
+    EstimatedMinutes,
     TargetCount,
     TargetMinutesEach,
     Period,
     LifeArea,
 }
 
+/// Every field paired with the name reported back to whoever submitted the
+/// triage -- a table, not a match, for the reason `guardrail::WEEKDAYS`
+/// already is one (`T-complexity-8`: eight arms of no logic beyond the
+/// lookup should not cost against the threshold).
+const FIELD_NAMES: [(Field, &str); 8] = [
+    (Field::Deadline, "deadline"),
+    (Field::DeadlineType, "deadline_type"),
+    (Field::Priority, "priority"),
+    (Field::EstimatedMinutes, "estimated_minutes"),
+    (Field::TargetCount, "target_count"),
+    (Field::TargetMinutesEach, "target_minutes_each"),
+    (Field::Period, "period"),
+    (Field::LifeArea, "life_area"),
+];
+
 impl Field {
     /// The name reported back to whoever submitted the triage.
     pub fn name(self) -> &'static str {
-        match self {
-            Self::Deadline => "deadline",
-            Self::DeadlineType => "deadline_type",
-            Self::Priority => "priority",
-            Self::TargetCount => "target_count",
-            Self::TargetMinutesEach => "target_minutes_each",
-            Self::Period => "period",
-            Self::LifeArea => "life_area",
-        }
+        FIELD_NAMES
+            .iter()
+            .find(|(field, _)| *field == self)
+            .map(|(_, name)| *name)
+            .expect("every Field variant is listed in FIELD_NAMES")
     }
 }
 
@@ -128,7 +145,11 @@ pub enum Period {
 }
 
 impl Period {
-    fn parse(value: &str) -> Option<Self> {
+    /// `pub` because a stored quota row's `period` column comes back as
+    /// text: `#62`'s capacity number reads it back into this type to
+    /// prorate demand, the same reason `guardrail::Weekday::parse` is
+    /// `pub` for a stored band's weekday.
+    pub fn parse(value: &str) -> Option<Self> {
         match value {
             "week" => Some(Self::Week),
             "month" => Some(Self::Month),
@@ -186,6 +207,13 @@ pub enum TaskKind {
         deadline: i64,
         deadline_type: DeadlineType,
         priority: Priority,
+        /// Required at triage (#62): capacity cannot report what a
+        /// committed task asks for if it carries no minutes. A stored task
+        /// predating this column reads back as `None` on
+        /// [`TaskAttributes`] -- this field itself is never optional,
+        /// because it is only ever built from a fresh, validated
+        /// submission.
+        estimated_minutes: i64,
     },
     /// T-quota-targets-required: a quota task cannot be scheduled at M8 or
     /// reported on at the reckoning without a target, so all three fields are
@@ -210,6 +238,7 @@ pub struct TaskAttributes {
     pub deadline: Option<i64>,
     pub deadline_type: Option<&'static str>,
     pub priority: Option<&'static str>,
+    pub estimated_minutes: Option<i64>,
     pub target_count: Option<i64>,
     pub target_minutes_each: Option<i64>,
     pub period: Option<&'static str>,
@@ -294,23 +323,26 @@ impl TaskKind {
     /// Required fields are checked before values, and in a fixed order, so a
     /// submission with several problems names the same one every time.
     fn committed_from(fields: &TriageFields) -> Result<Self, TriageRejection> {
-        let (deadline, deadline_type, priority) = Self::require_committed_fields(fields)?;
-        Self::parse_committed_fields(deadline, deadline_type, priority)
+        let (deadline, deadline_type, priority, estimated_minutes) =
+            Self::require_committed_fields(fields)?;
+        Self::parse_committed_fields(deadline, deadline_type, priority, estimated_minutes)
     }
 
     fn require_committed_fields(
         fields: &TriageFields,
-    ) -> Result<(String, String, String), TriageRejection> {
+    ) -> Result<(String, String, String, i64), TriageRejection> {
         let deadline = require(Field::Deadline, &fields.deadline)?;
         let deadline_type = require(Field::DeadlineType, &fields.deadline_type)?;
         let priority = require(Field::Priority, &fields.priority)?;
-        Ok((deadline, deadline_type, priority))
+        let estimated_minutes = require_i64(Field::EstimatedMinutes, fields.estimated_minutes)?;
+        Ok((deadline, deadline_type, priority, estimated_minutes))
     }
 
     fn parse_committed_fields(
         deadline: String,
         deadline_type: String,
         priority: String,
+        estimated_minutes: i64,
     ) -> Result<Self, TriageRejection> {
         let deadline =
             parse_deadline_ms(&deadline).ok_or(TriageRejection::InvalidField(Field::Deadline))?;
@@ -318,11 +350,13 @@ impl TaskKind {
             .ok_or(TriageRejection::InvalidField(Field::DeadlineType))?;
         let priority =
             Priority::parse(&priority).ok_or(TriageRejection::InvalidField(Field::Priority))?;
+        let estimated_minutes = require_positive(Field::EstimatedMinutes, estimated_minutes)?;
 
         Ok(Self::Committed {
             deadline,
             deadline_type,
             priority,
+            estimated_minutes,
         })
     }
 
@@ -365,11 +399,13 @@ impl TaskKind {
                 deadline,
                 deadline_type,
                 priority,
+                estimated_minutes,
             } => TaskAttributes {
                 kind: COMMITTED,
                 deadline: Some(*deadline),
                 deadline_type: Some(deadline_type.as_str()),
                 priority: Some(priority.as_str()),
+                estimated_minutes: Some(*estimated_minutes),
                 ..TaskAttributes::default()
             },
             Self::Quota {
@@ -620,6 +656,7 @@ mod tests {
             deadline: Some("2026-08-20T17:00:00Z".to_string()),
             deadline_type: Some("hard".to_string()),
             priority: Some("P1".to_string()),
+            estimated_minutes: Some(180),
             ..TriageFields::default()
         }
     }
@@ -632,6 +669,7 @@ mod tests {
                 deadline: 1787245200000,
                 deadline_type: DeadlineType::Hard,
                 priority: Priority::P1,
+                estimated_minutes: 180,
             })
         );
     }
@@ -646,8 +684,39 @@ mod tests {
                 deadline: Some(1787245200000),
                 deadline_type: Some("hard"),
                 priority: Some("P1"),
+                estimated_minutes: Some(180),
                 ..TaskAttributes::default()
             }
+        );
+    }
+
+    #[test]
+    fn committed_fields_without_an_estimate_are_rejected_as_missing() {
+        let mut fields = committed_fields();
+        fields.estimated_minutes = None;
+        assert_eq!(
+            TaskKind::from_fields(&fields),
+            Err(TriageRejection::MissingField(Field::EstimatedMinutes))
+        );
+    }
+
+    #[test]
+    fn committed_fields_with_a_zero_estimate_are_rejected_as_invalid() {
+        let mut fields = committed_fields();
+        fields.estimated_minutes = Some(0);
+        assert_eq!(
+            TaskKind::from_fields(&fields),
+            Err(TriageRejection::InvalidField(Field::EstimatedMinutes))
+        );
+    }
+
+    #[test]
+    fn committed_fields_with_a_negative_estimate_are_rejected_as_invalid() {
+        let mut fields = committed_fields();
+        fields.estimated_minutes = Some(-5);
+        assert_eq!(
+            TaskKind::from_fields(&fields),
+            Err(TriageRejection::InvalidField(Field::EstimatedMinutes))
         );
     }
 

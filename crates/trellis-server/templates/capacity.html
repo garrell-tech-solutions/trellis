@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block title %}Trellis — Capacity{% endblock %}
+{% block content %}
+<h1>Capacity</h1>
+<div id="capacity-rows">
+{% for row in rows %}
+<div id="capacity-row-{{ row.id }}">
+<span class="life-area-name">{{ row.name }}</span>
+{% if row.never_scheduled %}
+— never scheduled
+{% else %}
+— {{ row.needed_hours }}h needed, {{ row.available_hours }}h available, {{ row.percent_used }}%
+{% if let Some(over) = row.over_hours %}
+, {{ over }}h over
+{% endif %}
+{% if row.unestimated_committed > 0 %}
+({{ row.unestimated_committed }} without an estimate)
+{% endif %}
+{% endif %}
+</div>
+{% endfor %}
+</div>
+{% endblock %}

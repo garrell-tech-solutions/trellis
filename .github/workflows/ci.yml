@@ -28,9 +28,21 @@ on:
 permissions:
   contents: read
 
+# Superseding a run is right on a branch and wrong on trunk. On a PR only the
+# tip matters: an older commit's result is about code the author has already
+# replaced, so cancelling it saves a runner and loses nothing.
+#
+# Every commit on trunk is a state someone may ship, bisect or roll back to,
+# and it is the only opportunity to learn whether that state builds. Cancelling
+# there does not defer the verdict, it discards it -- and because a superseded
+# run reports as "cancelled" rather than "failed", the gap does not look like a
+# gap. That happened to 5a3247e (run 31835546542): the merge of PR #53 was
+# killed 31 seconds in by the next push and has never been built on trunk.
+#
+# So: supersede everywhere except trunk, where runs are left to finish.
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.ref != 'refs/heads/trunk' }}
 
 env:
   CARGO_TERM_COLOR: always
@@ -118,10 +130,57 @@ jobs:
       # libsqlite3-sys compiles C against the musl target, so the release
       # build needs a musl C toolchain. The cc crate picks up musl-gcc for
       # x86_64-unknown-linux-musl automatically once musl-tools is present.
+      #
+      # The package is not the problem and never was. Fetching musl,
+      # musl-dev and musl-tools is about a megabyte and takes ~8s on a
+      # healthy runner (run 32084039789, 00:19:17 -> 00:19:25), and none of
+      # the three is preinstalled, so the step is doing necessary work.
+      #
+      # What hangs is `apt-get update`. Runs 32084286223 and 32088198294 both
+      # stalled fetching release indexes -- azure.archive.ubuntu.com stopped
+      # answering, apt fell back to archive.ubuntu.com and went quiet
+      # mid-fetch -- and neither reached the install line at all. Left to its
+      # defaults apt has no overall deadline, so the step held the job until
+      # something outside it intervened: the first burned the 30-minute job
+      # timeout, the second was killed by hand at 24 minutes.
+      #
+      # Three layers, because each catches what the next cannot:
+      #
+      #   Acquire::*   caps a single connection, so one dead mirror is
+      #                skipped rather than waited on.
+      #   timeout 90   caps one apt invocation, which is what actually failed
+      #                here: apt was not erroring, it was sitting there.
+      #   retry x3     a stalled mirror is transient, and re-running the job
+      #                by hand is the same fix a machine can do unattended.
+      #
+      # timeout-minutes is the backstop for all three (worst case is ~9.5
+      # minutes of attempts and backoff), so this can no longer cost a job
+      # its whole budget however it fails.
       - name: Install musl C toolchain
+        timeout-minutes: 10
         run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends musl-tools
+          apt_try() {
+            timeout 90 sudo apt-get \
+              -o Acquire::Retries=3 \
+              -o Acquire::http::Timeout=15 \
+              -o Acquire::https::Timeout=15 \
+              "$@"
+          }
+          for attempt in 1 2 3; do
+            if apt_try update \
+              && apt_try install -y --no-install-recommends musl-tools; then
+              musl-gcc --version | head -1
+              exit 0
+            fi
+            echo "::warning::apt attempt $attempt did not complete; retrying"
+            # A timed-out install can leave dpkg mid-transaction, which would
+            # fail the next attempt for a different reason than the one being
+            # retried. Cheap to run and a no-op when nothing is pending.
+            sudo dpkg --configure -a || true
+            sleep $(( attempt * 10 ))
+          done
+          echo "::error::musl C toolchain install failed after 3 attempts"
+          exit 1
 
       # No toolchain action: `rustup toolchain install` with no toolchain
       # argument installs exactly the toolchain rust-toolchain.toml pins,
@@ -233,10 +292,57 @@ jobs:
       # features/release_binary.feature is one of the eleven, and its step
       # handler runs the musl release build, so this job needs the same musl C
       # toolchain `gate` does. libsqlite3-sys compiles C against the target.
+      #
+      # The package is not the problem and never was. Fetching musl,
+      # musl-dev and musl-tools is about a megabyte and takes ~8s on a
+      # healthy runner (run 32084039789, 00:19:17 -> 00:19:25), and none of
+      # the three is preinstalled, so the step is doing necessary work.
+      #
+      # What hangs is `apt-get update`. Runs 32084286223 and 32088198294 both
+      # stalled fetching release indexes -- azure.archive.ubuntu.com stopped
+      # answering, apt fell back to archive.ubuntu.com and went quiet
+      # mid-fetch -- and neither reached the install line at all. Left to its
+      # defaults apt has no overall deadline, so the step held the job until
+      # something outside it intervened: the first burned the 30-minute job
+      # timeout, the second was killed by hand at 24 minutes.
+      #
+      # Three layers, because each catches what the next cannot:
+      #
+      #   Acquire::*   caps a single connection, so one dead mirror is
+      #                skipped rather than waited on.
+      #   timeout 90   caps one apt invocation, which is what actually failed
+      #                here: apt was not erroring, it was sitting there.
+      #   retry x3     a stalled mirror is transient, and re-running the job
+      #                by hand is the same fix a machine can do unattended.
+      #
+      # timeout-minutes is the backstop for all three (worst case is ~9.5
+      # minutes of attempts and backoff), so this can no longer cost a job
+      # its whole budget however it fails.
       - name: Install musl C toolchain
+        timeout-minutes: 10
         run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends musl-tools
+          apt_try() {
+            timeout 90 sudo apt-get \
+              -o Acquire::Retries=3 \
+              -o Acquire::http::Timeout=15 \
+              -o Acquire::https::Timeout=15 \
+              "$@"
+          }
+          for attempt in 1 2 3; do
+            if apt_try update \
+              && apt_try install -y --no-install-recommends musl-tools; then
+              musl-gcc --version | head -1
+              exit 0
+            fi
+            echo "::warning::apt attempt $attempt did not complete; retrying"
+            # A timed-out install can leave dpkg mid-transaction, which would
+            # fail the next attempt for a different reason than the one being
+            # retried. Cheap to run and a no-op when nothing is pending.
+            sudo dpkg --configure -a || true
+            sleep $(( attempt * 10 ))
+          done
+          echo "::error::musl C toolchain install failed after 3 attempts"
+          exit 1
 
       # See the equivalent step in `gate` for why there is no toolchain action:
       # a bare `rustup toolchain install` honours rust-toolchain.toml's pin

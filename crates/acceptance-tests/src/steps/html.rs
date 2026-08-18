@@ -35,6 +35,12 @@ pub fn tasks_section(body: &str) -> Result<&str, String> {
     between(body, r#"<ul id="tasks">"#, "</ul>")
 }
 
+/// The shared header's own section — everything `app_shell.feature`'s "the
+/// header ..." steps mean.
+pub fn header_section(body: &str) -> Result<&str, String> {
+    between(body, "<header>", "</header>")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -67,6 +73,14 @@ mod tests {
         let body = r#"<ul id="captures"><li>buy milk</li></ul><ul id="tasks"><li>[pool] call the dentist</li></ul>"#;
         let section = tasks_section(body).unwrap();
         assert!(section.contains("call the dentist"));
+        assert!(!section.contains("buy milk"));
+    }
+
+    #[test]
+    fn header_section_is_scoped_to_the_header_only() {
+        let body = r#"<header><nav>Inbox</nav></header><ul id="captures"><li>buy milk</li></ul>"#;
+        let section = header_section(body).unwrap();
+        assert!(section.contains("Inbox"));
         assert!(!section.contains("buy milk"));
     }
 }

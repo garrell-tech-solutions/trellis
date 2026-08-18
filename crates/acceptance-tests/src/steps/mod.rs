@@ -15,6 +15,7 @@ use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
 
 mod app_client;
+mod app_shell;
 mod build;
 mod capture;
 mod committed_empty_fields;
@@ -204,6 +205,9 @@ pub async fn dispatch(
         return outcome;
     }
     if let Some(outcome) = build::dispatch(world, text, example) {
+        return outcome;
+    }
+    if let Some(outcome) = app_shell::dispatch(world, text, example).await {
         return outcome;
     }
 

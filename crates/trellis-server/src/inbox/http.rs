@@ -4,6 +4,7 @@
 use super::lists::build_lists;
 use crate::inbox::view::{CaptureRow, TaskRow};
 use crate::life_areas::view::LifeAreaOption;
+use crate::platform::nav::{self, NavLink, Page};
 use crate::platform::response::{render_template, write_failed};
 use askama::Template;
 use axum::extract::State;
@@ -17,6 +18,7 @@ struct InboxTemplate {
     captures: Vec<CaptureRow>,
     tasks: Vec<TaskRow>,
     life_areas: Vec<LifeAreaOption>,
+    nav: Vec<NavLink>,
 }
 
 /// The full page is the only thing that is not the `#lists` fragment, so it
@@ -32,6 +34,7 @@ pub async fn show_inbox(State(pool): State<SqlitePool>) -> Result<Response, Stat
             captures: lists.captures,
             tasks: lists.tasks,
             life_areas: lists.life_areas,
+            nav: nav::links(Page::Inbox),
         },
     ))
 }

@@ -30,6 +30,12 @@
   "threshold": 8,
   "accepted": [
     {
+      "file": "crates/acceptance-tests/src/steps/app_shell.rs",
+      "function": "dispatch",
+      "cyclomatic_complexity": 12,
+      "why": "Gherkin step dispatcher; regex chain, one-line delegation per arm. New module for features/app_shell.feature (app-shell brief, #58)."
+    },
+    {
       "file": "crates/acceptance-tests/src/steps/capture.rs",
       "function": "dispatch",
       "cyclomatic_complexity": 14,
@@ -56,8 +62,8 @@
     {
       "file": "crates/acceptance-tests/src/steps/mod.rs",
       "function": "dispatch",
-      "cyclomatic_complexity": 14,
-      "why": "Top-level step dispatcher; delegates to one step module per arm. 13 -> 14 for the new dismiss module's arm (dismiss-capture brief, #48): a new step, not new logic."
+      "cyclomatic_complexity": 15,
+      "why": "Top-level step dispatcher; delegates to one step module per arm. 14 -> 15 for the new app_shell module's arm (app-shell brief, #58): a new step, not new logic."
     },
     {
       "file": "crates/acceptance-tests/src/steps/stats_ratio.rs",

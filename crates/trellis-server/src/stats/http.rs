@@ -7,6 +7,7 @@
 //! whose other end lives in `scheduler_core::ratio`.
 
 use crate::platform::clock::Clock;
+use crate::platform::nav::{self, NavLink, Page};
 use crate::platform::response::{render_template, write_failed};
 use crate::stats::store;
 use askama::Template;
@@ -20,6 +21,7 @@ use sqlx::SqlitePool;
 #[template(path = "stats.html")]
 struct StatsTemplate {
     share: CommittedShare,
+    nav: Vec<NavLink>,
 }
 
 pub async fn show_stats(
@@ -31,7 +33,13 @@ pub async fn show_stats(
         .await
         .map_err(write_failed)?;
     let share = CommittedShare::from_counts(counts);
-    Ok(render_template(StatusCode::OK, &StatsTemplate { share }))
+    Ok(render_template(
+        StatusCode::OK,
+        &StatsTemplate {
+            share,
+            nav: nav::links(Page::Stats),
+        },
+    ))
 }
 
 #[cfg(test)]

@@ -1,4 +1,4 @@
-# QA Procedure: Committed triage requires deadline, deadline type and priority
+# QA Procedure: Committed triage requires deadline, deadline type, priority and an estimate
 
 Covers: `features/committed_triage_validation.feature`
 

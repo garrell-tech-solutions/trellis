@@ -5,7 +5,16 @@
 
 # committed-triage-validation-missing-field-01: committed triage is rejected when a required field is absent
 # committed-triage-validation-empty-field-02: committed triage is rejected when a required field is left empty, the same way as when it is absent
-Feature: Committed triage requires deadline, deadline type and priority
+#
+# `estimated_minutes` joined the required set in #62: capacity cannot report
+# what a fortnight needs if committed tasks carry no minutes, and the two
+# alternatives were closed by precedent -- counting only quota demand makes
+# the number wrong in the direction of "you have more time than you do", and
+# defaulting the estimate is a silent wrong default of the kind
+# D-manual-triage-until-llm and T-timezone-is-a-setting each refused. Only
+# committed needs it: pool is never placed, and quota already carries
+# target_minutes_each.
+Feature: Committed triage requires deadline, deadline type, priority and an estimate
 
   Background:
     Given the trellis server is running with an empty task list
@@ -19,10 +28,11 @@ Feature: Committed triage requires deadline, deadline type and priority
     And the capture is still waiting in the untriaged queue
 
     Examples:
-      | missing_field |
-      | deadline      |
-      | deadline_type |
-      | priority      |
+      | missing_field     |
+      | deadline          |
+      | deadline_type     |
+      | priority          |
+      | estimated_minutes |
 
   # committed-triage-validation-empty-field-02: committed triage is rejected when a required field is left empty, the same way as when it is absent
   Scenario: Triaging as committed with a required field left empty is rejected the same way as omitting it
@@ -33,7 +43,8 @@ Feature: Committed triage requires deadline, deadline type and priority
     And the capture is still waiting in the untriaged queue
 
     Examples:
-      | empty_field   |
-      | deadline      |
-      | deadline_type |
-      | priority      |
+      | empty_field       |
+      | deadline          |
+      | deadline_type     |
+      | priority          |
+      | estimated_minutes |

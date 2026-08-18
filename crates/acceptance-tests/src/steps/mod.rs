@@ -21,6 +21,7 @@ mod capture;
 mod committed_empty_fields;
 mod committed_field_domains;
 mod dismiss;
+mod free_time;
 mod guardrails;
 mod html;
 mod inbox_view;
@@ -105,6 +106,26 @@ pub(super) fn then_html_body_contains(
     } else {
         Err(format!(
             "expected {expected:?} in the response, got:\n{body}"
+        ))
+    }
+}
+
+/// Whether `section` (already scoped to one row or one page's own list)
+/// contains `expected`, framed as "expected {subject} to {verb}
+/// {expected:?}" -- the shape most step modules' own scoped-section
+/// assertions already repeat by hand, predating this one (#52 tracks the
+/// wider duplication; new code should not add another copy of the shape).
+pub(super) fn then_section_contains(
+    section: &str,
+    subject: &str,
+    verb: &str,
+    expected: &str,
+) -> Result<(), String> {
+    if section.contains(expected) {
+        Ok(())
+    } else {
+        Err(format!(
+            "expected {subject:?} to {verb} {expected:?}, got:\n{section}"
         ))
     }
 }
@@ -239,6 +260,9 @@ pub async fn dispatch(
         return outcome;
     }
     if let Some(outcome) = guardrails::dispatch(world, text, example).await {
+        return outcome;
+    }
+    if let Some(outcome) = free_time::dispatch(world, text, example).await {
         return outcome;
     }
 

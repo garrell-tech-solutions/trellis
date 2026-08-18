@@ -226,7 +226,7 @@ fn day_fields(days: &str) -> Vec<(&'static str, &'static str)> {
         .collect()
 }
 
-async fn post_guardrail(
+pub(super) async fn post_guardrail(
     world: &mut World,
     life_area_id: i64,
     fields: &[(&str, &str)],
@@ -472,13 +472,11 @@ fn dispatch_owner_timezone(
     then_body_contains(world, &zone)
 }
 
-async fn dispatch_timezone_set(
-    world: &mut World,
-    example: &BTreeMap<String, String>,
-    caps: &regex::Captures<'_>,
-) -> Result<(), String> {
-    let zone = resolve(example, &caps[1])?;
-    let body = format!("zone={}", super::inbox_view::urlencode(&zone));
+/// Shared by [`dispatch_timezone_set`] and `free_time.rs`'s own "the owner's
+/// timezone is ..." step -- both POST the same form to the same endpoint,
+/// and only differ in which step text resolved the zone.
+pub(super) async fn post_timezone(world: &mut World, zone: &str) -> Result<(), String> {
+    let body = format!("zone={}", super::inbox_view::urlencode(zone));
     let request = Request::builder()
         .method("POST")
         .uri("/timezone")
@@ -486,6 +484,15 @@ async fn dispatch_timezone_set(
         .body(Body::from(body))
         .map_err(|e| format!("build request: {e}"))?;
     html_response(world, request).await
+}
+
+async fn dispatch_timezone_set(
+    world: &mut World,
+    example: &BTreeMap<String, String>,
+    caps: &regex::Captures<'_>,
+) -> Result<(), String> {
+    let zone = resolve(example, &caps[1])?;
+    post_timezone(world, &zone).await
 }
 
 fn dispatch_rejection_says_not_a_timezone(

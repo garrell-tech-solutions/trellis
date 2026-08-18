@@ -28,10 +28,7 @@ pub struct Response {
 /// POSTs `body` as JSON to `uri` against a router built on the scenario's
 /// database pool.
 pub async fn post_json(world: &World, uri: &str, body: &Value) -> Result<Response, String> {
-    let app = trellis_server::platform::app::build_app(
-        world.pool()?.clone(),
-        trellis_server::platform::clock::Clock::system(),
-    );
+    let app = trellis_server::platform::app::build_app(world.pool()?.clone(), world.clock());
     let request = Request::builder()
         .method("POST")
         .uri(uri)

@@ -17,6 +17,12 @@ pub struct World {
 
     pub last_capture_id: Option<i64>,
 
+    /// The instant the server under test believes it is, when a scenario
+    /// has pinned one (`trellis serve --now`'s acceptance-side counterpart,
+    /// #60's DST scenarios). `None` means the real system clock, the same
+    /// as every scenario before this one.
+    pub pinned_now_ms: Option<i64>,
+
     pub migration_result: Option<Result<(), String>>,
     pub schema_snapshot: Option<Vec<String>>,
 
@@ -40,5 +46,16 @@ impl World {
         self.pool
             .as_ref()
             .ok_or_else(|| "no database pool set up for this scenario".to_string())
+    }
+
+    /// The clock every request this scenario sends should be built against:
+    /// pinned if a step has set [`Self::pinned_now_ms`], the real clock
+    /// otherwise. One method so every step module's own request-building
+    /// helper reads the same pin instead of each hardcoding `Clock::system()`.
+    pub fn clock(&self) -> trellis_server::platform::clock::Clock {
+        match self.pinned_now_ms {
+            Some(pinned) => trellis_server::platform::clock::Clock::pinned_at(pinned),
+            None => trellis_server::platform::clock::Clock::system(),
+        }
     }
 }

@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block title %}Trellis — Free time{% endblock %}
+{% block content %}
+<h1>Free time</h1>
+<div id="free-time-areas">
+{% for area in life_areas %}
+<div id="free-time-row-{{ area.id }}">
+<span class="life-area-name">{{ area.name }}</span> — {{ area.total_hours }}h
+<ul class="free-time-intervals">
+{% for interval in area.intervals %}
+<li>{{ interval }}</li>
+{% endfor %}
+</ul>
+</div>
+{% endfor %}
+</div>
+{% endblock %}

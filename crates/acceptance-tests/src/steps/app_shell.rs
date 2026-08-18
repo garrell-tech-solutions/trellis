@@ -279,13 +279,6 @@ fn then_header_excludes(world: &mut World, forbidden: &str) -> Result<(), String
 mod tests {
     use super::*;
 
-    fn example(pairs: &[(&str, &str)]) -> BTreeMap<String, String> {
-        pairs
-            .iter()
-            .map(|(k, v)| (k.to_string(), v.to_string()))
-            .collect()
-    }
-
     fn header_body(links: &[(&str, &str, bool)]) -> String {
         let items: String = links
             .iter()

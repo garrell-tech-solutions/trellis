@@ -251,13 +251,6 @@ fn then_does_not_mark_share(world: &mut World) -> Result<(), String> {
 mod tests {
     use super::*;
 
-    fn example(pairs: &[(&str, &str)]) -> BTreeMap<String, String> {
-        pairs
-            .iter()
-            .map(|(k, v)| (k.to_string(), v.to_string()))
-            .collect()
-    }
-
     #[tokio::test]
     async fn given_tasks_triaged_today_inserts_the_requested_count_of_the_named_kind() {
         let mut world = migrated_world().await;

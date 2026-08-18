@@ -21,6 +21,7 @@ mod capture;
 mod committed_empty_fields;
 mod committed_field_domains;
 mod dismiss;
+mod guardrails;
 mod html;
 mod inbox_view;
 mod life_areas;
@@ -108,6 +109,22 @@ pub(super) fn then_html_body_contains(
     }
 }
 
+/// [`then_html_body_contains`]'s counterpart for a forbidden substring.
+pub(super) fn then_html_body_excludes(
+    world: &mut World,
+    forbidden: &str,
+    no_response_message: &str,
+) -> Result<(), String> {
+    let body = html_body(world, no_response_message)?;
+    if body.contains(forbidden) {
+        Err(format!(
+            "expected no {forbidden:?} in the response, got:\n{body}"
+        ))
+    } else {
+        Ok(())
+    }
+}
+
 fn workspace_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
@@ -161,6 +178,17 @@ async fn migrated_world() -> World {
     world
 }
 
+/// Shared unit-test fixture: an example row built from `(name, value)`
+/// pairs, the shape every step module's own tests build a
+/// `BTreeMap<String, String>` from by hand otherwise.
+#[cfg(test)]
+fn example(pairs: &[(&str, &str)]) -> BTreeMap<String, String> {
+    pairs
+        .iter()
+        .map(|(k, v)| (k.to_string(), v.to_string()))
+        .collect()
+}
+
 pub async fn dispatch(
     world: &mut World,
     step: &Step,
@@ -210,6 +238,9 @@ pub async fn dispatch(
     if let Some(outcome) = app_shell::dispatch(world, text, example).await {
         return outcome;
     }
+    if let Some(outcome) = guardrails::dispatch(world, text, example).await {
+        return outcome;
+    }
 
     Err(format!("unsupported step: {} {}", step.keyword, step.text))
 }
@@ -217,13 +248,6 @@ pub async fn dispatch(
 #[cfg(test)]
 mod helper_tests {
     use super::*;
-
-    fn example(pairs: &[(&str, &str)]) -> BTreeMap<String, String> {
-        pairs
-            .iter()
-            .map(|(k, v)| (k.to_string(), v.to_string()))
-            .collect()
-    }
 
     #[test]
     fn example_value_returns_the_named_placeholder() {

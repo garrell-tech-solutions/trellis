@@ -41,29 +41,30 @@ qa_get_life_areas() {
 }
 
 # The ordered list of names in the #life-areas-list fragment's <ul
-# id="life-areas">, trimmed -- for membership/order/count assertions. Exact
-# whitespace is checked separately (qa_raw_life_area_row), because this
-# helper's trimming would hide the one defect the "trimmed before storage"
-# procedure exists to catch.
+# id="life-areas">, from each row's <span class="life-area-name"> -- for
+# membership/order/count assertions. Exact whitespace is checked separately
+# (qa_raw_life_area_row), because askama never puts stray whitespace inside
+# that span, so this helper needs no trimming of its own to hide.
 qa_life_area_names() {
   local page="$1" section
   section="$(qa_html_section "$page" life-areas)"
   python3 -c '
 import re, sys
 section = sys.argv[1]
-for m in re.finditer(r"<li id=\"life-area-row-\d+\">\n(.*?)\n<form", section, re.S):
-    print(m.group(1).strip())
+for m in re.finditer(r"<span class=\"life-area-name\">([^<]*)</span>", section):
+    print(m.group(1))
 ' "$section"
 }
 
-# The exact text a life area named (or containing) needle renders with,
-# leading/trailing whitespace preserved -- "" if no row matches.
+# The exact text a life area named (or containing) needle renders with in
+# its <span class="life-area-name">, leading/trailing whitespace preserved
+# -- "" if no row matches.
 qa_raw_life_area_row() {
   local page="$1" needle="$2"
   python3 -c '
 import re, sys
 page, needle = sys.argv[1], sys.argv[2]
-for m in re.finditer(r"<li id=\"life-area-row-\d+\">\n(.*?)\n<form", page, re.S):
+for m in re.finditer(r"<span class=\"life-area-name\">([^<]*)</span>", page):
     if needle in m.group(1):
         print(m.group(1))
         break
@@ -73,20 +74,7 @@ for m in re.finditer(r"<li id=\"life-area-row-\d+\">\n(.*?)\n<form", page, re.S)
 # The archive form's hx-post endpoint for the row whose name is exactly
 # `name`, read from that row's own markup.
 qa_life_area_archive_endpoint() {
-  local page="$1" name="$2"
-  python3 -c '
-import re, sys
-page, name = sys.argv[1], sys.argv[2]
-for m in re.finditer(r"<li id=\"life-area-row-\d+\">\n(.*?)\n</li>", page, re.S):
-    block = m.group(1)
-    if block.split("<form", 1)[0].strip() != name:
-        continue
-    hx = re.search(r"hx-post=\"([^\"]+)\"", block)
-    print(hx.group(1) if hx else "")
-    break
-else:
-    print("")
-' "$page" "$name"
+  qa_life_area_control_endpoint "$1" "$2" ">Archive<"
 }
 
 qa_life_area_row_count() {

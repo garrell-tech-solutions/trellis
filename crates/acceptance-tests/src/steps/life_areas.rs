@@ -165,7 +165,7 @@ static BRACKETED_PLACEHOLDER: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^<
 /// The whole value must match `^<\w+>$`, not merely start with `<` and end
 /// with `>` -- a hostile name like `<script>alert('boom')</script>` does
 /// both and is not a placeholder at all.
-fn resolve(example: &BTreeMap<String, String>, raw: &str) -> Result<String, String> {
+pub(super) fn resolve(example: &BTreeMap<String, String>, raw: &str) -> Result<String, String> {
     match BRACKETED_PLACEHOLDER.captures(raw) {
         Some(caps) => example_value(example, &caps[1]).map(str::to_string),
         None => Ok(raw.to_string()),
@@ -183,7 +183,7 @@ async fn html_get(world: &mut World, uri: &str) -> Result<(), String> {
     super::inbox_view::html_response(world, request).await
 }
 
-async fn when_life_areas_page_viewed(world: &mut World) -> Result<(), String> {
+pub(super) async fn when_life_areas_page_viewed(world: &mut World) -> Result<(), String> {
     html_get(world, "/life-areas").await
 }
 
@@ -207,7 +207,7 @@ async fn dispatch_add_life_area(
     post_life_area_form(world, &name).await
 }
 
-async fn life_area_id_by_name(world: &World, name: &str) -> Result<i64, String> {
+pub(super) async fn life_area_id_by_name(world: &World, name: &str) -> Result<i64, String> {
     let pool = world.pool()?;
     let row = trellis_server::life_areas::store::find_by_name(pool, name)
         .await
@@ -240,15 +240,17 @@ fn life_areas_section(world: &World) -> Result<&str, String> {
 }
 
 /// The name inside each `<li id="life-area-row-N">...</li>`, in document
-/// order -- the archive button's own text lives after the name in the same
-/// `<li>`, so this stops at the row's `<form` rather than at its `</li>`.
+/// order -- read from its own `<span class="life-area-name">`, scoped
+/// rather than "everything before the row's first `<form`" now that a
+/// row's guardrail state (bands, or "no guardrail") renders between the
+/// name and any control.
 fn life_area_row_names(section: &str) -> Vec<String> {
     section
         .split(r#"<li id="life-area-row-"#)
         .skip(1)
         .filter_map(|chunk| {
-            let after_id = chunk.split_once('>')?.1;
-            Some(after_id.split("<form").next()?.trim().to_string())
+            let name = html::between(chunk, r#"<span class="life-area-name">"#, "</span>").ok()?;
+            Some(name.trim().to_string())
         })
         .collect()
 }
@@ -549,13 +551,6 @@ fn then_task_list_shows_tagged(
 mod tests {
     use super::*;
 
-    fn example(pairs: &[(&str, &str)]) -> BTreeMap<String, String> {
-        pairs
-            .iter()
-            .map(|(k, v)| (k.to_string(), v.to_string()))
-            .collect()
-    }
-
     #[test]
     fn resolve_returns_a_literal_as_is() {
         assert_eq!(resolve(&BTreeMap::new(), "Work"), Ok("Work".to_string()));
@@ -574,7 +569,10 @@ mod tests {
 
     #[test]
     fn life_area_row_names_reads_names_in_document_order() {
-        let section = r#"<li id="life-area-row-1">Work <form></form></li><li id="life-area-row-2">Fitness <form></form></li>"#;
+        let section = concat!(
+            r#"<li id="life-area-row-1"><span class="life-area-name">Work</span> <form></form></li>"#,
+            r#"<li id="life-area-row-2"><span class="life-area-name">Fitness</span> <form></form></li>"#,
+        );
         assert_eq!(
             life_area_row_names(section),
             vec!["Work".to_string(), "Fitness".to_string()]

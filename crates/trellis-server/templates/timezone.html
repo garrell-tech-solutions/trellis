@@ -1,0 +1,10 @@
+<div id="timezone">
+{% if let Some(message) = timezone_error %}
+<p class="timezone-error">{{ message }}</p>
+{% endif %}
+<p>Timezone: {{ timezone }}</p>
+<form hx-post="/timezone" hx-target="#timezone" hx-swap="outerHTML">
+<input type="text" name="zone" value="{{ timezone }}" required>
+<button type="submit">Save</button>
+</form>
+</div>

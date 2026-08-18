@@ -210,17 +210,19 @@ fn dispatch_link_points_at(
     }
 }
 
+fn href_for_label(world: &mut World, label: &str) -> Result<String, String> {
+    let section = header_section(world)?;
+    let link = header_link_html(section, label)?;
+    extract_href(link)
+}
+
 async fn dispatch_link_followed(
     world: &mut World,
     example: &BTreeMap<String, String>,
     caps: &regex::Captures<'_>,
 ) -> Result<(), String> {
     let label = example_value(example, &caps[1])?.to_string();
-    let path = {
-        let section = header_section(world)?;
-        let link = header_link_html(section, &label)?;
-        extract_href(link)?
-    };
+    let path = href_for_label(world, &label)?;
     let request = Request::builder()
         .uri(path)
         .body(Body::empty())

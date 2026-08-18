@@ -47,7 +47,12 @@ pub(crate) struct NavLink {
 /// place that order is decided. A page added later is one more variant here
 /// and one more row in this list; no page already shipped changes, and
 /// `base.html` never compares a page's name to anything.
-const ALL: [Page; 3] = [Page::Inbox, Page::LifeAreas, Page::Stats];
+///
+/// `label` and `path` are exhaustive matches, so the compiler sends the
+/// author of a new variant here; this list is the one step it cannot force,
+/// which is why `app`'s `every_header_link_reaches_the_page_it_names` walks
+/// it rather than a list of its own.
+pub(crate) const ALL: [Page; 3] = [Page::Inbox, Page::LifeAreas, Page::Stats];
 
 /// The header's own links for a page declaring itself `current` -- one call,
 /// made once per handler, so a fourth page never means editing the first

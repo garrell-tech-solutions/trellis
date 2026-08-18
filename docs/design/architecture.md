@@ -67,8 +67,8 @@ crates/trellis-server/src/
   inbox/      mod.rs  http.rs  lists.rs  store.rs  view.rs
   life_areas/ mod.rs  http.rs  store.rs  view.rs
   stats/      http.rs  store.rs
-  platform/   app.rs  assets.rs  boundary.rs  clock.rs  db.rs  request.rs
-              response.rs  test_support.rs
+  platform/   app.rs  assets.rs  boundary.rs  clock.rs  db.rs  nav.rs
+              request.rs  response.rs  test_support.rs
 ```
 
 Six capabilities and one bucket named so a reader can tell it is not one.
@@ -128,6 +128,66 @@ the fragment was a four-file change. `render_lists` is also the single
 implementation of `T-forms-swap-one-fragment`'s response contract — a 422
 whose body is not the re-rendered fragment breaks the whole page, since the
 422 swap is configured globally.
+
+## The app shell — built (`#58`)
+
+Every page carries the same header, from one definition. Settled by the
+`app-shell` slice, 2026-08-17; recorded here because the shell is the frame
+every page Trellis will ever have inherits, and it was answered in a commit
+message.
+
+```
+templates/base.html          <head>, the 422 config, <header><nav>, {% block content %}
+platform/nav.rs              Page, NavLink, links(current) -> Vec<NavLink>, ALL
+```
+
+**Inheritance, not an included partial.** `{% extends "base.html" %}` makes
+"every page carries the header" structural: a page that forgets an
+`{% include %}` still compiles and renders, while one with no `{% extends %}`
+has no frame at all and cannot pass review by accident.
+
+**A page declares only which page it is.** A handler passes
+`nav: nav::links(Page::X)`; `platform::nav` decides `current` per link and
+`base.html` only iterates, never comparing a page's name to anything
+(`T-templates-take-view-models`). No page's template struct encodes another
+page's identity, so a fourth page is one enum variant, one row in `nav::ALL`,
+and one handler — and no page already shipped changes. Askama makes the
+field itself compulsory: a template extending `base.html` without a `nav`
+field does not compile.
+
+**The nav is a second statement of the route table, and a test is what makes
+them agree.** `nav::Page::path` and `app::build_app` name the same three
+paths independently; rename one and the header offers a link that 404s.
+Unifying them would cost the route table its readability — it is meant to be
+the shortest statement of what this server does — so instead
+`app::every_header_link_reaches_the_page_it_names` walks `nav::ALL`, fetches
+each page over the real router, and asserts it resolves and marks exactly
+itself current. It walks the list rather than restating it, which is what
+makes it cover page five: a typo'd `path`, or a handler copied from another
+page and still declaring that page current, fails the moment the variant
+joins `ALL`. The acceptance suite asserts the same thing from a
+hand-maintained Examples table, which covers what someone remembered to add.
+
+**Every page in the route table is in the header** — worked-in or read-only.
+`/stats` is an instrument rather than a place you work, and it is in the nav
+anyway, because the alternative makes it reachable only by typing a URL,
+which is the failure this slice exists to close. Stated as the rule rather
+than the instance so `#62`'s capacity page inherits the answer.
+
+**Links are plain `href`, not `hx-boost`.** Boosting turns navigation into
+htmx requests, and an endpoint answering 422 mid-navigation would have its
+body swapped into the DOM — the failure the 422 contract depends on keeping
+confined to actual form responses.
+
+**The 422 override moved into `base.html`, which widened it.**
+`T-forms-swap-one-fragment` recorded it as a one-line global in `inbox.html`
+and named its cost; by the third page it was in two templates, and the next
+page to grow a form would have been the one that forgot it. It is now
+declared once and carried by every page, `stats.html` included, which has no
+forms. That is a widening, not a move: **the guard — 422 means exactly
+"validation rejection, body is the re-rendered fragment" — is now owed by
+every endpoint any page can reach**, and an endpoint that cannot honour it
+must not use 422.
 
 **The rule that decides what goes in the core**, and the one this tree is
 easiest to get wrong: a rule that survives changing HTTP for something else
@@ -443,6 +503,10 @@ POST /life-areas              add one. Duplicate or blank -> 422 + the list
                               fragment carrying the message.
 POST /life-areas/{id}/archive retire one. Never deleted (D-kill-means-archive).
 ```
+
+The three `GET` pages — `/`, `/life-areas`, `/stats` — are exactly the three
+the header links, and `nav::ALL` decides their order. Every other route is a
+fragment or an asset, and none carries a header.
 
 Triage requires a life area for every kind. The name is validated in two
 steps that meet at `scheduler_core::task::WellFormedTriage`: the core decides

@@ -210,16 +210,22 @@ async fn dispatch_marked_away_labelled(
     post_exception(world, &from, &to, None, Some(&label)).await
 }
 
+fn exception_row_for<'a>(world: &'a World, start_date: &str) -> Result<&'a str, String> {
+    let section = exceptions_section(html_body(world)?)?;
+    exception_row(section, start_date)
+}
+
+fn exception_id_by_start(world: &World, start_date: &str) -> Result<i64, String> {
+    exception_id(exception_row_for(world, start_date)?)
+}
+
 async fn dispatch_exception_removed(
     world: &mut World,
     example: &BTreeMap<String, String>,
     caps: &regex::Captures<'_>,
 ) -> Result<(), String> {
     let start_date = resolve(example, &caps[1])?;
-    let body = html_body(world)?.to_string();
-    let section = exceptions_section(&body)?;
-    let row = exception_row(section, &start_date)?;
-    let id = exception_id(row)?;
+    let id = exception_id_by_start(world, &start_date)?;
     let request = Request::builder()
         .method("POST")
         .uri(format!("/exceptions/{id}/remove"))
@@ -235,9 +241,7 @@ fn dispatch_list_shows_for_starting(
 ) -> Result<(), String> {
     let expected = resolve(example, &caps[1])?;
     let start_date = resolve(example, &caps[2])?;
-    let body = html_body(world)?;
-    let section = exceptions_section(body)?;
-    let row = exception_row(section, &start_date)?;
+    let row = exception_row_for(world, &start_date)?;
     if row.contains(&expected) {
         Ok(())
     } else {
@@ -250,13 +254,6 @@ fn dispatch_list_shows_for_starting(
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn example(pairs: &[(&str, &str)]) -> BTreeMap<String, String> {
-        pairs
-            .iter()
-            .map(|(k, v)| (k.to_string(), v.to_string()))
-            .collect()
-    }
 
     #[test]
     fn exception_row_finds_the_chunk_naming_the_start_date() {

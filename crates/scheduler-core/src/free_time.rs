@@ -168,24 +168,29 @@ fn band_interval(tz: &TimeZone, date: Date, band: Band) -> Interval {
 /// and different dates never overlap by construction. The one thing this
 /// function still owes is the sort, since bands are not walked in start-time
 /// order.
+fn is_excluded(excluded: &[crate::exception::DateRange], date: jiff::civil::Date) -> bool {
+    excluded.iter().any(|excluded| excluded.contains(date))
+}
+
+/// One date's own contribution to [`free_intervals`] -- every band whose
+/// weekday it falls on, projected into that date's civil span.
+fn intervals_for_date(guardrail: &Guardrail<'_>, date: jiff::civil::Date) -> Vec<Interval> {
+    let weekday = weekday_of(date);
+    guardrail
+        .bands
+        .iter()
+        .filter(|band| band.weekday == weekday)
+        .map(|band| band_interval(guardrail.timezone, date, *band))
+        .collect()
+}
+
 pub fn free_intervals(guardrail: Guardrail<'_>, range: Range) -> Vec<Interval> {
     let mut intervals: Vec<Interval> = Vec::new();
     for date in range.dates() {
-        if guardrail
-            .excluded
-            .iter()
-            .any(|excluded| excluded.contains(date))
-        {
+        if is_excluded(guardrail.excluded, date) {
             continue;
         }
-        let weekday = weekday_of(date);
-        for band in guardrail
-            .bands
-            .iter()
-            .filter(|band| band.weekday == weekday)
-        {
-            intervals.push(band_interval(guardrail.timezone, date, *band));
-        }
+        intervals.extend(intervals_for_date(&guardrail, date));
     }
     intervals.sort_by_key(|interval| interval.start_ms);
     intervals

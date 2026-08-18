@@ -61,6 +61,7 @@ dependency rule itself is unchanged.
 
 ```
 crates/trellis-server/src/
+  capacity/   mod.rs  http.rs  store.rs  view.rs
   capture/    http.rs  store.rs
   triage/     http.rs  store.rs
   dismiss/    mod.rs  http.rs
@@ -74,7 +75,7 @@ crates/trellis-server/src/
               request.rs  response.rs  test_support.rs
 ```
 
-Nine capabilities and one bucket named so a reader can tell it is not one.
+Ten capabilities and one bucket named so a reader can tell it is not one.
 `scheduler-core` holds the rules and names neither adapter; a domain's `http`
 turns requests into core inputs and core types into view models; its `store`
 turns core types into rows and is the only production SQL; its `view` is what
@@ -222,7 +223,13 @@ nothing outside a `store.rs` or `platform/db.rs` writes production SQL (the
 half the old check never had); that no top-level directory carries a
 technical-role name; that **no capability names another capability's `store`
 in production**, which is the front-door rule above; and a floor on each, so
-an empty walk fails rather than passes. It is still a substring scan over
+an empty walk fails rather than passes. "Production" means what
+`production_source` has always meant — outside a `#[cfg(test)]` module —
+now read at file granularity too, so a module its parent declares
+`#[cfg(test)] mod x;` is skipped. That set is *derived* from the parent's
+own declaration rather than hand-listed, and a test asserts it stays small,
+because a walk that quietly began exempting everything would disable three
+of the four rules. It is still a substring scan over
 source text — defeated by a type alias or a macro, so treat it as a lint, not
 a proof. The front door's *own* enforcement is stronger than the lint:
 `inbox::store::capture_is_open`, `close_capture` and the whole of
@@ -463,6 +470,41 @@ makes it one value for the whole product rather than one per guardrail, and
 reason a life area's name is. It defaults to `UTC`, which is the only default
 that cannot silently mean the wrong hour.
 
+### Capacity — built (M2 slice 4, `#62`)
+
+`scheduler_core::capacity` compares demand against supply, both in minutes:
+committed work is the sum of its tasks' `estimated_minutes`, quota work is
+prorated over the horizon and **rounded up**, and `percent_used` is reported
+on every row while `over_minutes` is `Some` only strictly above 100% — an
+exact threshold, not a cushion nobody has a fortnight of real numbers to
+pick. A task with no estimate is counted as missing, never as zero: it is
+the one direction this number must not be wrong in, so the count of
+estimate-less tasks rides along and the total says it is incomplete.
+
+**A never-scheduled life area reports no capacity at all**, not
+zero-available-and-over (`T-guardrail-well-formedness`). This is the second
+purpose `pool_only` serves and the reason it now rides on
+`life_areas::LifeAreaGuardrail` beside the already-resolved `bands`:
+"opted out" and "walled but full" are different answers and `bands` alone
+cannot tell them apart.
+
+> **GAP — `end_minutes` has three different bounds.** The
+> `guardrail_bands` CHECK permits `end_minutes <= 1440`; the guardrail
+> form's `parse_minutes` caps hours at 23 and so cannot exceed 1439; and
+> `scheduler_core::free_time::band_interval` **panics** on 1440, since 24 is
+> not a civil hour ("guardrail minutes are always within a single day").
+> Found by strengthening the free-time property generator, which produced a
+> midnight-ending band the schema calls legal.
+>
+> Latent today — no write path creates one, because the form is the only
+> writer. But the schema advertises it as valid, and `free_intervals`'
+> own doc says its guarantees "follow from what is guaranteed upstream";
+> upstream does not guarantee this. Fixing it is a decision, not a tidy-up:
+> tighten the CHECK in a new migration (a table rebuild, `T-migrations-append-only`),
+> give `Band` a checked constructor, or teach the core that 1440 means
+> end-of-day. Needs settling before a second writer exists — an import, or
+> an API.
+
 **Each life area carries one guardrail** — the hours its work may be scheduled
 in (`D-life-area-owns-its-time`). A task goes in its own life area's hours by
 default and may not go outside them; borrowing another's is an explicit
@@ -627,6 +669,10 @@ POST /captures/{id}/dismiss   the inbox's "no" (#48). The capture leaves the
                               no archive view (D-kill-means-archive).
 GET  /stats                   the committed share of the last fourteen days
                               (R2, #45). Rules in `scheduler_core::ratio`.
+GET  /capacity                hours you have against hours you promised, per life
+                              area, over the same fourteen days (#62, closes M2).
+                              Computes only; the arithmetic is
+                              `scheduler_core::capacity`.
 GET  /free-time               what each life area's guardrail projects to over
                               the next fourteen civil days (#60). Computes only;
                               stores nothing. Carries the exceptions controls,
@@ -691,6 +737,7 @@ Everything above marked **GAP**, in the order it blocks work:
 
 | Gap | Blocks | Tracked |
 |---|---|---|
+| `end_minutes` bounds disagree: schema allows 1440, form caps at 1439, core panics on 1440 | nothing today; a second writer | #62 |
 | Walled and pool-only are not exclusive; pool-only cannot be un-marked | ~~#60~~ — the free-time reader now applies the rule; the state stays representable | #59 |
 | Invariants 1, 3, 4 undefined | M3 cannot be specified | #11 |
 | ~~Which five domains, and one concept or two~~ | ~~M1 S4, M9~~ | **closed** — `T-life-areas-are-data`, #47 |

@@ -53,37 +53,56 @@ fn any_weekday() -> impl Strategy<Value = Weekday> {
     (0..7usize).prop_map(|i| ALL_WEEKDAYS[i])
 }
 
-/// One well-formed band on its own weekday -- `scheduler_core::guardrail`
-/// already owns "is this band well-formed" and "do a life area's own bands
-/// overlap"; generating bands that already satisfy both lets this property
-/// stay about `free_intervals`, not re-prove guardrail's own rules.
+/// How many non-overlapping slots a day is cut into. A band lives inside
+/// one slot, so two bands can never overlap however they are generated --
+/// `scheduler_core::guardrail::overlaps` already owns that rule and these
+/// properties should not re-prove it -- while two bands *can* share a
+/// weekday, which is the shape that matters here.
+const SLOTS_PER_DAY: i64 = 8;
+const SLOT_MINUTES: i64 = 1440 / SLOTS_PER_DAY;
+
+/// One well-formed band, placed in a slot of its own day.
+///
+/// **Why slots rather than free start/end.** This generator used to give
+/// every band a distinct weekday, so a date could never carry two
+/// intervals -- and `free_intervals` walks dates in ascending order, so its
+/// output was sorted *by construction*. Deleting its `sort_by_key`
+/// outright left all four properties green, including the one whose whole
+/// subject is sortedness. Two bands on one weekday is not a contrived
+/// input either: `overlaps` is half-open precisely so that touching bands
+/// (`09:00-12:00` and `12:00-17:00`) are both kept.
 fn any_band() -> impl Strategy<Value = Band> {
-    (any_weekday(), 0..1439i64, 1..1440i64).prop_filter_map(
-        "end must follow start",
-        |(weekday, start, end)| {
-            (end > start).then_some(Band {
-                weekday,
-                start_minutes: start,
-                end_minutes: end,
-            })
-        },
-    )
+    (any_weekday(), 0..SLOTS_PER_DAY, 1..=SLOT_MINUTES).prop_map(|(weekday, slot, width)| {
+        let start = slot * SLOT_MINUTES;
+        Band {
+            weekday,
+            start_minutes: start,
+            // Capped at 23:59, which is what the guardrail form can actually
+            // produce. The `guardrail_bands` CHECK permits `end_minutes =
+            // 1440` and the core panics on it ("guardrail minutes are always
+            // within a single day") -- a three-way disagreement recorded in
+            // `docs/design/architecture.md`, not something this generator
+            // should assert either way.
+            end_minutes: (start + width).min(1439),
+        }
+    })
 }
 
-/// A small set of bands, each on a distinct weekday so no two can overlap
-/// or touch -- the disjointness `scheduler_core::guardrail::overlaps`
-/// enforces for bands that share a day, generated structurally here instead
-/// of filtered after the fact.
+/// A small set of bands, no two occupying the same slot -- so none overlap,
+/// several may share a weekday, adjacent ones touch, and the order they
+/// arrive in is whatever was generated rather than sorted. That last part
+/// is what makes sortedness falsifiable.
 fn any_bands() -> impl Strategy<Value = Vec<Band>> {
-    prop::collection::vec(any_band(), 0..5).prop_map(|bands| {
-        let mut seen = Vec::new();
+    prop::collection::vec(any_band(), 0..6).prop_map(|bands| {
+        let mut seen: Vec<(Weekday, i64)> = Vec::new();
         bands
             .into_iter()
             .filter(|band| {
-                if seen.contains(&band.weekday) {
+                let slot = (band.weekday, band.start_minutes / SLOT_MINUTES);
+                if seen.contains(&slot) {
                     false
                 } else {
-                    seen.push(band.weekday);
+                    seen.push(slot);
                     true
                 }
             })
@@ -138,6 +157,47 @@ fn is_disjoint(intervals: &[Interval]) -> bool {
         .all(|pair| pair[0].end_ms <= pair[1].start_ms)
 }
 
+/// Everything `free_intervals` takes, generated together.
+///
+/// The five strategies below were spelled out in each property's own
+/// parameter list, which made every property four lines of setup before the
+/// one line that was actually its own. Bundled here so a property reads as
+/// its assertion; a sixth input (M3's pins, M4's busy) is then one field
+/// rather than one more line in every property.
+#[derive(Debug, Clone)]
+struct Projection {
+    bands: Vec<Band>,
+    timezone: TimeZone,
+    excluded: Vec<DateRange>,
+    range: Range,
+}
+
+impl Projection {
+    fn guardrail(&self) -> Guardrail<'_> {
+        Guardrail {
+            bands: &self.bands,
+            timezone: &self.timezone,
+            excluded: &self.excluded,
+        }
+    }
+
+    fn intervals(&self) -> Vec<Interval> {
+        free_intervals(self.guardrail(), self.range)
+    }
+}
+
+prop_compose! {
+    fn any_projection()(
+        bands in any_bands(),
+        start in any_start_date(),
+        days in any_range_days(),
+        timezone in any_timezone(),
+        excluded in any_excluded(),
+    ) -> Projection {
+        Projection { bands, timezone, excluded, range: Range::horizon(start, days) }
+    }
+}
+
 proptest! {
     #![proptest_config(ProptestConfig { cases: 1000, ..ProptestConfig::default() })]
 
@@ -146,16 +206,9 @@ proptest! {
     #[test]
     #[ignore]
     fn free_intervals_is_always_disjoint_and_sorted(
-        bands in any_bands(),
-        start in any_start_date(),
-        days in any_range_days(),
-        tz in any_timezone(),
-        excluded in any_excluded(),
+        projection in any_projection(),
     ) {
-        let range = Range::horizon(start, days);
-        let guardrail = Guardrail { bands: &bands, timezone: &tz, excluded: &excluded };
-
-        let intervals = free_intervals(guardrail, range);
+        let intervals = projection.intervals();
 
         prop_assert!(is_sorted(&intervals), "not sorted: {intervals:?}");
         prop_assert!(is_disjoint(&intervals), "not disjoint: {intervals:?}");
@@ -166,16 +219,9 @@ proptest! {
     #[test]
     #[ignore]
     fn free_intervals_never_produces_a_non_positive_duration(
-        bands in any_bands(),
-        start in any_start_date(),
-        days in any_range_days(),
-        tz in any_timezone(),
-        excluded in any_excluded(),
+        projection in any_projection(),
     ) {
-        let range = Range::horizon(start, days);
-        let guardrail = Guardrail { bands: &bands, timezone: &tz, excluded: &excluded };
-
-        for interval in free_intervals(guardrail, range) {
+        for interval in projection.intervals() {
             prop_assert!(interval.duration_ms() > 0, "got {interval:?}");
         }
     }
@@ -185,15 +231,10 @@ proptest! {
     #[test]
     #[ignore]
     fn free_intervals_reports_exactly_one_interval_per_matching_day(
-        bands in any_bands(),
-        start in any_start_date(),
-        days in any_range_days(),
-        tz in any_timezone(),
-        excluded in any_excluded(),
+        projection in any_projection(),
     ) {
-        let range = Range::horizon(start, days);
-        let guardrail = Guardrail { bands: &bands, timezone: &tz, excluded: &excluded };
-        let intervals = free_intervals(guardrail, range);
+        let Projection { bands, excluded, range, .. } = &projection;
+        let intervals = projection.intervals();
 
         // Recomputed by walking the same days a band's weekday can land
         // on, independently of `free_intervals`'s own date walk, so this
@@ -201,7 +242,7 @@ proptest! {
         let mut expected_count = 0usize;
         let mut day = range.start;
         while day < range.end {
-            if !excluded_on(&excluded, day) {
+            if !excluded_on(excluded, day) {
                 expected_count += bands.iter().filter(|b| weekday_of(day) == b.weekday).count();
             }
             day = day.tomorrow().unwrap();

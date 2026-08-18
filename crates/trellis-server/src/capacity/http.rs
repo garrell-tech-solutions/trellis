@@ -38,7 +38,7 @@ pub async fn show_capacity(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::platform::test_support::{get_ok, test_pool};
+    use crate::platform::test_support::{assert_life_area_name_is_escaped, get_ok, test_pool};
 
     async fn get_capacity(pool: &SqlitePool) -> String {
         get_ok(pool, Clock::system(), "/capacity").await
@@ -58,13 +58,7 @@ mod tests {
     #[tokio::test]
     async fn hostile_text_in_a_life_area_name_is_escaped() {
         let (_dir, pool) = test_pool().await;
-        crate::life_areas::store::insert(&pool, "<script>alert('boom')</script>")
-            .await
-            .unwrap();
 
-        let body = get_capacity(&pool).await;
-
-        assert!(!body.contains("<script>"), "got:\n{body}");
-        assert!(body.contains("boom"), "got:\n{body}");
+        assert_life_area_name_is_escaped(&pool, Clock::system(), "/capacity").await;
     }
 }

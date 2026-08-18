@@ -1,0 +1,19 @@
+<div id="exceptions-list">
+{% if let Some(message) = exception_error %}
+<p class="exception-error">{{ message }}</p>
+{% endif %}
+<ul id="exceptions">
+{% for exception in exceptions %}
+<li id="exception-row-{{ exception.id }}">
+<span class="exception-scope">{{ exception.scope }}</span>
+<span class="exception-dates">{{ exception.start }} to {{ exception.end }}</span>
+{% if !exception.label.is_empty() %}
+<span class="exception-label">{{ exception.label }}</span>
+{% endif %}
+<form hx-post="/exceptions/{{ exception.id }}/remove" hx-target="#exceptions-list" hx-swap="outerHTML">
+<button type="submit">Remove</button>
+</form>
+</li>
+{% endfor %}
+</ul>
+</div>

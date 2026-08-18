@@ -48,27 +48,6 @@ pub async fn insert_task(
     Ok(())
 }
 
-/// The life area triage needs to resolve a submission against: an id for an
-/// *active* row named `name` (case-insensitively, via the column's own
-/// collation). `None` covers both a name that names no life area at all and
-/// one that names only an archived one -- triage refuses both identically
-/// (life-area-triage-archived-05: "rejected at the boundary, not only hidden
-/// from the picker"), so one query answering "does an active choice exist"
-/// is enough; nothing downstream needs to tell the two apart.
-///
-/// This is triage's own query, not a function borrowed from `life_areas`
-/// (`T-capability-owns-its-queries`): validating a life area at the triage
-/// boundary is triage's concern even though `life_areas` owns the table.
-pub async fn find_active_life_area_id(
-    pool: &SqlitePool,
-    name: &str,
-) -> Result<Option<i64>, sqlx::Error> {
-    sqlx::query_scalar("SELECT id FROM life_areas WHERE name = ? AND archived_at IS NULL")
-        .bind(name)
-        .fetch_optional(pool)
-        .await
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -223,44 +202,5 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(life_area_id, Some(3));
-    }
-
-    #[tokio::test]
-    async fn find_active_life_area_id_resolves_a_seeded_name_case_insensitively() {
-        let (_dir, pool) = test_pool().await;
-
-        let id = find_active_life_area_id(&pool, "work").await.unwrap();
-
-        assert!(id.is_some());
-    }
-
-    #[tokio::test]
-    async fn find_active_life_area_id_is_none_for_a_name_that_does_not_exist() {
-        let (_dir, pool) = test_pool().await;
-
-        assert_eq!(
-            find_active_life_area_id(&pool, "Gardening").await.unwrap(),
-            None
-        );
-    }
-
-    #[tokio::test]
-    async fn find_active_life_area_id_is_none_for_an_archived_life_area() {
-        let (_dir, pool) = test_pool().await;
-        crate::life_areas::store::archive(
-            &pool,
-            find_active_life_area_id(&pool, "Learning")
-                .await
-                .unwrap()
-                .unwrap(),
-            1_000,
-        )
-        .await
-        .unwrap();
-
-        assert_eq!(
-            find_active_life_area_id(&pool, "Learning").await.unwrap(),
-            None
-        );
     }
 }

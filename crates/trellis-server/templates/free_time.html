@@ -14,4 +14,19 @@
 </div>
 {% endfor %}
 </div>
+
+<h2>Exceptions</h2>
+<form hx-post="/exceptions" hx-target="#exceptions-list" hx-swap="outerHTML" hx-on::after-request="this.reset()">
+<input type="date" name="start" required>
+<input type="date" name="end" required>
+<select name="life_area">
+<option value="">All life areas</option>
+{% for option in life_area_options %}
+<option value="{{ option.name }}">{{ option.name }}</option>
+{% endfor %}
+</select>
+<input type="text" name="label" placeholder="Label (optional)">
+<button type="submit">Mark away</button>
+</form>
+{% include "exceptions_list.html" %}
 {% endblock %}

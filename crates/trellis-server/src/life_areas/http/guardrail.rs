@@ -234,13 +234,9 @@ pub async fn remove_guardrail_band(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::platform::test_support::test_pool;
+    use crate::platform::test_support::{seeded_life_area_id, test_pool};
     use proptest::prelude::*;
     use scheduler_core::guardrail::AuthoredBand;
-
-    async fn work_id(pool: &SqlitePool) -> i64 {
-        store::find_by_name(pool, "Work").await.unwrap().unwrap().id
-    }
 
     async fn authored_bands(pool: &SqlitePool, life_area_id: i64) -> Vec<AuthoredBand<i64>> {
         let rows = store::list_guardrail_bands(pool, life_area_id)
@@ -323,7 +319,7 @@ mod tests {
             let rt = tokio::runtime::Runtime::new().unwrap();
             rt.block_on(async {
                 let (_dir, pool) = test_pool().await;
-                let life_area_id = work_id(&pool).await;
+                let life_area_id = seeded_life_area_id(&pool, "Work").await;
 
                 // Starts and lengths are drawn from a handful of values, not
                 // spread over the day. Two bands that share a start and differ

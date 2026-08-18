@@ -1,14 +1,16 @@
 //! `free_intervals(guardrail, range)` -- projecting a life area's weekly
 //! civil guardrail across a date range into disjoint, sorted free intervals
-//! (#60). Correct across DST gaps and folds is the point: a naive civil
-//! subtraction hides exactly the case `T-jiff-epoch-millis` exists to force
-//! into the open.
+//! (#60), then subtracting whatever dated exceptions apply (#61). Correct
+//! across DST gaps and folds is the point: a naive civil subtraction hides
+//! exactly the case `T-jiff-epoch-millis` exists to force into the open.
 //!
-//! **Nothing here supplies busy time, pins or buffers yet.** M2 has none of
-//! those -- dated exceptions arrive at `#61`, pins at M3, calendar busy at
-//! M4. Until then the projected mask is the whole answer: `free_intervals`
-//! subtracts nothing because there is nothing yet to subtract.
+//! **Exceptions are the first subtrahend; pins and calendar busy are not
+//! here yet.** Pins arrive at M3, calendar busy at M4. `excluded` is shaped
+//! so both are additional inputs of the same kind rather than a second
+//! mechanism -- `Interval` was never named after a producer for exactly this
+//! reason.
 
+use crate::exception::DateRange;
 use crate::guardrail::{Band, Weekday};
 use jiff::civil::{Date, DateTime, Time};
 use jiff::tz::{Disambiguation, TimeZone};
@@ -67,12 +69,14 @@ impl Range {
     }
 }
 
-/// A life area's weekly mask and the zone its civil times are read in --
-/// bundled together because a band with no zone is not yet anything a
-/// scheduler could place work into.
+/// A life area's weekly mask, the zone its civil times are read in, and the
+/// dated exceptions that narrow it -- bundled together because a band with
+/// no zone is not yet anything a scheduler could place work into, and this
+/// is the one place `free_intervals` needs all three at once.
 pub struct Guardrail<'a> {
     pub bands: &'a [Band],
     pub timezone: &'a TimeZone,
+    pub excluded: &'a [DateRange],
 }
 
 /// Every `jiff` weekday paired with this crate's own -- a table, not a
@@ -145,9 +149,17 @@ fn band_interval(tz: &TimeZone, date: Date, band: Band) -> Interval {
     }
 }
 
-/// Projects `guardrail`'s weekly mask across `range`, subtracting what is
-/// taken (`M2` supplies nothing yet -- see the module's own header) and
-/// returning the result as disjoint, sorted intervals.
+/// Projects `guardrail`'s weekly mask across `range`, subtracting whichever
+/// whole civil dates `excluded` names, and returning the result as disjoint,
+/// sorted intervals.
+///
+/// **Subtraction is whole-date, not instant-ranged**: an excluded date
+/// contributes no interval at all rather than a zero-length one -- a
+/// zero-length interval is something a scheduler could still try to place
+/// work into, and whole dates is this slice's own scope (`exceptions`
+/// brief, open question 4). A date excluded by more than one overlapping
+/// range is still skipped exactly once: membership in the union of
+/// `excluded`, not a count, is all `free_intervals` ever asks.
 ///
 /// Disjoint and sorted both follow from what is guaranteed upstream rather
 /// than being enforced here: `scheduler_core::guardrail::overlaps` already
@@ -156,17 +168,29 @@ fn band_interval(tz: &TimeZone, date: Date, band: Band) -> Interval {
 /// and different dates never overlap by construction. The one thing this
 /// function still owes is the sort, since bands are not walked in start-time
 /// order.
+fn is_excluded(excluded: &[crate::exception::DateRange], date: jiff::civil::Date) -> bool {
+    excluded.iter().any(|excluded| excluded.contains(date))
+}
+
+/// One date's own contribution to [`free_intervals`] -- every band whose
+/// weekday it falls on, projected into that date's civil span.
+fn intervals_for_date(guardrail: &Guardrail<'_>, date: jiff::civil::Date) -> Vec<Interval> {
+    let weekday = weekday_of(date);
+    guardrail
+        .bands
+        .iter()
+        .filter(|band| band.weekday == weekday)
+        .map(|band| band_interval(guardrail.timezone, date, *band))
+        .collect()
+}
+
 pub fn free_intervals(guardrail: Guardrail<'_>, range: Range) -> Vec<Interval> {
     let mut intervals: Vec<Interval> = Vec::new();
     for date in range.dates() {
-        let weekday = weekday_of(date);
-        for band in guardrail
-            .bands
-            .iter()
-            .filter(|band| band.weekday == weekday)
-        {
-            intervals.push(band_interval(guardrail.timezone, date, *band));
+        if is_excluded(guardrail.excluded, date) {
+            continue;
         }
+        intervals.extend(intervals_for_date(&guardrail, date));
     }
     intervals.sort_by_key(|interval| interval.start_ms);
     intervals
@@ -199,6 +223,7 @@ mod tests {
         let guardrail = Guardrail {
             bands: &[],
             timezone: &tz,
+            excluded: &[],
         };
         let range = Range::horizon(date(2026, 8, 24), 14);
 
@@ -212,6 +237,7 @@ mod tests {
         let guardrail = Guardrail {
             bands: &bands,
             timezone: &tz,
+            excluded: &[],
         };
         // 2026-08-24 is a Monday; a 14-day horizon holds exactly two.
         let range = Range::horizon(date(2026, 8, 24), 14);
@@ -233,6 +259,7 @@ mod tests {
         let guardrail = Guardrail {
             bands: &bands,
             timezone: &tz,
+            excluded: &[],
         };
         let range = Range::horizon(date(2026, 8, 24), 7);
 
@@ -258,6 +285,7 @@ mod tests {
             Guardrail {
                 bands: &bands,
                 timezone: &tz_utc,
+                excluded: &[],
             },
             range,
         )
@@ -268,6 +296,7 @@ mod tests {
             Guardrail {
                 bands: &bands,
                 timezone: &tz_tokyo,
+                excluded: &[],
             },
             range,
         )
@@ -288,6 +317,7 @@ mod tests {
         let guardrail = Guardrail {
             bands: &bands,
             timezone: &tz,
+            excluded: &[],
         };
         let range = Range::horizon(date(2027, 3, 14), 1);
 
@@ -306,6 +336,7 @@ mod tests {
         let guardrail = Guardrail {
             bands: &bands,
             timezone: &tz,
+            excluded: &[],
         };
         let range = Range::horizon(date(2027, 11, 7), 1);
 
@@ -323,11 +354,178 @@ mod tests {
             let guardrail = Guardrail {
                 bands: &bands,
                 timezone: &tz,
+                excluded: &[],
             };
             let range = Range::horizon(start, 1);
             for interval in free_intervals(guardrail, range) {
                 assert!(interval.duration_ms() > 0, "got {interval:?} for {start}");
             }
         }
+    }
+
+    #[test]
+    fn an_excluded_range_removes_exactly_the_dates_it_covers() {
+        let tz = TimeZone::UTC;
+        let bands = [band(Weekday::Mon, 9 * 60, 17 * 60)];
+        // 2026-08-24 is a Monday; a 14-day horizon holds two (24 and 31).
+        let range = Range::horizon(date(2026, 8, 24), 14);
+        let excluded = [DateRange {
+            start: date(2026, 8, 24),
+            end: date(2026, 8, 24),
+        }];
+        let guardrail = Guardrail {
+            bands: &bands,
+            timezone: &tz,
+            excluded: &excluded,
+        };
+
+        let intervals = free_intervals(guardrail, range);
+
+        assert_eq!(intervals.len(), 1);
+        let total_ms: i64 = intervals.iter().map(|i| i.duration_ms()).sum();
+        assert_eq!(total_ms, 8 * 60 * 60 * 1000);
+    }
+
+    /// The excluded day contributes no interval at all -- a zero-length one
+    /// would still be something a scheduler could try to place work into.
+    #[test]
+    fn an_excluded_date_produces_no_interval_rather_than_a_zero_length_one() {
+        let tz = TimeZone::UTC;
+        let bands = [band(Weekday::Mon, 9 * 60, 17 * 60)];
+        let range = Range::horizon(date(2026, 8, 24), 1);
+        let excluded = [DateRange {
+            start: date(2026, 8, 24),
+            end: date(2026, 8, 24),
+        }];
+        let guardrail = Guardrail {
+            bands: &bands,
+            timezone: &tz,
+            excluded: &excluded,
+        };
+
+        assert_eq!(free_intervals(guardrail, range), Vec::new());
+    }
+
+    /// Whether `excluded` makes any difference at all to what a Mon
+    /// 09:00-17:00 band projects over the standard fortnight. The shared
+    /// shape of every "this exception is a true statement that removes
+    /// nothing" case, asked as one question so each case is only its own
+    /// dates.
+    fn changes_nothing(excluded: &[DateRange]) -> bool {
+        let tz = TimeZone::UTC;
+        let bands = [band(Weekday::Mon, 9 * 60, 17 * 60)];
+        let range = Range::horizon(date(2026, 8, 24), 14);
+        let projected = |excluded: &[DateRange]| {
+            free_intervals(
+                Guardrail {
+                    bands: &bands,
+                    timezone: &tz,
+                    excluded,
+                },
+                range,
+            )
+        };
+        projected(excluded) == projected(&[])
+    }
+
+    /// An exception on days the guardrail does not cover removes nothing --
+    /// not an error, not a no-op to reject, simply a true statement about
+    /// empty days (`exceptions` QA doc). 2026-08-22/23 is the weekend
+    /// before the Monday band.
+    #[test]
+    fn an_excluded_range_covering_no_guardrail_day_changes_nothing() {
+        assert!(changes_nothing(&[DateRange {
+            start: date(2026, 8, 22),
+            end: date(2026, 8, 23),
+        }]));
+    }
+
+    /// An exception entirely outside the horizon changes nothing -- it is
+    /// still a real, stored exception, just not one this projection reaches.
+    #[test]
+    fn an_excluded_range_entirely_outside_the_horizon_changes_nothing() {
+        assert!(changes_nothing(&[DateRange {
+            start: date(2026, 9, 10),
+            end: date(2026, 9, 20),
+        }]));
+    }
+
+    /// Two overlapping exceptions subtract their union, not their sum --
+    /// 24-28 and 26-29 August overlap on 26-28, so together they remove
+    /// 24-29 (six days, of which 24-28 are the five weekdays a Mon-Fri
+    /// band covers; 29 is a Saturday it does not).
+    #[test]
+    fn overlapping_excluded_ranges_subtract_their_union_not_twice() {
+        let tz = TimeZone::UTC;
+        let bands = [band(Weekday::Mon, 9 * 60, 17 * 60)];
+        let range = Range::horizon(date(2026, 8, 24), 14);
+        let excluded = [
+            DateRange {
+                start: date(2026, 8, 24),
+                end: date(2026, 8, 28),
+            },
+            DateRange {
+                start: date(2026, 8, 26),
+                end: date(2026, 8, 29),
+            },
+        ];
+        let guardrail = Guardrail {
+            bands: &bands,
+            timezone: &tz,
+            excluded: &excluded,
+        };
+
+        let intervals = free_intervals(guardrail, range);
+
+        // Only 31 August's Monday band survives.
+        assert_eq!(intervals.len(), 1);
+        let total_ms: i64 = intervals.iter().map(|i| i.duration_ms()).sum();
+        assert_eq!(total_ms, 8 * 60 * 60 * 1000);
+    }
+
+    /// Excluding the *ordinary* Sunday leaves the transition Sunday's own
+    /// odd length intact -- excluding the transition day instead would
+    /// leave a plain three-hour Sunday and prove nothing about subtraction
+    /// interacting with the fold correctly (`exceptions` QA doc).
+    #[test]
+    fn excluding_the_ordinary_sunday_leaves_the_fall_back_transition_day_at_its_true_length() {
+        // 2027-11-07 is the transition Sunday; 2027-11-14 is the ordinary one.
+        let only = lone_sunday_left_after_excluding(date(2027, 11, 6), date(2027, 11, 14));
+
+        assert_eq!(only.duration_ms(), 4 * 60 * 60 * 1000);
+    }
+
+    /// A 01:00-04:00 Sunday band over a fortnight containing one DST
+    /// transition, with the *ordinary* Sunday excluded -- so the one
+    /// interval left is the transition day's, and its length is the whole
+    /// assertion. `T-fold-counts-both-passes` is what makes the two
+    /// directions differ.
+    fn lone_sunday_left_after_excluding(from: Date, excluded_sunday: Date) -> Interval {
+        let tz = TimeZone::get("America/New_York").unwrap();
+        let bands = [band(Weekday::Sun, 60, 4 * 60)];
+        let excluded = [DateRange {
+            start: excluded_sunday,
+            end: excluded_sunday,
+        }];
+        let intervals = free_intervals(
+            Guardrail {
+                bands: &bands,
+                timezone: &tz,
+                excluded: &excluded,
+            },
+            Range::horizon(from, 14),
+        );
+        assert_eq!(intervals.len(), 1, "expected only the transition Sunday");
+        intervals[0]
+    }
+
+    /// The spring-forward mirror of the above: excluding the ordinary
+    /// Sunday leaves the transition Sunday's two-hour span intact.
+    #[test]
+    fn excluding_the_ordinary_sunday_leaves_the_spring_forward_transition_day_at_its_true_length() {
+        // 2027-03-14 is the transition Sunday; 2027-03-21 is the ordinary one.
+        let only = lone_sunday_left_after_excluding(date(2027, 3, 13), date(2027, 3, 21));
+
+        assert_eq!(only.duration_ms(), 2 * 60 * 60 * 1000);
     }
 }

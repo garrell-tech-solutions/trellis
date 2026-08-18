@@ -64,6 +64,7 @@ crates/trellis-server/src/
   capture/    http.rs  store.rs
   triage/     http.rs  store.rs
   dismiss/    mod.rs  http.rs
+  exceptions/ mod.rs  http.rs  store.rs  view.rs
   free_time/  mod.rs  http.rs
   inbox/      mod.rs  http.rs  lists.rs  store.rs  view.rs
   life_areas/ mod.rs  http/mod.rs  http/guardrail.rs  store.rs  view.rs
@@ -73,7 +74,7 @@ crates/trellis-server/src/
               request.rs  response.rs  test_support.rs
 ```
 
-Eight capabilities and one bucket named so a reader can tell it is not one.
+Nine capabilities and one bucket named so a reader can tell it is not one.
 `scheduler-core` holds the rules and names neither adapter; a domain's `http`
 turns requests into core inputs and core types into view models; its `store`
 turns core types into rows and is the only production SQL; its `view` is what
@@ -104,6 +105,18 @@ copy of another capability's internals, and three of those drift. Reaching
 across for a *type* (`inbox::view::CaptureRow`, `life_areas::view::
 LifeAreaOption`) stays fine; it is reaching across for the recipe that does
 not.
+
+**`life_areas` answers "does this name a life area work may be filed
+under?" for everyone who asks.** `life_areas::active_id_for_name` exists
+because triage (before writing a task) and exceptions (before writing a
+dated exception scoped to one life area) both validate a submitted name at
+their own boundary, and arrived as two byte-identical `find_active_life_area_id`
+functions in two `store.rs` files. `T-capability-owns-its-queries` licenses
+separate copies for *two facts*; this is one fact asked twice for the same
+reason, and the answer belongs to the capability that owns the table, the
+name-identity rule and the archived/active distinction. What "active" means
+was about to grow a second dimension — `pool_only` — which is exactly the
+kind of change two copies get wrong.
 
 The **inbox** is the second capability to need one, and it needs three
 things in its door:
@@ -385,12 +398,40 @@ intervals that are adjacent or overlapping only make sense compared as
 instants — a DST transition can reorder civil clock readings. That is the
 type M3's `schedule()` will consume and M4's calendar sync will produce.
 
+**Exceptions narrow, and only narrow** (`#61`). A dated exception is the
+owner saying a week is not normal; it removes civil dates from what a
+guardrail projects and there is no code path that adds an interval, which
+is what keeps it from being `D-guardrails-never-yield` breached under a
+friendlier name. Overlapping exceptions subtract their union, not their
+sum. Dates are stored as ISO civil text, never epoch millis — a date is not
+an instant. Removing one is a hard `DELETE`: configuration is removed, not
+retired, which is the opposite call from `D-kill-means-archive`'s and
+deliberately so, because an exception is not a record of anything that
+happened.
+
+> **The subtrahend is date-granular, and pins and busy are not.**
+> `Guardrail.excluded` is `&[DateRange]`, and `free_intervals` skips a whole
+> civil date rather than subtracting an interval from one. That is the
+> simplest thing that supports whole-date exceptions, which is what was
+> asked for — but it means M3's pins and M4's calendar busy, which are
+> partial-day, **cannot arrive as more of the same input**. They need
+> interval-minus-interval subtraction, which does not exist here yet. Worth
+> writing down because this slice's own reasoning recorded the opposite
+> ("one subtrahend shape for M3's pins and M4's calendar busy to inherit"),
+> and the next slice would otherwise inherit that sentence rather than the
+> code. Building the general form now would be speculative: the fold rule
+> means a civil day is not a fixed span, so date exclusion is not simply a
+> special case of interval subtraction, and getting it right needs the real
+> second producer to design against.
+
 The mask it reads:
 
 ```sql
 guardrail_bands(id, life_area_id, weekday, start_minutes, end_minutes)
 life_areas.pool_only                     -- a column, not the absence of bands
 settings(id CHECK (id = 1), timezone)    -- one row; the owner's zone
+exceptions(id, life_area_id NULL, start_date, end_date, label)
+                                         -- NULL life_area_id means every one
 ```
 
 **A band is one weekday and a civil span**, minutes since midnight, never an
@@ -588,7 +629,13 @@ GET  /stats                   the committed share of the last fourteen days
                               (R2, #45). Rules in `scheduler_core::ratio`.
 GET  /free-time               what each life area's guardrail projects to over
                               the next fourteen civil days (#60). Computes only;
-                              stores nothing.
+                              stores nothing. Carries the exceptions controls,
+                              being the only page whose numbers they change.
+POST /exceptions              mark a civil date range away, globally or for one
+                              life area (#61). 422 on a backwards range or a
+                              name that resolves to nothing.
+POST /exceptions/{id}/remove  a hard DELETE, not an archive — configuration is
+                              removed, not retired.
 GET  /life-areas              manage the set: list, add, archive (#47)
 POST /life-areas              add one. Duplicate or blank -> 422 + the list
                               fragment carrying the message.

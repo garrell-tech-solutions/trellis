@@ -2,11 +2,21 @@
 //!
 //! Translation only, the same shape `stats::http` is: read the clock and
 //! the owner's zone, ask `scheduler_core::free_time::free_intervals` what
-//! each life area's guardrail projects to over the horizon, render what it
-//! says. No arithmetic of its own beyond formatting -- summing durations
-//! and reading civil fields off an already-resolved `Zoned` is not a rule
-//! that survives changing HTTP, it is display.
+//! each life area's guardrail projects to over the horizon minus whatever
+//! exceptions apply to it, render what it says. No arithmetic of its own
+//! beyond formatting -- summing durations and reading civil fields off an
+//! already-resolved `Zoned` is not a rule that survives changing HTTP, it
+//! is display.
+//!
+//! Also renders the exceptions list and its add form (`#61`): the
+//! specifier's call was that the exception controls live here rather than
+//! on a page of their own, since this is the only page whose numbers they
+//! change. `exceptions::http` owns the writes; this handler only reads
+//! `exceptions::list` and `exceptions::for_life_area` back
+//! (`T-one-front-door-per-capability`).
 
+use crate::exceptions::view::ExceptionListItem;
+use crate::life_areas::view::LifeAreaOption;
 use crate::platform::clock::Clock;
 use crate::platform::nav::{self, NavLink, Page};
 use crate::platform::response::{render_template, write_failed};
@@ -38,6 +48,9 @@ struct FreeTimeArea {
 #[template(path = "free_time.html")]
 struct FreeTimeTemplate {
     life_areas: Vec<FreeTimeArea>,
+    exceptions: Vec<ExceptionListItem>,
+    exception_error: Option<String>,
+    life_area_options: Vec<LifeAreaOption>,
     nav: Vec<NavLink>,
 }
 
@@ -74,10 +87,12 @@ fn free_time_area(
     bands: &[scheduler_core::guardrail::Band],
     tz: &TimeZone,
     range: Range,
+    excluded: &[scheduler_core::exception::DateRange],
 ) -> Result<FreeTimeArea, StatusCode> {
     let guardrail = Guardrail {
         bands,
         timezone: tz,
+        excluded,
     };
     let intervals = free_intervals(guardrail, range);
     let total_ms: i64 = intervals.iter().map(|i| i.duration_ms()).sum();
@@ -115,7 +130,17 @@ async fn free_time_areas(
         .map_err(write_failed)?;
     let mut life_areas = Vec::with_capacity(guardrails.len());
     for area in guardrails {
-        life_areas.push(free_time_area(area.id, area.name, &area.bands, tz, range)?);
+        let excluded = crate::exceptions::for_life_area(pool, area.id)
+            .await
+            .map_err(write_failed)?;
+        life_areas.push(free_time_area(
+            area.id,
+            area.name,
+            &area.bands,
+            tz,
+            range,
+            &excluded,
+        )?);
     }
     Ok(life_areas)
 }
@@ -126,11 +151,18 @@ pub async fn show_free_time(
 ) -> Result<Response, StatusCode> {
     let (tz, range) = today_range(&pool, &clock).await?;
     let life_areas = free_time_areas(&pool, &tz, range).await?;
+    let exceptions = crate::exceptions::list(&pool).await.map_err(write_failed)?;
+    let life_area_options = crate::life_areas::active_options(&pool)
+        .await
+        .map_err(write_failed)?;
 
     Ok(render_template(
         StatusCode::OK,
         &FreeTimeTemplate {
             life_areas,
+            exceptions,
+            exception_error: None,
+            life_area_options,
             nav: nav::links(Page::FreeTime),
         },
     ))

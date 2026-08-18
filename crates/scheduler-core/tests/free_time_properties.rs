@@ -1,4 +1,4 @@
-//! Property tests for `free_intervals` (#60).
+//! Property tests for `free_intervals` (#60, extended by #61's subtraction).
 //!
 //! Kept separate from the unit tests and every case marked `#[ignore]`, per
 //! the project convention: normal verification runs `cargo test --workspace`,
@@ -6,16 +6,22 @@
 //!
 //! The unit tests in `free_time.rs` pin the two DST transitions the
 //! acceptance scenarios name, with real dates and real expected totals.
-//! These check what has to hold for *any* well-formed guardrail and *any*
-//! range, including zones neither scenario reaches: that the output stays
-//! disjoint and sorted (the brief's own criterion), and that a change of
-//! zone never moves a total unless a real transition falls inside the
-//! range -- the DST correctness claim, generalised past the two dates the
-//! literal scenarios pin.
+//! These check what has to hold for *any* well-formed guardrail, *any*
+//! range and *any* set of dated exceptions, including zones neither
+//! scenario reaches: that the output stays disjoint and sorted (the
+//! brief's own criterion), and that a change of zone never moves a total
+//! unless a real transition falls inside the range -- the DST correctness
+//! claim, generalised past the two dates the literal scenarios pin.
+//!
+//! `#61`'s brief asked for subtraction to extend this property rather than
+//! duplicate it in a second file: `excluded` is now one more generated
+//! input to the same four properties, not a fifth property of its own.
 
 use jiff::civil::{date, Date};
 use jiff::tz::TimeZone;
+use jiff::ToSpan;
 use proptest::prelude::*;
+use scheduler_core::exception::DateRange;
 use scheduler_core::free_time::{free_intervals, weekday_of, Guardrail, Interval, Range};
 use scheduler_core::guardrail::{Band, Weekday};
 
@@ -93,6 +99,33 @@ fn any_range_days() -> impl Strategy<Value = i64> {
     1..60i64
 }
 
+/// One well-formed dated exception: a start date and a length, both ends
+/// inclusive (`scheduler_core::exception::well_formed_range`'s own
+/// contract) -- a single-day range is `len == 0`.
+fn any_date_range() -> impl Strategy<Value = DateRange> {
+    (any_start_date(), 0..10i64).prop_map(|(start, len)| DateRange {
+        start,
+        end: start
+            .checked_add(len.days())
+            .expect("a ten-day span stays within jiff's representable date range"),
+    })
+}
+
+/// A small set of exceptions, deliberately allowed to overlap each other --
+/// `free_intervals`'s own contract is that overlapping exclusions subtract
+/// their union, not their sum, so generating disjoint ranges here would
+/// leave that path untested.
+fn any_excluded() -> impl Strategy<Value = Vec<DateRange>> {
+    prop::collection::vec(any_date_range(), 0..3)
+}
+
+/// Whether `day` falls inside any of `excluded` -- the same union-membership
+/// test `free_intervals` itself applies, recomputed independently so a
+/// property's own expectation cannot share a bug with the implementation.
+fn excluded_on(excluded: &[DateRange], day: Date) -> bool {
+    excluded.iter().any(|range| range.contains(day))
+}
+
 fn is_sorted(intervals: &[Interval]) -> bool {
     intervals
         .windows(2)
@@ -117,9 +150,10 @@ proptest! {
         start in any_start_date(),
         days in any_range_days(),
         tz in any_timezone(),
+        excluded in any_excluded(),
     ) {
         let range = Range::horizon(start, days);
-        let guardrail = Guardrail { bands: &bands, timezone: &tz };
+        let guardrail = Guardrail { bands: &bands, timezone: &tz, excluded: &excluded };
 
         let intervals = free_intervals(guardrail, range);
 
@@ -136,9 +170,10 @@ proptest! {
         start in any_start_date(),
         days in any_range_days(),
         tz in any_timezone(),
+        excluded in any_excluded(),
     ) {
         let range = Range::horizon(start, days);
-        let guardrail = Guardrail { bands: &bands, timezone: &tz };
+        let guardrail = Guardrail { bands: &bands, timezone: &tz, excluded: &excluded };
 
         for interval in free_intervals(guardrail, range) {
             prop_assert!(interval.duration_ms() > 0, "got {interval:?}");
@@ -154,9 +189,10 @@ proptest! {
         start in any_start_date(),
         days in any_range_days(),
         tz in any_timezone(),
+        excluded in any_excluded(),
     ) {
         let range = Range::horizon(start, days);
-        let guardrail = Guardrail { bands: &bands, timezone: &tz };
+        let guardrail = Guardrail { bands: &bands, timezone: &tz, excluded: &excluded };
         let intervals = free_intervals(guardrail, range);
 
         // Recomputed by walking the same days a band's weekday can land
@@ -165,7 +201,9 @@ proptest! {
         let mut expected_count = 0usize;
         let mut day = range.start;
         while day < range.end {
-            expected_count += bands.iter().filter(|b| weekday_of(day) == b.weekday).count();
+            if !excluded_on(&excluded, day) {
+                expected_count += bands.iter().filter(|b| weekday_of(day) == b.weekday).count();
+            }
             day = day.tomorrow().unwrap();
         }
 
@@ -182,10 +220,11 @@ proptest! {
         bands in any_bands(),
         start in any_start_date(),
         days in 1..14i64,
+        excluded in any_excluded(),
     ) {
         let range = Range::horizon(start, days);
         let utc = TimeZone::UTC;
-        let guardrail = Guardrail { bands: &bands, timezone: &utc };
+        let guardrail = Guardrail { bands: &bands, timezone: &utc, excluded: &excluded };
 
         let intervals = free_intervals(guardrail, range);
         let total_ms: i64 = intervals.iter().map(|i| i.duration_ms()).sum();
@@ -193,8 +232,10 @@ proptest! {
         let mut expected_minutes = 0i64;
         let mut day = range.start;
         while day < range.end {
-            for band in bands.iter().filter(|b| weekday_of(day) == b.weekday) {
-                expected_minutes += band.end_minutes - band.start_minutes;
+            if !excluded_on(&excluded, day) {
+                for band in bands.iter().filter(|b| weekday_of(day) == b.weekday) {
+                    expected_minutes += band.end_minutes - band.start_minutes;
+                }
             }
             day = day.tomorrow().unwrap();
         }

@@ -155,18 +155,27 @@ async fn dispatch_reports_hours(
     super::then_section_contains(section, &name, "report", &format!("{hours}h"))
 }
 
+fn parse_expected_interval_count(raw: &str) -> Result<usize, String> {
+    raw.parse().map_err(|e| format!("bad interval count: {e}"))
+}
+
+async fn interval_count(world: &mut World, name: &str) -> Result<(usize, String), String> {
+    let section = free_time_row(world, name).await?;
+    let interval_list = html::between(section, r#"<ul class="free-time-intervals">"#, "</ul>")?;
+    Ok((
+        interval_list.matches("<li>").count(),
+        interval_list.to_string(),
+    ))
+}
+
 async fn dispatch_lists_intervals(
     world: &mut World,
     example: &BTreeMap<String, String>,
     caps: &regex::Captures<'_>,
 ) -> Result<(), String> {
-    let expected: usize = resolve(example, &caps[1])?
-        .parse()
-        .map_err(|e| format!("bad interval count: {e}"))?;
+    let expected = parse_expected_interval_count(&resolve(example, &caps[1])?)?;
     let name = resolve(example, &caps[2])?;
-    let section = free_time_row(world, &name).await?;
-    let interval_list = html::between(section, r#"<ul class="free-time-intervals">"#, "</ul>")?;
-    let actual = interval_list.matches("<li>").count();
+    let (actual, interval_list) = interval_count(world, &name).await?;
     if actual == expected {
         Ok(())
     } else {

@@ -93,25 +93,39 @@ fn free_time_area(
     })
 }
 
-pub async fn show_free_time(
-    State(pool): State<SqlitePool>,
-    State(clock): State<Clock>,
-) -> Result<Response, StatusCode> {
-    let zone_name = crate::settings::current_timezone(&pool)
+/// The owner's zone and the civil-date horizon to project it over --
+/// [`show_free_time`]'s setup half, ahead of the per-life-area projection.
+async fn today_range(pool: &SqlitePool, clock: &Clock) -> Result<(TimeZone, Range), StatusCode> {
+    let zone_name = crate::settings::current_timezone(pool)
         .await
         .map_err(write_failed)?;
     let tz = scheduler_core::timezone::resolve(&zone_name)
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     let today = today_in(clock.now_ms(), &tz)?;
-    let range = Range::horizon(today, HORIZON_DAYS);
+    Ok((tz.clone(), Range::horizon(today, HORIZON_DAYS)))
+}
 
-    let guardrails = crate::life_areas::guardrails(&pool)
+async fn free_time_areas(
+    pool: &SqlitePool,
+    tz: &TimeZone,
+    range: Range,
+) -> Result<Vec<FreeTimeArea>, StatusCode> {
+    let guardrails = crate::life_areas::guardrails(pool)
         .await
         .map_err(write_failed)?;
     let mut life_areas = Vec::with_capacity(guardrails.len());
     for area in guardrails {
-        life_areas.push(free_time_area(area.id, area.name, &area.bands, &tz, range)?);
+        life_areas.push(free_time_area(area.id, area.name, &area.bands, tz, range)?);
     }
+    Ok(life_areas)
+}
+
+pub async fn show_free_time(
+    State(pool): State<SqlitePool>,
+    State(clock): State<Clock>,
+) -> Result<Response, StatusCode> {
+    let (tz, range) = today_range(&pool, &clock).await?;
+    let life_areas = free_time_areas(&pool, &tz, range).await?;
 
     Ok(render_template(
         StatusCode::OK,

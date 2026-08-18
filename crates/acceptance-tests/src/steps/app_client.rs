@@ -25,23 +25,35 @@ pub struct Response {
     pub elapsed: Duration,
 }
 
-/// POSTs `body` as JSON to `uri` against a router built on the scenario's
-/// database pool.
-pub async fn post_json(world: &World, uri: &str, body: &Value) -> Result<Response, String> {
-    let app = trellis_server::platform::app::build_app(world.pool()?.clone(), world.clock());
-    let request = Request::builder()
+fn build_json_post(uri: &str, body: &Value) -> Result<Request<Body>, String> {
+    Request::builder()
         .method("POST")
         .uri(uri)
         .header("content-type", "application/json")
         .body(Body::from(body.to_string()))
-        .map_err(|e| format!("build request: {e}"))?;
+        .map_err(|e| format!("build request: {e}"))
+}
 
+/// Sends `request` through `app`, timing the round trip -- the half of
+/// [`post_json`] that reads the body separately, once it has one.
+async fn send_timed(
+    app: axum::Router,
+    request: Request<Body>,
+) -> Result<(axum::response::Response, Duration), String> {
     let start = std::time::Instant::now();
     let response = app
         .oneshot(request)
         .await
         .map_err(|e| format!("send request: {e}"))?;
-    let elapsed = start.elapsed();
+    Ok((response, start.elapsed()))
+}
+
+/// POSTs `body` as JSON to `uri` against a router built on the scenario's
+/// database pool.
+pub async fn post_json(world: &World, uri: &str, body: &Value) -> Result<Response, String> {
+    let app = trellis_server::platform::app::build_app(world.pool()?.clone(), world.clock());
+    let request = build_json_post(uri, body)?;
+    let (response, elapsed) = send_timed(app, request).await?;
 
     let status = response.status().as_u16();
     let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)

@@ -1,10 +1,6 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<title>Trellis — Stats</title>
-</head>
-<body>
+{% extends "base.html" %}
+{% block title %}Trellis — Stats{% endblock %}
+{% block content %}
 <h1>Stats</h1>
 <p>{{ share.counts.committed }} committed, {{ share.counts.pool }} pool and {{ share.counts.quota }} quota tasks</p>
 <p>{{ share.in_window }} tasks in the window</p>
@@ -20,5 +16,4 @@
 {% else %}
 <p>It has not measured enough tasks yet to report a share.</p>
 {% endif %}
-</body>
-</html>
+{% endblock %}

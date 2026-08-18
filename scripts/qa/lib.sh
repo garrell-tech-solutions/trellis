@@ -141,6 +141,27 @@ print(m.group(1) if m else "")
 ' "$page" "$capture_id"
 }
 
+# The hx-post endpoint of the control in capture_id's row whose <form>
+# contains `marker` (e.g. "value=\"pool\"" for the pool triage control,
+# ">Dismiss<" for the dismiss control), read from the page's own markup --
+# not assumed. Prints nothing if the row or a matching control cannot be
+# found.
+qa_row_control_endpoint() {
+  local page="$1" capture_id="$2" marker="$3" block
+  block="$(qa_capture_row_block "$page" "$capture_id")"
+  python3 -c '
+import re, sys
+block, marker = sys.argv[1], sys.argv[2]
+for form in re.findall(r"<form\b[^>]*>.*?</form>", block, re.S):
+    if marker not in form:
+        continue
+    hx = re.search(r"hx-post=\"([^\"]+)\"", form)
+    print(hx.group(1) if hx else "")
+    sys.exit()
+print("")
+' "$block" "$marker"
+}
+
 # Extracts the contents of <ul id="html_id">...</ul> from a page, or prints
 # nothing if not found. The inbox page renders both the capture list and the
 # task list on one page (triage-from-page), so an assertion about one must

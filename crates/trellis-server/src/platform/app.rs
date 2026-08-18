@@ -62,6 +62,7 @@ pub fn build_app(pool: SqlitePool, clock: Clock) -> Router {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::platform::nav;
     use crate::platform::test_support::test_pool;
     use axum::body::Body;
     use axum::http::{Request, StatusCode};
@@ -95,6 +96,80 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(row, ("buy milk".to_string(), "web".to_string()));
+    }
+
+    /// **Every header link is a real route, and the page it reaches agrees
+    /// about which one it is.**
+    ///
+    /// `build_app` above and `nav::Page::path` are two statements of the same
+    /// three paths, and nothing in the type system makes them agree: rename a
+    /// route here and the header keeps offering the old one, which 404s. The
+    /// acceptance suite asserts the same thing, but from an Examples table
+    /// listing today's three pages by hand — so it covers what someone
+    /// remembered to add, while this walks `nav::ALL` and covers whatever is
+    /// in it.
+    ///
+    /// That is the difference the brief asked for. Its open question 2 named
+    /// the hazard as *"the part most likely to be got wrong in a way that
+    /// only shows up on page five"*, and page five is exactly the case a
+    /// hand-maintained table misses: a new variant whose `path` has a typo,
+    /// or whose handler was copied from another page and still declares that
+    /// page current, fails here the moment it joins `ALL`.
+    #[tokio::test]
+    async fn every_header_link_reaches_the_page_it_names() {
+        let (_dir, pool) = test_pool().await;
+
+        for page in nav::ALL {
+            let link = nav::links(page)
+                .into_iter()
+                .find(|link| link.current)
+                .expect("a page's own link is in the header it renders");
+
+            let response = build_app(pool.clone(), Clock::system())
+                .oneshot(
+                    Request::builder()
+                        .uri(link.path)
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+
+            assert_eq!(
+                response.status(),
+                StatusCode::OK,
+                "the header offers {} but GET {} is not a page",
+                link.label,
+                link.path
+            );
+            let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+                .await
+                .unwrap();
+            let body = String::from_utf8(body.to_vec()).unwrap();
+            let header = header_of(&body);
+
+            assert!(
+                header.contains(&format!(r#"aria-current="page">{}</a>"#, link.label)),
+                "GET {} does not mark {} as the current page",
+                link.path,
+                link.label
+            );
+            assert_eq!(
+                header.matches("aria-current").count(),
+                1,
+                "GET {} marks more than one link current",
+                link.path
+            );
+        }
+    }
+
+    /// The header's own markup. Scoped rather than searching the whole page,
+    /// so "exactly one link is current" stays a claim about the nav even
+    /// after some page's content grows an `aria-current` of its own.
+    fn header_of(body: &str) -> &str {
+        let start = body.find("<header>").expect("every page carries a header");
+        let end = body.find("</header>").expect("the header is closed");
+        &body[start..end]
     }
 
     /// One exit attempt against a capture, through the real router.

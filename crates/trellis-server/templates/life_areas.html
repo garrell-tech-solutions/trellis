@@ -1,19 +1,10 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<title>Trellis — Life areas</title>
-<script src="/static/htmx.min.js"></script>
-<script type="text/javascript">
-htmx.config.responseHandling.unshift({code: "422", swap: true});
-</script>
-</head>
-<body>
+{% extends "base.html" %}
+{% block title %}Trellis — Life areas{% endblock %}
+{% block content %}
 <h1>Life areas</h1>
 <form hx-post="/life-areas" hx-target="#life-areas-list" hx-swap="outerHTML" hx-on::after-request="this.reset()">
 <input type="text" name="name" placeholder="Add a life area" required>
 <button type="submit">Add</button>
 </form>
 {% include "life_areas_list.html" %}
-</body>
-</html>
+{% endblock %}

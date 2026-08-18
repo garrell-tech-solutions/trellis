@@ -3,8 +3,9 @@
 //! ([`db`]), the clock they are handed to stamp rows with ([`clock`]), the
 //! vendored script
 //! the page loads ([`assets`]), the request-side helper every transport-
-//! sniffing handler needs ([`request`]), and the two helpers that turn a
-//! template or a failed write into a response ([`response`]).
+//! sniffing handler needs ([`request`]), the two helpers that turn a
+//! template or a failed write into a response ([`response`]), and the shared
+//! header every page carries ([`nav`]).
 //!
 //! Kept in one directory with an obviously non-product name so that `ls
 //! src/` lists what Trellis does and exactly one bucket that is plainly not
@@ -19,6 +20,7 @@ pub mod app;
 pub mod assets;
 pub mod clock;
 pub mod db;
+pub(crate) mod nav;
 pub(crate) mod request;
 pub(crate) mod response;
 

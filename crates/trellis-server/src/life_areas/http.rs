@@ -14,6 +14,7 @@
 use crate::life_areas::store;
 use crate::life_areas::view::LifeAreaOption;
 use crate::platform::clock::Clock;
+use crate::platform::nav::{self, NavLink, Page};
 use crate::platform::response::{render_template, write_failed};
 use askama::Template;
 use axum::extract::{Path, State};
@@ -29,6 +30,7 @@ use sqlx::SqlitePool;
 struct LifeAreasTemplate {
     life_areas: Vec<LifeAreaOption>,
     error: Option<String>,
+    nav: Vec<NavLink>,
 }
 
 /// The `#life-areas-list` fragment on its own -- what both a successful add
@@ -49,6 +51,7 @@ pub async fn show_life_areas(State(pool): State<SqlitePool>) -> Result<Response,
         &LifeAreasTemplate {
             life_areas,
             error: None,
+            nav: nav::links(Page::LifeAreas),
         },
     ))
 }

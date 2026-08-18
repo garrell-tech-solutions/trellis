@@ -52,19 +52,7 @@ qa_get_inbox() {
 # page's own markup -- not assumed. Prints nothing if the row (or a dismiss
 # control on it) cannot be found.
 qa_dismiss_endpoint() {
-  local page="$1" capture_id="$2" block
-  block="$(qa_capture_row_block "$page" "$capture_id")"
-  python3 -c '
-import re, sys
-block = sys.argv[1]
-for form in re.findall(r"<form\b[^>]*>.*?</form>", block, re.S):
-    if ">Dismiss<" not in form:
-        continue
-    hx = re.search(r"hx-post=\"([^\"]+)\"", form)
-    print(hx.group(1) if hx else "")
-    sys.exit()
-print("")
-' "$block"
+  qa_row_control_endpoint "$1" "$2" ">Dismiss<"
 }
 
 # POSTs the dismiss control (no body) and sets STATUS and BODY.

@@ -224,19 +224,7 @@ name="archived-refused-at-boundary"
 if qa_start_server "$BIN" "$TMP_DIR/$name.sqlite" "$TMP_DIR/$name.log"; then
   CAPTURE_ID="$(qa_submit_capture "buy milk")"
   life_areas_page="$(curl -s "http://$ADDR/life-areas")"
-  archive_endpoint="$(python3 -c '
-import re, sys
-page = sys.argv[1]
-for m in re.finditer(r"<li id=\"life-area-row-\d+\">\n(.*?)\n</li>", page, re.S):
-    block = m.group(1)
-    if block.split("<form", 1)[0].strip() != "Learning":
-        continue
-    hx = re.search(r"hx-post=\"([^\"]+)\"", block)
-    print(hx.group(1) if hx else "")
-    break
-else:
-    print("")
-' "$life_areas_page")"
+  archive_endpoint="$(qa_life_area_control_endpoint "$life_areas_page" "Learning" ">Archive<")"
   curl -s -o /dev/null -X POST "http://$ADDR$archive_endpoint"
   # By hand, not through the picker (which no longer offers Learning) --
   # exactly what the procedure requires: a request composed directly must

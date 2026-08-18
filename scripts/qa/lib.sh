@@ -141,14 +141,13 @@ print(m.group(1) if m else "")
 ' "$page" "$capture_id"
 }
 
-# The hx-post endpoint of the control in capture_id's row whose <form>
-# contains `marker` (e.g. "value=\"pool\"" for the pool triage control,
-# ">Dismiss<" for the dismiss control), read from the page's own markup --
-# not assumed. Prints nothing if the row or a matching control cannot be
-# found.
-qa_row_control_endpoint() {
-  local page="$1" capture_id="$2" marker="$3" block
-  block="$(qa_capture_row_block "$page" "$capture_id")"
+# The hx-post endpoint of whichever <form> in `block` contains `marker`
+# (e.g. "value=\"pool\"" for a pool triage control, ">Archive<" for an
+# archive control), or "" if none matches. The shared primitive behind
+# qa_row_control_endpoint and qa_life_area_control_endpoint, which differ
+# only in how they find their block.
+qa_block_control_endpoint() {
+  local block="$1" marker="$2"
   python3 -c '
 import re, sys
 block, marker = sys.argv[1], sys.argv[2]
@@ -160,6 +159,48 @@ for form in re.findall(r"<form\b[^>]*>.*?</form>", block, re.S):
     sys.exit()
 print("")
 ' "$block" "$marker"
+}
+
+# The hx-post endpoint of the control in capture_id's row whose <form>
+# contains `marker` (e.g. "value=\"pool\"" for the pool triage control,
+# ">Dismiss<" for the dismiss control), read from the page's own markup --
+# not assumed. Prints nothing if the row or a matching control cannot be
+# found.
+qa_row_control_endpoint() {
+  local page="$1" capture_id="$2" marker="$3"
+  qa_block_control_endpoint "$(qa_capture_row_block "$page" "$capture_id")" "$marker"
+}
+
+# The markup inside <li id="life-area-row-ID">...</li> whose
+# <span class="life-area-name"> exactly matches `name`, read from a rendered
+# page -- or from a response that already is that li -- or "" if no row
+# matches. Keyed by name rather than id because that is what every caller
+# has in hand; life_area_row.html's guardrail markup means a row's first
+# <form> is no longer reliably the one a caller wants, so control lookups go
+# through this and qa_life_area_control_endpoint rather than assuming which
+# form comes first.
+qa_life_area_row_block() {
+  local page="$1" name="$2"
+  python3 -c '
+import re, sys
+page, name = sys.argv[1], sys.argv[2]
+for m in re.finditer(r"<li id=\"life-area-row-\d+\">(.*?)</li>", page, re.S):
+    block = m.group(1)
+    nm = re.search(r"<span class=\"life-area-name\">([^<]*)</span>", block)
+    if nm and nm.group(1) == name:
+        print(block)
+        sys.exit()
+print("")
+' "$page" "$name"
+}
+
+# The hx-post endpoint of the control in name's life-area row whose <form>
+# contains `marker` (e.g. ">Archive<", ">Add band<"), read from the page's
+# own markup -- not assumed. Prints nothing if the row or a matching control
+# cannot be found.
+qa_life_area_control_endpoint() {
+  local page="$1" name="$2" marker="$3"
+  qa_block_control_endpoint "$(qa_life_area_row_block "$page" "$name")" "$marker"
 }
 
 # Extracts the contents of <ul id="html_id">...</ul> from a page, or prints

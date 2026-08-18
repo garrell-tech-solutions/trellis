@@ -157,6 +157,29 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_guardrail_band_reports_its_projected_free_time() {
+        let (_dir, pool) = test_pool().await;
+        let id = crate::life_areas::store::find_by_name(&pool, "Work")
+            .await
+            .unwrap()
+            .unwrap()
+            .id;
+        // 2026-01-05 is a Monday, at midnight UTC -- "now" falls exactly on
+        // the civil date the Monday band below projects into. The 14-day
+        // horizon starting there covers two Mondays: 2026-01-05 and
+        // 2026-01-12.
+        crate::life_areas::store::insert_guardrail_band(&pool, id, "Mon", 540, 1020)
+            .await
+            .unwrap();
+
+        let body = get_ok(&pool, Clock::pinned_at(1_767_571_200_000), "/free-time").await;
+
+        assert!(body.contains("16h"), "got:\n{body}");
+        assert!(body.contains("2026-01-05 09:00-17:00"), "got:\n{body}");
+        assert!(body.contains("2026-01-12 09:00-17:00"), "got:\n{body}");
+    }
+
+    #[tokio::test]
     async fn a_life_area_with_no_guardrail_reports_zero_hours() {
         let (_dir, pool) = test_pool().await;
 

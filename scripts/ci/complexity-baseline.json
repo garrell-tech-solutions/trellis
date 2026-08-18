@@ -36,6 +36,12 @@
       "why": "Gherkin step dispatcher; regex chain, one-line delegation per arm."
     },
     {
+      "file": "crates/acceptance-tests/src/steps/dismiss.rs",
+      "function": "dispatch",
+      "cyclomatic_complexity": 11,
+      "why": "Gherkin step dispatcher; regex chain, one-line delegation per arm. New module for features/dismiss_capture.feature (dismiss-capture brief, #48)."
+    },
+    {
       "file": "crates/acceptance-tests/src/steps/inbox_view.rs",
       "function": "dispatch",
       "cyclomatic_complexity": 11,
@@ -44,14 +50,14 @@
     {
       "file": "crates/acceptance-tests/src/steps/life_areas.rs",
       "function": "dispatch",
-      "cyclomatic_complexity": 18,
-      "why": "Gherkin step dispatcher; regex chain, one-line delegation per arm. New module for features/life_areas.feature and features/life_area_triage.feature (life-areas brief, #47); every helper it delegates to was itself kept under threshold (dispatch_archive_life_area's own request-building was extracted into life_area_id_by_name and inbox_view::html_response rather than inlined here)."
+      "cyclomatic_complexity": 22,
+      "why": "Gherkin step dispatcher; regex chain, one-line delegation per arm. 18 -> 22: four new one-line arms for features/life_area_triage.feature's no-preselection, quick-add-picker and page-required scenarios (dismiss-capture brief, #48) -- new steps, not new logic. Every helper it delegates to was itself kept under threshold (dispatch_archive_life_area's own request-building was extracted into life_area_id_by_name and inbox_view::html_response rather than inlined here)."
     },
     {
       "file": "crates/acceptance-tests/src/steps/mod.rs",
       "function": "dispatch",
-      "cyclomatic_complexity": 13,
-      "why": "Top-level step dispatcher; delegates to one step module per arm. 12 -> 13 because the life_areas module added one more one-line arm: a new step, not new logic."
+      "cyclomatic_complexity": 14,
+      "why": "Top-level step dispatcher; delegates to one step module per arm. 13 -> 14 for the new dismiss module's arm (dismiss-capture brief, #48): a new step, not new logic."
     },
     {
       "file": "crates/acceptance-tests/src/steps/stats_ratio.rs",
@@ -68,8 +74,8 @@
     {
       "file": "crates/acceptance-tests/src/steps/triage_from_page.rs",
       "function": "dispatch",
-      "cyclomatic_complexity": 12,
-      "why": "Gherkin step dispatcher; regex chain, one-line delegation per arm."
+      "cyclomatic_complexity": 14,
+      "why": "Gherkin step dispatcher; regex chain, one-line delegation per arm. 12 -> 14: two new one-line arms for the pool-needs-no-form and pool-is-cheapest scenarios (#9's amended AC-2, dismiss-capture brief #48) -- new steps, not new logic."
     }
   ]
 }

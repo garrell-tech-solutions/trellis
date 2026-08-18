@@ -4,6 +4,7 @@
 <input type="hidden" name="kind" value="pool">
 <label>Life area
 <select name="life_area">
+<option value="">— choose —</option>
 {% for life_area in life_areas %}
 <option value="{{ life_area.name }}">{{ life_area.name }}</option>
 {% endfor %}
@@ -32,6 +33,7 @@
 </label>
 <label>Life area
 <select name="life_area">
+<option value="">— choose —</option>
 {% for life_area in life_areas %}
 <option value="{{ life_area.name }}">{{ life_area.name }}</option>
 {% endfor %}
@@ -54,6 +56,7 @@
 </label>
 <label>Life area
 <select name="life_area">
+<option value="">— choose —</option>
 {% for life_area in life_areas %}
 <option value="{{ life_area.name }}">{{ life_area.name }}</option>
 {% endfor %}
@@ -62,6 +65,9 @@
 <button type="submit">Add</button>
 </form>
 </details>
+<form style="display:inline" hx-post="/captures/{{ capture.id }}/dismiss" hx-target="#lists" hx-swap="outerHTML">
+<button type="submit">Dismiss</button>
+</form>
 {% if let Some(message) = capture.error %}
 <p class="triage-error">{{ message }}</p>
 {% endif %}

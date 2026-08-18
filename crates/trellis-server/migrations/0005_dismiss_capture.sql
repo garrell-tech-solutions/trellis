@@ -1,0 +1,15 @@
+-- Dismissal is the second way a capture leaves the inbox
+-- (D-kill-means-archive keeps the row). `captures.triaged_at` already meant
+-- "this capture left the inbox, by becoming a task"; renamed to
+-- `left_inbox_at` because it now means "left the inbox", full stop.
+--
+-- A second nullable column here (`dismissed_at` beside `triaged_at`) would
+-- let a row be both triaged and dismissed at once -- exactly the shape
+-- `T-archived-at-only` was written against ("two fields for one state ...
+-- every path gets two chances to set one and forget the other"). One column
+-- forbids the impossible state outright rather than policing it with a
+-- CHECK: which way a capture left is derivable from whether a `tasks` row
+-- references it, so a second column would only restate that fact.
+--
+-- T-migrations-append-only: 0001-0004 are frozen; this is a rename only.
+ALTER TABLE captures RENAME COLUMN triaged_at TO left_inbox_at;

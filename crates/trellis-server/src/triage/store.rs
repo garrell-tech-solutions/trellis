@@ -1,11 +1,15 @@
-//! What an accepted triage writes: the new `tasks` row, and the `triaged_at`
-//! stamp that consumes the capture it came from.
+//! What an accepted triage writes and reads: the new `tasks` row, and the
+//! life-area name it must resolve before writing one.
 //!
-//! Two tables, one capability — which is the packaging rule doing its job.
-//! A capture row is never deleted (`docs/design/architecture.md`); triage
-//! marks it, and [`crate::inbox`] stops listing it. Everything here speaks
-//! `scheduler_core` types and `sqlx::Error` and must not know an HTTP server
-//! exists (`T-module-boundary`, enforced by `platform::boundary`).
+//! Consuming the capture is deliberately *not* here. Triage does not stamp
+//! the capture itself; it asks `inbox::close_capture` to take it
+//! out, because "still in the inbox" is the inbox's fact and dismissal needs
+//! the identical answer (`T-one-front-door-per-capability`). What is left is
+//! what triage alone means.
+//!
+//! Everything here speaks `scheduler_core` types and `sqlx::Error` and must
+//! not know an HTTP server exists (`T-module-boundary`, enforced by
+//! `platform::boundary`).
 
 use scheduler_core::task::TaskKind;
 use sqlx::SqlitePool;
@@ -63,19 +67,6 @@ pub async fn find_active_life_area_id(
         .bind(name)
         .fetch_optional(pool)
         .await
-}
-
-pub async fn mark_triaged(
-    pool: &SqlitePool,
-    capture_id: i64,
-    triaged_at_ms: i64,
-) -> Result<(), sqlx::Error> {
-    sqlx::query("UPDATE captures SET triaged_at = ? WHERE id = ?")
-        .bind(triaged_at_ms)
-        .bind(capture_id)
-        .execute(pool)
-        .await?;
-    Ok(())
 }
 
 #[cfg(test)]
@@ -271,38 +262,5 @@ mod tests {
             find_active_life_area_id(&pool, "Learning").await.unwrap(),
             None
         );
-    }
-
-    #[tokio::test]
-    async fn mark_triaged_stamps_the_named_capture() {
-        let (_dir, pool) = test_pool().await;
-        let capture_id = given_a_capture(&pool, "buy milk").await;
-
-        mark_triaged(&pool, capture_id, 9999).await.unwrap();
-
-        let triaged_at: Option<i64> =
-            sqlx::query_scalar("SELECT triaged_at FROM captures WHERE id = ?")
-                .bind(capture_id)
-                .fetch_one(&pool)
-                .await
-                .unwrap();
-        assert_eq!(triaged_at, Some(9999));
-    }
-
-    #[tokio::test]
-    async fn mark_triaged_leaves_other_captures_untouched() {
-        let (_dir, pool) = test_pool().await;
-        let triaged = given_a_capture(&pool, "buy milk").await;
-        let untouched = given_a_capture(&pool, "call the dentist").await;
-
-        mark_triaged(&pool, triaged, 9999).await.unwrap();
-
-        let triaged_at: Option<i64> =
-            sqlx::query_scalar("SELECT triaged_at FROM captures WHERE id = ?")
-                .bind(untouched)
-                .fetch_one(&pool)
-                .await
-                .unwrap();
-        assert_eq!(triaged_at, None);
     }
 }

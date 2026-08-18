@@ -139,7 +139,7 @@ if qa_start_server "$BIN" "$TMP_DIR/$name.sqlite" "$TMP_DIR/$name.log"; then
     FAILURES=1
   fi
   if qa_capture_untriaged "$capture_id"; then
-    echo "FAIL: [$name] expected the capture to be triaged (triaged_at set) in the database" >&2
+    echo "FAIL: [$name] expected the capture to be triaged (left_inbox_at set) in the database" >&2
     FAILURES=1
   fi
 else

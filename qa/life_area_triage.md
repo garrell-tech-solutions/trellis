@@ -126,6 +126,62 @@ is only the life area that is under test.
 - The task is still listed and still tagged `Learning`. The tag is a persisted
   reference, not something the serving process remembered.
 
+## Procedure — the picker chooses nothing for the user
+
+1. Submit a capture with raw text `buy milk`.
+2. `GET /` and read the life area control on **each** of the three triage
+   forms in that row — pool, committed and quota.
+3. Submit a further capture through the quick-add box and read the life area
+   control in the row that response returns.
+
+### Expected Observable Outcomes
+- On all three forms, and on the quick-added row, **no life area is
+  preselected**. The control's initial choice is a placeholder carrying no
+  value; nothing named `Work` or any other life area is marked selected.
+- The placeholder's text names no life area, so a user glancing at the row
+  cannot mistake it for a choice already made.
+- The life areas the control offers are still exactly the five seeded ones.
+  **The placeholder is not a life area and must not be counted as one** — this
+  is why `offers-every-life-area` above still expects exactly six after adding
+  `Side project`, and why an assertion that reads option *values* must skip the
+  empty one. If that assertion needed loosening, that is fixture drift; if it
+  needed a sixth expected name, something is wrong.
+- `D-manual-triage-until-llm` is the whole of the reasoning, and it is worth
+  reading before deciding a default would be friendlier: *a wrong pre-fill is
+  accepted silently, a blank field is filled deliberately.* The picker used to
+  land on `Work` by accident of `ORDER BY id ASC`, so every unattended pool
+  triage filed into Work — a default the user never chose, in a product whose
+  entire value is that the user trusts what it shows.
+
+## Procedure — submitting without choosing is refused on that row
+
+1. Submit a capture with raw text `buy milk`.
+2. Submit the **pool** triage form exactly as the page would send it with the
+   placeholder still selected — that is, `life_area` present and empty.
+3. Observe the status and the response body.
+4. Repeat for committed (with valid deadline, deadline type and priority) and
+   for quota (with valid targets and period).
+5. Query the tasks table and re-read the untriaged queue.
+
+### Expected Observable Outcomes
+- All three are rejected with **`422`**, and the body is the re-rendered
+  `#lists` fragment — not a JSON error, not a redirect
+  (`T-forms-swap-one-fragment`).
+- The rejection message lands **on that capture's own row** in the returned
+  fragment, naming the life area field. An error rendered above the list, or
+  on a different row, is a failure: the point of the shared fragment is that
+  the error stays attached to the row that caused it.
+- The message is the **existing** missing-field rejection. `#47` already made
+  `life_area` required for all three kinds, and `T-empty-equals-absent` makes
+  an empty string and an absent key report identically — so this submission
+  was always going to be refused, and the placeholder is only what finally
+  makes it reachable from the page. **A new rejection variant here is a
+  defect**, not a feature.
+- Nothing is created and the capture is still untriaged.
+- The by-hand half of this is step 2 of the handoff brief's demo: click
+  **Pool** without choosing a life area and watch the message appear on the
+  row. Do it once in a real browser.
+
 ## Procedure — triage otherwise behaves identically
 
 1. Submit a capture with raw text `call the dentist`.

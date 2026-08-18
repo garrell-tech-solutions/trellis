@@ -67,6 +67,18 @@ qa_submit_capture() {
   sqlite3 "$DB_PATH" "SELECT id FROM captures WHERE raw_text = '$sql_escaped';"
 }
 
+# POSTs a form-encoded triage submission (as a page triage control would)
+# and sets STATUS and BODY. Shared by every script that drives a triage form
+# directly rather than through lib.sh's JSON qa_triage.
+qa_triage_form() {
+  local endpoint="$1" data="$2" response
+  response="$(curl -s -w '\n%{http_code}' -X POST "http://$ADDR$endpoint" \
+    -H 'content-type: application/x-www-form-urlencoded' \
+    -d "$data")"
+  STATUS="${response##*$'\n'}"
+  BODY="${response%$'\n'*}"
+}
+
 # POSTs a triage body for capture_id and sets STATUS and BODY.
 qa_triage() {
   local capture_id="$1" body="$2" response
@@ -114,6 +126,21 @@ qa_task_count() {
   sqlite3 "$DB_PATH" 'SELECT COUNT(*) FROM tasks;'
 }
 
+# Extracts the markup inside <li id="capture-row-ID">...</li> from a
+# rendered page -- or from a response that already is that li, such as the
+# quick-add box's own reply -- or prints nothing if the row is not found.
+# Shared by every script that reads a capture row's triage or dismiss
+# controls from the page's own markup rather than assuming their shape.
+qa_capture_row_block() {
+  local page="$1" capture_id="$2"
+  python3 -c '
+import re, sys
+page, capture_id = sys.argv[1], sys.argv[2]
+m = re.search(r"<li id=\"capture-row-" + re.escape(capture_id) + r"\">(.*?)</li>", page, re.S)
+print(m.group(1) if m else "")
+' "$page" "$capture_id"
+}
+
 # Extracts the contents of <ul id="html_id">...</ul> from a page, or prints
 # nothing if not found. The inbox page renders both the capture list and the
 # task list on one page (triage-from-page), so an assertion about one must
@@ -127,10 +154,14 @@ print(m.group(1) if m else "")
 ' "$page" "$html_id"
 }
 
-# True (exit 0) if capture_id is still present and untriaged.
+# True (exit 0) if capture_id is still present and untriaged. Migration 0005
+# renamed captures.triaged_at to left_inbox_at (it now means "left the
+# inbox", by either triage or dismissal, not just triage) -- this still
+# means "untriaged" for every caller here because none of them dismiss the
+# capture they are checking.
 qa_capture_untriaged() {
   local capture_id="$1"
-  [[ -z "$(sqlite3 "$DB_PATH" "SELECT IFNULL(triaged_at,'') FROM captures WHERE id = $capture_id;")" ]]
+  [[ -z "$(sqlite3 "$DB_PATH" "SELECT IFNULL(left_inbox_at,'') FROM captures WHERE id = $capture_id;")" ]]
 }
 
 # Setup shared by every scenario/example row across the triage QA scripts:

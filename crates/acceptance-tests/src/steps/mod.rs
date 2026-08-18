@@ -19,6 +19,7 @@ mod build;
 mod capture;
 mod committed_empty_fields;
 mod committed_field_domains;
+mod dismiss;
 mod html;
 mod inbox_view;
 mod life_areas;
@@ -47,6 +48,63 @@ fn example_pair<'a>(
         example_value(example, &caps[1])?,
         example_value(example, &caps[2])?,
     ))
+}
+
+/// Whether the last recorded response redirected the browser. Shared by
+/// every step module whose own "not a redirect" check was otherwise
+/// identical but for what a missing response is called in its error
+/// (`no_response_message`, e.g. "no dismissal response recorded").
+pub(super) fn then_not_redirect(
+    world: &mut World,
+    no_response_message: &str,
+) -> Result<(), String> {
+    match world.last_status {
+        Some(status) if !(300..400).contains(&status) => Ok(()),
+        Some(status) => Err(format!("expected no redirect, got status {status}")),
+        None => Err(no_response_message.to_string()),
+    }
+}
+
+/// [`then_not_redirect`]'s counterpart for an exact expected status.
+pub(super) fn then_status_is(
+    world: &mut World,
+    expected: u16,
+    no_response_message: &str,
+) -> Result<(), String> {
+    match world.last_status {
+        Some(status) if status == expected => Ok(()),
+        Some(status) => Err(format!("expected status {expected}, got {status}")),
+        None => Err(no_response_message.to_string()),
+    }
+}
+
+/// The last recorded HTML response body, or `no_response_message` (e.g. "no
+/// stats page response recorded") if none was. Shared by every step module
+/// whose own version differed only in that message.
+pub(super) fn html_body<'a>(
+    world: &'a World,
+    no_response_message: &str,
+) -> Result<&'a str, String> {
+    world
+        .last_html_body
+        .as_deref()
+        .ok_or_else(|| no_response_message.to_string())
+}
+
+/// Whether the last recorded HTML body contains `expected`.
+pub(super) fn then_html_body_contains(
+    world: &mut World,
+    expected: &str,
+    no_response_message: &str,
+) -> Result<(), String> {
+    let body = html_body(world, no_response_message)?;
+    if body.contains(expected) {
+        Ok(())
+    } else {
+        Err(format!(
+            "expected {expected:?} in the response, got:\n{body}"
+        ))
+    }
 }
 
 fn workspace_root() -> PathBuf {
@@ -130,10 +188,13 @@ pub async fn dispatch(
     if let Some(outcome) = inbox_view::dispatch(world, text).await {
         return outcome;
     }
-    if let Some(outcome) = triage_from_page::dispatch(world, text).await {
+    if let Some(outcome) = triage_from_page::dispatch(world, text, example).await {
         return outcome;
     }
     if let Some(outcome) = life_areas::dispatch(world, text, example).await {
+        return outcome;
+    }
+    if let Some(outcome) = dismiss::dispatch(world, text, example).await {
         return outcome;
     }
     if let Some(outcome) = stats_ratio::dispatch(world, text, example).await {

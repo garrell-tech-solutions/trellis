@@ -57,8 +57,18 @@ static THEN_TASK_LIST_NO_UNESCAPED_SCRIPT: LazyLock<Regex> = LazyLock::new(|| {
 });
 static THEN_TASK_LIST_CONTAINS_WORD: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r#"^the task list contains the word "([^"]+)"$"#).unwrap());
+static THEN_POOL_NOT_BEHIND_CONTROL: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"^the pool triage form is not behind a control that must be opened first$").unwrap()
+});
+static THEN_POOL_FEWER_INPUTS: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"^the pool triage form asks for fewer inputs than the <(\w+)> form$").unwrap()
+});
 
-pub async fn dispatch(world: &mut World, text: &str) -> Option<Result<(), String>> {
+pub async fn dispatch(
+    world: &mut World,
+    text: &str,
+    example: &BTreeMap<String, String>,
+) -> Option<Result<(), String>> {
     if let Some(caps) = THEN_OFFERS_ALL_KINDS.captures(text) {
         return Some(then_offers_all_kinds(world, &caps[1]));
     }
@@ -106,6 +116,12 @@ pub async fn dispatch(world: &mut World, text: &str) -> Option<Result<(), String
     if let Some(caps) = THEN_TASK_LIST_CONTAINS_WORD.captures(text) {
         return Some(then_task_list_contains(world, &caps[1]));
     }
+    if THEN_POOL_NOT_BEHIND_CONTROL.is_match(text) {
+        return Some(then_pool_not_behind_control(world));
+    }
+    if let Some(caps) = THEN_POOL_FEWER_INPUTS.captures(text) {
+        return Some(dispatch_pool_fewer_inputs(world, example, &caps));
+    }
     None
 }
 
@@ -115,7 +131,7 @@ fn capture_id(world: &World) -> Result<i64, String> {
         .ok_or_else(|| "no capture set up for this scenario".to_string())
 }
 
-async fn when_triaged_through_page(
+pub(super) async fn when_triaged_through_page(
     world: &mut World,
     fields: &[(&str, &str)],
 ) -> Result<(), String> {
@@ -137,7 +153,7 @@ async fn when_triaged_through_page(
 /// A well-formed committed submission's fields as page form fields — the
 /// same values `payloads::committed` uses for the JSON API, so the two
 /// validation paths are exercised against the same canonical inputs.
-fn committed_form_fields() -> [(&'static str, &'static str); 5] {
+pub(super) fn committed_form_fields() -> [(&'static str, &'static str); 5] {
     [
         ("kind", "committed"),
         ("deadline", payloads::VALID_DEADLINE),
@@ -147,7 +163,7 @@ fn committed_form_fields() -> [(&'static str, &'static str); 5] {
     ]
 }
 
-fn quota_form_fields() -> [(&'static str, &'static str); 5] {
+pub(super) fn quota_form_fields() -> [(&'static str, &'static str); 5] {
     [
         ("kind", "quota"),
         ("target_count", "3"),
@@ -185,12 +201,18 @@ async fn dispatch_quota_omitting(
     when_triaged_through_page(world, &fields).await
 }
 
-fn then_offers_all_kinds(world: &mut World, raw_text: &str) -> Result<(), String> {
+/// The captures section of the last HTML response, mirroring
+/// [`task_list_section`] for the row a page-originated triage acts on.
+fn captures_list_section(world: &World) -> Result<&str, String> {
     let body = world
         .last_html_body
         .as_deref()
         .ok_or_else(|| "no HTML response recorded".to_string())?;
-    let section = html::captures_section(body)?;
+    html::captures_section(body)
+}
+
+fn then_offers_all_kinds(world: &mut World, raw_text: &str) -> Result<(), String> {
+    let section = captures_list_section(world)?;
     for expected in [raw_text, "Pool", "Committed", "Quota"] {
         if !section.contains(expected) {
             return Err(format!(
@@ -216,11 +238,7 @@ fn then_page_response_not_redirect(world: &mut World) -> Result<(), String> {
 }
 
 fn then_inbox_does_not_list(world: &mut World, raw_text: &str) -> Result<(), String> {
-    let body = world
-        .last_html_body
-        .as_deref()
-        .ok_or_else(|| "no HTML response recorded".to_string())?;
-    let section = html::captures_section(body)?;
+    let section = captures_list_section(world)?;
     if section.contains(raw_text) {
         Err(format!(
             "expected {raw_text:?} to be gone from the inbox, got:\n{section}"
@@ -273,16 +291,73 @@ pub(super) fn select_option_values(section: &str, field_name: &str) -> Result<Ve
         .collect())
 }
 
+/// One triage form's own markup within `section`: pool's is everything
+/// before the row's first `<details>` (D-pool-is-default keeps it outside
+/// any expanding control), committed's and quota's are each scoped to their
+/// own `<details>` block by its `<summary>` text.
+fn pool_form_section(section: &str) -> Result<&str, String> {
+    let end = section
+        .find("<details")
+        .ok_or_else(|| format!("no <details> found in:\n{section}"))?;
+    Ok(&section[..end])
+}
+
+pub(super) fn form_section<'a>(section: &'a str, kind: &str) -> Result<&'a str, String> {
+    match kind {
+        "pool" => pool_form_section(section),
+        "committed" => html::between(section, "<summary>Committed</summary>", "</details>"),
+        "quota" => html::between(section, "<summary>Quota</summary>", "</details>"),
+        other => Err(format!("unknown triage kind {other:?}")),
+    }
+}
+
+/// How many form fields (`<input>` and `<select>` elements) a form asks for
+/// — AC-2's "fewer inputs" as something countable from the rendered markup.
+pub(super) fn field_count(section: &str) -> usize {
+    section.matches("<input").count() + section.matches("<select").count()
+}
+
+fn then_pool_not_behind_control(world: &mut World) -> Result<(), String> {
+    let section = captures_list_section(world)?;
+    let pool_section = form_section(section, "pool")?;
+    if pool_section.contains(r#"name="kind" value="pool""#) {
+        Ok(())
+    } else {
+        Err(format!(
+            "expected the pool form outside any <details>, got:\n{section}"
+        ))
+    }
+}
+
+fn dispatch_pool_fewer_inputs(
+    world: &mut World,
+    example: &BTreeMap<String, String>,
+    caps: &regex::Captures<'_>,
+) -> Result<(), String> {
+    let other_kind = example_value(example, &caps[1])?;
+    then_pool_fewer_inputs(world, other_kind)
+}
+
+fn then_pool_fewer_inputs(world: &mut World, other_kind: &str) -> Result<(), String> {
+    let section = captures_list_section(world)?;
+    let pool_count = field_count(form_section(section, "pool")?);
+    let other_count = field_count(form_section(section, other_kind)?);
+    if pool_count < other_count {
+        Ok(())
+    } else {
+        Err(format!(
+            "expected pool ({pool_count} fields) to ask for fewer inputs than \
+             {other_kind} ({other_count} fields)"
+        ))
+    }
+}
+
 fn then_select_offers_exactly(
     world: &mut World,
     field_name: &str,
     expected: &[&str],
 ) -> Result<(), String> {
-    let body = world
-        .last_html_body
-        .as_deref()
-        .ok_or_else(|| "no HTML response recorded".to_string())?;
-    let section = html::captures_section(body)?;
+    let section = captures_list_section(world)?;
     let actual = select_option_values(section, field_name)?;
     if actual == expected {
         Ok(())
@@ -388,5 +463,102 @@ mod tests {
         assert!(
             then_select_offers_exactly(&mut world, "priority", &["P1", "P2", "P3", "P4"]).is_err()
         );
+    }
+
+    /// A capture row with two form fields on the pool form and four on each
+    /// of committed and quota, standing in for the real template's shape
+    /// without depending on it.
+    fn row_with_forms() -> String {
+        concat!(
+            r#"<li id="capture-row-1">buy milk"#,
+            r#"<form><input type="hidden" name="kind" value="pool"><select name="life_area"></select></form>"#,
+            r#"<details><summary>Committed</summary>"#,
+            r#"<form><input type="hidden" name="kind" value="committed">"#,
+            r#"<input type="text" name="deadline">"#,
+            r#"<select name="deadline_type"></select>"#,
+            r#"<select name="priority"></select></form></details>"#,
+            r#"<details><summary>Quota</summary>"#,
+            r#"<form><input type="hidden" name="kind" value="quota">"#,
+            r#"<input type="number" name="target_count">"#,
+            r#"<input type="number" name="target_minutes_each"></form></details>"#,
+            r#"</li>"#,
+        )
+        .to_string()
+    }
+
+    #[test]
+    fn form_section_scopes_pool_to_everything_before_the_first_details() {
+        let row = row_with_forms();
+        let section = form_section(&row, "pool").unwrap();
+        assert!(section.contains(r#"value="pool""#));
+        assert!(!section.contains("Committed"));
+    }
+
+    #[test]
+    fn form_section_scopes_committed_to_its_own_details_block() {
+        let row = row_with_forms();
+        let section = form_section(&row, "committed").unwrap();
+        assert!(section.contains(r#"value="committed""#));
+        assert!(!section.contains(r#"value="quota""#));
+    }
+
+    #[test]
+    fn form_section_scopes_quota_to_its_own_details_block() {
+        let row = row_with_forms();
+        let section = form_section(&row, "quota").unwrap();
+        assert!(section.contains(r#"value="quota""#));
+        assert!(!section.contains(r#"value="committed""#));
+    }
+
+    #[test]
+    fn field_count_counts_inputs_and_selects() {
+        assert_eq!(
+            field_count(r#"<input type="hidden"><select></select><input type="text">"#),
+            3
+        );
+    }
+
+    #[test]
+    fn field_count_is_zero_for_a_section_with_no_fields() {
+        assert_eq!(field_count("<p>nothing here</p>"), 0);
+    }
+
+    fn world_with_row(row: &str) -> World {
+        let mut world = World::new();
+        world.last_html_body = Some(format!(r#"<ul id="captures">{row}</ul>"#));
+        world
+    }
+
+    #[test]
+    fn then_pool_not_behind_control_passes_when_pool_precedes_any_details() {
+        let mut world = world_with_row(&row_with_forms());
+        assert_eq!(then_pool_not_behind_control(&mut world), Ok(()));
+    }
+
+    #[test]
+    fn then_pool_not_behind_control_errors_when_pool_is_missing() {
+        let mut world = world_with_row("<details><summary>Committed</summary></details>");
+        assert!(then_pool_not_behind_control(&mut world).is_err());
+    }
+
+    #[test]
+    fn then_pool_fewer_inputs_passes_against_committed_and_quota() {
+        let mut world = world_with_row(&row_with_forms());
+        assert_eq!(then_pool_fewer_inputs(&mut world, "committed"), Ok(()));
+        assert_eq!(then_pool_fewer_inputs(&mut world, "quota"), Ok(()));
+    }
+
+    #[test]
+    fn then_pool_fewer_inputs_errors_when_pool_does_not_ask_for_fewer() {
+        let row = concat!(
+            r#"<li>"#,
+            r#"<form><input type="hidden" name="kind" value="pool">"#,
+            r#"<input type="text"><input type="text"><input type="text"></form>"#,
+            r#"<details><summary>Committed</summary>"#,
+            r#"<form><input type="hidden" name="kind" value="committed"></form></details>"#,
+            r#"</li>"#,
+        );
+        let mut world = world_with_row(row);
+        assert!(then_pool_fewer_inputs(&mut world, "committed").is_err());
     }
 }

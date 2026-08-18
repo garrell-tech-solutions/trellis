@@ -68,3 +68,11 @@ __pycache__/
 # and swarmforge.conf are project configuration that the worktrees need, and
 # worktrees only receive what git tracks.
 swarmforge/scripts/
+
+# proptest writes a seed file next to the crate whenever a property fails, and
+# recommends checking it in. Not here: the failures that produce one in this
+# repo come from deliberately broken code -- a mutation run, or a guard removed
+# to confirm a property is not vacuous -- so the seed records a case that never
+# failed against real code. A property worth keeping belongs in the generator
+# or in a named example test.
+proptest-regressions/

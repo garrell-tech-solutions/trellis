@@ -123,6 +123,34 @@ the parametrized procedures after it are `curl`-only.
   list is a second render surface with its own template, and the same defect
   could exist there independently.
 
+## Procedure — pool is the cheapest path
+
+1. Submit a capture with raw text `buy milk`.
+2. `GET /` and read that capture's row.
+3. Count what the pool control asks the user for before it can be submitted,
+   and do the same for committed and for quota. Count the fields a user must
+   touch — a hidden `kind` input is not one, and neither is the submit button.
+4. Check whether the pool control sits inside anything that has to be opened
+   first.
+
+### Expected Observable Outcomes
+- The pool control is **submittable straight from the row**. It is not inside a
+  `<details>`, an accordion, a dialog, or anything else the user must open —
+  committed and quota may be, and are.
+- Pool asks for **strictly fewer** inputs than committed, and strictly fewer
+  than quota.
+- Do **not** check for a literal count. `#9`'s AC-2 was amended on 2026-08-17
+  to drop it: `#47` made a life area required for all three kinds and
+  `D-manual-triage-until-llm` removed the picker's silent default, so pool is
+  now pick-then-submit rather than one click. The property AC-2 was always a
+  proxy for is the relation, and the relation is what QA checks.
+- `D-pool-is-default` is why this is worth a procedure at all: pool is the
+  default kind and committed the exception, so the default path must cost
+  less than the exception. **Restoring a life-area default to get back to one
+  click would satisfy the count and violate the product** — if pool has become
+  cheap again because the picker answers for the user, that is a failure of
+  this procedure, not a pass.
+
 ## Independent of Implementation
 
 This procedure depends only on what `GET /` renders, how the page's triage

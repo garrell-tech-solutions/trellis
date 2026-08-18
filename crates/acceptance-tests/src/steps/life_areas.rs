@@ -207,6 +207,19 @@ async fn dispatch_add_life_area(
     post_life_area_form(world, &name).await
 }
 
+/// Resolves a step's `<name>`-or-literal capture and looks up the life area
+/// it names -- the two-step lookup most `dispatch_*` handlers across this
+/// module and its siblings repeat by hand around a call to
+/// [`life_area_id_by_name`].
+pub(super) async fn resolved_life_area_id(
+    world: &World,
+    example: &BTreeMap<String, String>,
+    raw: &str,
+) -> Result<i64, String> {
+    let name = resolve(example, raw)?;
+    life_area_id_by_name(world, &name).await
+}
+
 pub(super) async fn life_area_id_by_name(world: &World, name: &str) -> Result<i64, String> {
     let pool = world.pool()?;
     let row = trellis_server::life_areas::store::find_by_name(pool, name)

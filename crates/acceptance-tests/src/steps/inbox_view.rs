@@ -78,23 +78,22 @@ pub async fn dispatch(world: &mut World, text: &str) -> Option<Result<(), String
     None
 }
 
+async fn response_body_string(response: axum::response::Response) -> Result<String, String> {
+    let bytes = to_bytes(response.into_body(), usize::MAX)
+        .await
+        .map_err(|e| format!("read response body: {e}"))?;
+    String::from_utf8(bytes.to_vec()).map_err(|e| format!("response body not utf8: {e}"))
+}
+
 pub(super) async fn html_response(world: &mut World, request: Request<Body>) -> Result<(), String> {
     let pool = world.pool()?.clone();
-    let app = trellis_server::platform::app::build_app(
-        pool,
-        trellis_server::platform::clock::Clock::system(),
-    );
+    let app = trellis_server::platform::app::build_app(pool, world.clock());
     let response = app
         .oneshot(request)
         .await
         .map_err(|e| format!("send request: {e}"))?;
     world.last_status = Some(response.status().as_u16());
-    let bytes = to_bytes(response.into_body(), usize::MAX)
-        .await
-        .map_err(|e| format!("read response body: {e}"))?;
-    world.last_html_body = Some(
-        String::from_utf8(bytes.to_vec()).map_err(|e| format!("response body not utf8: {e}"))?,
-    );
+    world.last_html_body = Some(response_body_string(response).await?);
     Ok(())
 }
 
@@ -172,14 +171,16 @@ fn then_captures_section_excludes(world: &mut World, forbidden: &str) -> Result<
     }
 }
 
+fn index_of_or_error(section: &str, needle: &str) -> Result<usize, String> {
+    section
+        .find(needle)
+        .ok_or_else(|| format!("expected {needle:?} in the inbox, got:\n{section}"))
+}
+
 fn then_lists_before(world: &mut World, first: &str, second: &str) -> Result<(), String> {
     let section = captures_section(world)?;
-    let first_index = section
-        .find(first)
-        .ok_or_else(|| format!("expected {first:?} in the inbox, got:\n{section}"))?;
-    let second_index = section
-        .find(second)
-        .ok_or_else(|| format!("expected {second:?} in the inbox, got:\n{section}"))?;
+    let first_index = index_of_or_error(section, first)?;
+    let second_index = index_of_or_error(section, second)?;
     if first_index < second_index {
         Ok(())
     } else {

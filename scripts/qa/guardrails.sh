@@ -42,64 +42,6 @@ qa_get_life_areas() {
   curl -s "http://$ADDR/life-areas"
 }
 
-# The state text a life area's own row shows: "no guardrail",
-# "never scheduled - menu only", or "" if it carries bands instead (a row
-# with bands shows the bands themselves, not a state sentence).
-qa_life_area_state() {
-  local page="$1" name="$2" block
-  block="$(qa_life_area_row_block "$page" "$name")"
-  python3 -c '
-import re, sys
-block = sys.argv[1]
-m = re.search(r"<span>([^<]*)</span>", block)
-print(m.group(1) if m else "")
-' "$block"
-}
-
-# The guardrail bands listed on name's row, one label per line, in document
-# order -- "" (no lines) if the row carries none.
-qa_guardrail_band_labels() {
-  local page="$1" name="$2" block
-  block="$(qa_life_area_row_block "$page" "$name")"
-  python3 -c '
-import re, sys
-block = sys.argv[1]
-for m in re.finditer(r"<div>([^<]*)\n<form", block):
-    print(m.group(1).strip())
-' "$block"
-}
-
-# POSTs name's guardrail band form (weekday checkboxes on "<days>", a
-# comma-separated list of Mon/Tue/.../Sun) and sets STATUS and BODY.
-qa_save_guardrail_band() {
-  local page="$1" name="$2" days="$3" start="$4" end="$5" endpoint data response
-  endpoint="$(qa_life_area_control_endpoint "$page" "$name" '>Add band<')"
-  data="start=$(python3 -c 'import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1]))' "$start")"
-  data="$data&end=$(python3 -c 'import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1]))' "$end")"
-  IFS=',' read -ra day_list <<< "$days"
-  for day in "${day_list[@]}"; do
-    day="$(echo "$day" | tr -d ' ' | tr '[:upper:]' '[:lower:]')"
-    [[ -z "$day" ]] && continue
-    data="$data&$day=on"
-  done
-  response="$(curl -s -w '\n%{http_code}' -X POST "http://$ADDR$endpoint" \
-    -H 'content-type: application/x-www-form-urlencoded' \
-    -d "$data")"
-  STATUS="${response##*$'\n'}"
-  BODY="${response%$'\n'*}"
-}
-
-# POSTs name's pool-only form and sets STATUS and BODY.
-qa_save_pool_only() {
-  local page="$1" name="$2" endpoint response
-  endpoint="$(qa_life_area_control_endpoint "$page" "$name" '>Save<')"
-  response="$(curl -s -w '\n%{http_code}' -X POST "http://$ADDR$endpoint" \
-    -H 'content-type: application/x-www-form-urlencoded' \
-    -d "pool_only=on")"
-  STATUS="${response##*$'\n'}"
-  BODY="${response%$'\n'*}"
-}
-
 # POSTs name's guardrail form with neither a day/time nor pool_only, and
 # sets STATUS and BODY -- what Save sends with nothing filled in.
 qa_save_guardrail_empty() {

@@ -18,6 +18,7 @@ use sqlx::SqlitePool;
 
 use crate::capture::http::create_capture;
 use crate::dismiss::http::dismiss_capture;
+use crate::free_time::http::show_free_time;
 use crate::inbox::http::show_inbox;
 use crate::life_areas::http::{
     archive_life_area, create_life_area, remove_guardrail_band, save_guardrail, show_life_areas,
@@ -62,6 +63,7 @@ pub fn build_app(pool: SqlitePool, clock: Clock) -> Router {
         .route("/life-areas/{id}/guardrail", post(save_guardrail))
         .route("/guardrail-bands/{id}/remove", post(remove_guardrail_band))
         .route("/timezone", post(set_timezone))
+        .route("/free-time", get(show_free_time))
         .with_state(AppState { pool, clock })
 }
 

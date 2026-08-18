@@ -7,11 +7,16 @@
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UnknownTimezone;
 
+/// The zone `name` names, or [`UnknownTimezone`] if it names none.
+/// `#60`'s `free_time` module is the first caller that needs the resolved
+/// zone itself rather than only the yes/no answer.
+pub fn resolve(name: &str) -> Result<jiff::tz::TimeZone, UnknownTimezone> {
+    jiff::tz::TimeZone::get(name).map_err(|_| UnknownTimezone)
+}
+
 /// Whether `name` resolves against the system's timezone database.
 pub fn validate(name: &str) -> Result<(), UnknownTimezone> {
-    jiff::tz::TimeZone::get(name)
-        .map(|_| ())
-        .map_err(|_| UnknownTimezone)
+    resolve(name).map(|_| ())
 }
 
 #[cfg(test)]

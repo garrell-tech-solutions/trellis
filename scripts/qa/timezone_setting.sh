@@ -49,28 +49,6 @@ print(m.group(1).strip() if m else "")
 ' "$page"
 }
 
-# The #timezone fragment's own hx-post endpoint, read from the page's
-# markup -- not assumed.
-qa_timezone_endpoint() {
-  local page="$1"
-  python3 -c '
-import re, sys
-page = sys.argv[1]
-m = re.search(r"<div id=\"timezone\">.*?<form hx-post=\"([^\"]+)\"", page, re.S)
-print(m.group(1) if m else "")
-' "$page"
-}
-
-# POSTs the timezone control with zone and sets STATUS and BODY.
-qa_set_timezone() {
-  local endpoint="$1" zone="$2" response
-  response="$(curl -s -w '\n%{http_code}' -X POST "http://$ADDR$endpoint" \
-    -H 'content-type: application/x-www-form-urlencoded' \
-    --data-urlencode "zone=$zone")"
-  STATUS="${response##*$'\n'}"
-  BODY="${response%$'\n'*}"
-}
-
 qa_settings_row_count() {
   sqlite3 "$DB_PATH" 'SELECT COUNT(*) FROM settings;'
 }

@@ -551,13 +551,6 @@ fn then_task_list_shows_tagged(
 mod tests {
     use super::*;
 
-    fn example(pairs: &[(&str, &str)]) -> BTreeMap<String, String> {
-        pairs
-            .iter()
-            .map(|(k, v)| (k.to_string(), v.to_string()))
-            .collect()
-    }
-
     #[test]
     fn resolve_returns_a_literal_as_is() {
         assert_eq!(resolve(&BTreeMap::new(), "Work"), Ok("Work".to_string()));

@@ -176,25 +176,11 @@ fn then_status_is_in(world: &mut World, range: std::ops::Range<u16>) -> Result<(
 }
 
 fn then_body_contains(world: &mut World, expected: &str) -> Result<(), String> {
-    let body = html_body(world)?;
-    if body.contains(expected) {
-        Ok(())
-    } else {
-        Err(format!(
-            "expected {expected:?} in the response, got:\n{body}"
-        ))
-    }
+    super::then_html_body_contains(world, expected, "no page response recorded")
 }
 
 fn then_body_excludes(world: &mut World, forbidden: &str) -> Result<(), String> {
-    let body = html_body(world)?;
-    if body.contains(forbidden) {
-        Err(format!(
-            "expected no {forbidden:?} in the response, got:\n{body}"
-        ))
-    } else {
-        Ok(())
-    }
+    super::then_html_body_excludes(world, forbidden, "no page response recorded")
 }
 
 fn life_area_row_section(body: &str, id: i64) -> Result<&str, String> {
@@ -272,17 +258,30 @@ fn row_shows(body: &str, id: i64, name: &str, state: &str) -> Result<(), String>
     }
 }
 
+async fn active_life_areas(
+    pool: &sqlx::SqlitePool,
+) -> Result<Vec<trellis_server::life_areas::store::LifeAreaRow>, String> {
+    trellis_server::life_areas::store::list_active(pool)
+        .await
+        .map_err(|e| format!("list life areas: {e}"))
+}
+
+async fn active_life_area_rows_and_body(
+    world: &mut World,
+) -> Result<(Vec<trellis_server::life_areas::store::LifeAreaRow>, String), String> {
+    let pool = world.pool()?.clone();
+    let rows = active_life_areas(&pool).await?;
+    let body = html_body(world)?.to_string();
+    Ok((rows, body))
+}
+
 async fn dispatch_every_shows(
     world: &mut World,
     example: &BTreeMap<String, String>,
     caps: &regex::Captures<'_>,
 ) -> Result<(), String> {
     let state = resolve(example, &caps[1])?;
-    let pool = world.pool()?.clone();
-    let rows = trellis_server::life_areas::store::list_active(&pool)
-        .await
-        .map_err(|e| format!("list life areas: {e}"))?;
-    let body = html_body(world)?.to_string();
+    let (rows, body) = active_life_area_rows_and_body(world).await?;
     for row in rows {
         row_shows(&body, row.id, &row.name, &state)?;
     }
@@ -390,15 +389,17 @@ async fn dispatch_shows_band(
     }
 }
 
+fn parse_expected_band_count(raw: &str) -> Result<usize, String> {
+    raw.parse().map_err(|e| format!("bad band count: {e}"))
+}
+
 async fn dispatch_shows_band_count(
     world: &mut World,
     example: &BTreeMap<String, String>,
     caps: &regex::Captures<'_>,
 ) -> Result<(), String> {
     let name = resolve(example, &caps[1])?;
-    let expected: usize = resolve(example, &caps[2])?
-        .parse()
-        .map_err(|e| format!("bad band count: {e}"))?;
+    let expected = parse_expected_band_count(&resolve(example, &caps[2])?)?;
     let (_, section) = life_area_row(world, &name).await?;
     let actual = section.matches("/guardrail-bands/").count();
     if actual == expected {
@@ -441,6 +442,14 @@ fn extract_band_id(chunk: &str) -> Option<i64> {
     id_str.parse().ok()
 }
 
+fn remove_band_request(band_id: i64) -> Result<Request<Body>, String> {
+    Request::builder()
+        .method("POST")
+        .uri(format!("/guardrail-bands/{band_id}/remove"))
+        .body(Body::empty())
+        .map_err(|e| format!("build request: {e}"))
+}
+
 async fn dispatch_band_removed(
     world: &mut World,
     example: &BTreeMap<String, String>,
@@ -450,11 +459,7 @@ async fn dispatch_band_removed(
     let name = resolve(example, &caps[2])?;
     let (_, section) = life_area_row(world, &name).await?;
     let band_id = band_id_by_label(section, &listed)?;
-    let request = Request::builder()
-        .method("POST")
-        .uri(format!("/guardrail-bands/{band_id}/remove"))
-        .body(Body::empty())
-        .map_err(|e| format!("build request: {e}"))?;
+    let request = remove_band_request(band_id)?;
     html_response(world, request).await
 }
 
@@ -496,13 +501,6 @@ fn dispatch_rejection_says_not_a_timezone(
 mod tests {
     use super::super::life_areas::when_life_areas_page_viewed;
     use super::*;
-
-    fn example(pairs: &[(&str, &str)]) -> BTreeMap<String, String> {
-        pairs
-            .iter()
-            .map(|(k, v)| (k.to_string(), v.to_string()))
-            .collect()
-    }
 
     #[test]
     fn day_fields_reads_a_comma_separated_list() {

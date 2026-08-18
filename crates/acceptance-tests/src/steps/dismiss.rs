@@ -230,14 +230,7 @@ fn then_html_body_contains(world: &mut World, expected: &str) -> Result<(), Stri
 }
 
 fn then_html_body_excludes(world: &mut World, forbidden: &str) -> Result<(), String> {
-    let body = html_body(world)?;
-    if body.contains(forbidden) {
-        Err(format!(
-            "expected no {forbidden:?} in the response, got:\n{body}"
-        ))
-    } else {
-        Ok(())
-    }
+    super::then_html_body_excludes(world, forbidden, "no HTML response recorded")
 }
 
 #[cfg(test)]

@@ -204,19 +204,8 @@ async fn dispatch_reports_needed_available(
     let available = resolve(example, &caps[2])?;
     let name = resolve(example, &caps[3])?;
     let section = capacity_row(world, &name).await?;
-    let needed_needle = format!("{needed}h needed");
-    let available_needle = format!("{available}h available");
-    if !section.contains(&needed_needle) {
-        return Err(format!(
-            "expected {name:?} to report {needed_needle:?}, got:\n{section}"
-        ));
-    }
-    if !section.contains(&available_needle) {
-        return Err(format!(
-            "expected {name:?} to report {available_needle:?}, got:\n{section}"
-        ));
-    }
-    Ok(())
+    super::then_section_contains(section, &name, "report", &format!("{needed}h needed"))?;
+    super::then_section_contains(section, &name, "report", &format!("{available}h available"))
 }
 
 async fn dispatch_reports_percent(
@@ -307,13 +296,6 @@ async fn dispatch_does_not_report(
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn example(pairs: &[(&str, &str)]) -> BTreeMap<String, String> {
-        pairs
-            .iter()
-            .map(|(k, v)| (k.to_string(), v.to_string()))
-            .collect()
-    }
 
     #[tokio::test]
     async fn a_committed_task_reports_supply_against_demand() {

@@ -65,13 +65,14 @@ crates/trellis-server/src/
   triage/     http.rs  store.rs
   dismiss/    mod.rs  http.rs
   inbox/      mod.rs  http.rs  lists.rs  store.rs  view.rs
-  life_areas/ mod.rs  http.rs  store.rs  view.rs
+  life_areas/ mod.rs  http/mod.rs  http/guardrail.rs  store.rs  view.rs
+  settings/   mod.rs  http.rs  store.rs
   stats/      http.rs  store.rs
   platform/   app.rs  assets.rs  boundary.rs  clock.rs  db.rs  nav.rs
               request.rs  response.rs  test_support.rs
 ```
 
-Six capabilities and one bucket named so a reader can tell it is not one.
+Seven capabilities and one bucket named so a reader can tell it is not one.
 `scheduler-core` holds the rules and names neither adapter; a domain's `http`
 turns requests into core inputs and core types into view models; its `store`
 turns core types into rows and is the only production SQL; its `view` is what
@@ -360,12 +361,50 @@ it raises are unanswered: which chunk a pin binds when a task splits, and
 whether a pin ever expires. The reason enum above has no code for "a stale pin
 is in the way".
 
-### Guardrails and free time — specified (M2, #10)
+### Guardrails — built (M2 slice 1, `#59`); free time still specified (`#60`)
 
 ```
 free_intervals(guardrail, range) -> disjoint, sorted intervals
                                     each a subset of (mask - busy - pins - buffers)
 ```
+
+`free_intervals` is `#60`'s and does not exist. What exists is the mask it
+will read:
+
+```sql
+guardrail_bands(id, life_area_id, weekday, start_minutes, end_minutes)
+life_areas.pool_only                     -- a column, not the absence of bands
+settings(id CHECK (id = 1), timezone)    -- one row; the owner's zone
+```
+
+**A band is one weekday and a civil span**, minutes since midnight, never an
+instant (`T-jiff-epoch-millis` — turning a band into instants is `#60`'s
+work, and DST is its problem to have). "Mon–Fri 09:00–17:00" is *five rows
+sharing one span*: storage stays one row per weekday, and only the form
+spares the owner five repeats.
+
+**Which rows are one band is `scheduler_core::guardrail::group`'s call.** The
+span — `BandSpan`, the start and end without the weekday — is what makes two
+rows the same band, and it is named because **two places act on it and must
+agree**: the page groups rows into bands to display them, and removing a band
+deletes every row sharing its span. Those were two independent statements of
+one rule, one in Rust and one in SQL, with nothing tying them, so the band a
+reader saw and the band Remove took were defined separately. The Rust half
+now lives in the core; the SQL half cannot be tied to it by any signature, so
+a property test (`removing_a_band_removes_exactly_the_rows_that_band_displayed`)
+holds them together instead.
+
+Two submissions choosing the same times merge into one band afterwards. They
+are indistinguishable once stored, and the alternative is a page showing two
+rows whose Remove buttons each take both.
+
+**The owner's timezone is data, not configuration** — a `settings` row the
+owner edits from the running app, not a flag beside `--now`. It is what a
+zone actually is: something that changes when the owner moves. `D-single-user`
+makes it one value for the whole product rather than one per guardrail, and
+`settings` is a capability rather than `platform` machinery for the same
+reason a life area's name is. It defaults to `UTC`, which is the only default
+that cannot silently mean the wrong hour.
 
 **Each life area carries one guardrail** — the hours its work may be scheduled
 in (`D-life-area-owns-its-time`). A task goes in its own life area's hours by
@@ -374,6 +413,30 @@ per-task permission. **Guardrails may overlap in clock time**, and where they
 do their life areas compete, resolved by deadline and priority. A life area
 with no guardrail must be marked **pool-only** — never placed, only offered by
 the menu (`T-life-areas-are-data`'s well-formedness rule, made concrete).
+
+> **GAP — walled and pool-only are not exclusive, and pool-only cannot be
+> taken back.** The model reads "a guardrail, **or** pool-only", and the
+> acceptance criterion says a life area may *instead* be marked pool-only.
+> Nothing enforces the *or*. Marking a life area pool-only sets the column
+> and leaves any bands it already had; adding a band afterwards succeeds and
+> leaves the column set. Verified against the running handlers: pool-only
+> then a band gives `pool_only = 1` with one stored band, both writes
+> accepted. `life_area_row.html` tests `pool_only` first, so those bands
+> render as "never scheduled" with no way to see or remove them, and
+> `store::set_pool_only` is only ever called with `true` — submitting the
+> pool-only form unchecked is `ChooseOne` (`422`), so there is no way back.
+>
+> This is the shape `T-archived-at-only` and `T-capture-leaves-inbox-once`
+> both legislated against, arriving from the other direction: not two fields
+> spelling one state, but two states with no rule saying they exclude each
+> other. It reaches `#60` directly — `free_intervals` reads
+> `guardrail_bands`, and a pool-only life area with bands would project free
+> time it is not supposed to have.
+>
+> **Left open deliberately.** Which write yields is a product call — marking
+> pool-only could clear the bands, adding a band could clear the column, or
+> either could be refused — and choosing one is the specifier's, not an
+> architectural tidy-up. Needs a decision before `#60`.
 
 Reservation is the default and sharing is opt-in, which is what lets one
 mechanism serve both jobs the settled decisions demand: **containment**, since
@@ -553,6 +616,7 @@ Everything above marked **GAP**, in the order it blocks work:
 
 | Gap | Blocks | Tracked |
 |---|---|---|
+| Walled and pool-only are not exclusive; pool-only cannot be un-marked | #60 — free time would be projected for a life area marked never-scheduled | #59 |
 | Invariants 1, 3, 4 undefined | M3 cannot be specified | #11 |
 | ~~Which five domains, and one concept or two~~ | ~~M1 S4, M9~~ | **closed** — `T-life-areas-are-data`, #47 |
 | ~~Per-life-area capacity vs `allowed_windows`~~ | ~~M2~~ | **closed** — `T-capacity-two-axes` + `D-life-area-owns-its-time`, #6 |

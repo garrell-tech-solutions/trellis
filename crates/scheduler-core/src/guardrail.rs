@@ -150,6 +150,73 @@ impl WellFormedGuardrailSubmission {
     }
 }
 
+/// What makes two stored weekday-rows the same band the owner authored:
+/// they span the same civil minutes. A "Mon-Fri 09:00-17:00" submission is
+/// five [`Band`]s sharing one span.
+///
+/// It has a name because **two places act on it and they must agree**: the
+/// management page groups rows into bands by span to display them, and
+/// removing a band deletes every row sharing its span. Those were two
+/// independent statements of one rule -- one in Rust for the display, one
+/// in SQL for the delete -- with nothing tying them, so the band a reader
+/// sees and the band the Remove button takes were defined separately.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BandSpan {
+    pub start_minutes: i64,
+    pub end_minutes: i64,
+}
+
+impl Band {
+    pub fn span(self) -> BandSpan {
+        BandSpan {
+            start_minutes: self.start_minutes,
+            end_minutes: self.end_minutes,
+        }
+    }
+}
+
+/// One band as the owner authored it: its span, every weekday it covers in
+/// `Mon..Sun` order, and the `tag` its first member carried.
+///
+/// `tag` is deliberately opaque here. The adapter passes row ids and uses
+/// the group's own as the handle its Remove control posts against; the core
+/// only promises which member's tag it keeps, and knows nothing about what
+/// a tag is.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AuthoredBand<T> {
+    pub tag: T,
+    pub span: BandSpan,
+    pub weekdays: Vec<Weekday>,
+}
+
+/// Folds per-weekday bands back into the bands they were authored as.
+///
+/// Groups appear in the order their first member arrives, and each group's
+/// weekdays come out sorted `Mon..Sun` regardless of the order they were
+/// written in -- a band reads as the owner thinks of it, not as the rows
+/// happened to land.
+///
+/// Two submissions that chose the same times merge into one band, which is
+/// deliberate: they are indistinguishable once stored, and the alternative
+/// is a page showing two rows whose Remove buttons each take both.
+pub fn group<T>(bands: impl IntoIterator<Item = (T, Band)>) -> Vec<AuthoredBand<T>> {
+    let mut grouped: Vec<AuthoredBand<T>> = Vec::new();
+    for (tag, band) in bands {
+        match grouped.iter_mut().find(|group| group.span == band.span()) {
+            Some(group) => group.weekdays.push(band.weekday),
+            None => grouped.push(AuthoredBand {
+                tag,
+                span: band.span(),
+                weekdays: vec![band.weekday],
+            }),
+        }
+    }
+    for group in &mut grouped {
+        group.weekdays.sort();
+    }
+    grouped
+}
+
 /// Whether `candidate` overlaps any of `existing` -- the same weekday and
 /// intervals that genuinely intersect. Half-open on purpose: `09:00-12:00`
 /// and `12:00-17:00` touch without overlapping, and both are kept
@@ -166,6 +233,91 @@ pub fn overlaps(existing: &[Band], candidate: &Band) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn group_folds_one_submission_back_into_one_band() {
+        let bands = vec![
+            (1, band(Weekday::Mon, 540, 1020)),
+            (2, band(Weekday::Tue, 540, 1020)),
+            (3, band(Weekday::Wed, 540, 1020)),
+        ];
+
+        let grouped = group(bands);
+
+        assert_eq!(grouped.len(), 1);
+        assert_eq!(
+            grouped[0].weekdays,
+            vec![Weekday::Mon, Weekday::Tue, Weekday::Wed]
+        );
+        assert_eq!(grouped[0].tag, 1, "the first member names the group");
+    }
+
+    #[test]
+    fn group_keeps_different_spans_apart() {
+        let bands = vec![
+            (1, band(Weekday::Mon, 360, 420)),
+            (2, band(Weekday::Sat, 540, 660)),
+        ];
+
+        let grouped = group(bands);
+
+        assert_eq!(grouped.len(), 2);
+        assert_eq!(
+            grouped[0].span,
+            BandSpan {
+                start_minutes: 360,
+                end_minutes: 420
+            }
+        );
+    }
+
+    #[test]
+    fn group_sorts_each_bands_weekdays_monday_first() {
+        let bands = vec![
+            (1, band(Weekday::Fri, 540, 600)),
+            (2, band(Weekday::Mon, 540, 600)),
+            (3, band(Weekday::Wed, 540, 600)),
+        ];
+
+        let grouped = group(bands);
+
+        assert_eq!(
+            grouped[0].weekdays,
+            vec![Weekday::Mon, Weekday::Wed, Weekday::Fri]
+        );
+    }
+
+    /// Two submissions that chose the same times are one band afterwards.
+    /// Recorded as a test rather than left implicit, because it is the one
+    /// case where grouping is not simply undoing a fan-out.
+    #[test]
+    fn group_merges_separately_authored_bands_that_share_a_span() {
+        let bands = vec![
+            (1, band(Weekday::Mon, 540, 1020)),
+            (9, band(Weekday::Thu, 540, 1020)),
+        ];
+
+        let grouped = group(bands);
+
+        assert_eq!(grouped.len(), 1);
+        assert_eq!(grouped[0].weekdays, vec![Weekday::Mon, Weekday::Thu]);
+    }
+
+    #[test]
+    fn group_of_nothing_is_no_bands() {
+        assert_eq!(group(Vec::<(i64, Band)>::new()), Vec::new());
+    }
+
+    #[test]
+    fn a_bands_span_is_its_times_without_its_weekday() {
+        assert_eq!(
+            band(Weekday::Sun, 600, 660).span(),
+            BandSpan {
+                start_minutes: 600,
+                end_minutes: 660
+            }
+        );
+    }
 
     #[test]
     fn weekday_parse_round_trips_every_variant() {

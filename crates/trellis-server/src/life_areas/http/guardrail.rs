@@ -18,54 +18,49 @@ use axum::http::StatusCode;
 use axum::response::Response;
 use axum::Form;
 use scheduler_core::guardrail::{
-    overlaps, Band, GuardrailFields, GuardrailRejection, Weekday, WellFormedGuardrailSubmission,
+    group, overlaps, Band, BandSpan, GuardrailFields, GuardrailRejection, Weekday,
+    WellFormedGuardrailSubmission,
 };
 use serde::Deserialize;
 use sqlx::SqlitePool;
 
-/// Rows sharing the same start and end are one band the owner authored
-/// together, whichever submission wrote them (`guardrails-two-bands-03`:
-/// "two bands, one life area" counts groups, not weekday rows). `id` names
-/// the group's own representative row -- the one `remove_guardrail_band`'s
-/// URL carries, and `store::remove_guardrail_band` takes the whole group
-/// with it regardless of which member's id arrives.
-/// Folds `rows` down to one `(id, start, end, weekdays)` tuple per distinct
-/// start/end pair -- [`group_bands`]'s grouping half, split out from its
-/// labelling half.
-fn group_band_rows(rows: Vec<store::GuardrailBandRow>) -> Vec<(i64, i64, i64, Vec<Weekday>)> {
-    let mut groups: Vec<(i64, i64, i64, Vec<Weekday>)> = Vec::new();
-    for row in rows {
-        let weekday = Weekday::parse(&row.weekday).expect("stored weekday is well-formed");
-        match groups
-            .iter_mut()
-            .find(|(_, start, end, _)| *start == row.start_minutes && *end == row.end_minutes)
-        {
-            Some(group) => group.3.push(weekday),
-            None => groups.push((row.id, row.start_minutes, row.end_minutes, vec![weekday])),
-        }
+/// One stored row as the core's own band. The `expect` cannot fire: the
+/// `weekday` column carries a `CHECK` naming exactly the seven
+/// `Weekday::as_str` spellings (migration `0006`), so a row that failed to
+/// parse would mean the schema and the enum had already diverged.
+fn band_of(row: &store::GuardrailBandRow) -> Band {
+    Band {
+        weekday: Weekday::parse(&row.weekday).expect("stored weekday is well-formed"),
+        start_minutes: row.start_minutes,
+        end_minutes: row.end_minutes,
     }
-    groups
 }
 
-fn band_group_label(start: i64, end: i64, mut weekdays: Vec<Weekday>) -> String {
-    weekdays.sort();
+/// The rows a life area's page shows as bands. Which rows make up one band
+/// is `scheduler_core::guardrail::group`'s call, not this module's --
+/// `store::remove_guardrail_band` deletes by the same rule in SQL, and the
+/// band a reader sees has to be the band the Remove button takes.
+///
+/// What is left here is the label, which is presentation and belongs
+/// nowhere else.
+pub(super) fn group_bands(rows: Vec<store::GuardrailBandRow>) -> Vec<GuardrailBandGroup> {
+    group(rows.iter().map(|row| (row.id, band_of(row))))
+        .into_iter()
+        .map(|band| GuardrailBandGroup {
+            id: band.tag,
+            label: band_label(band.span, &band.weekdays),
+        })
+        .collect()
+}
+
+fn band_label(span: BandSpan, weekdays: &[Weekday]) -> String {
     let days: Vec<&str> = weekdays.iter().map(|day| day.as_str()).collect();
     format!(
         "{} {}-{}",
         days.join(", "),
-        format_minutes(start),
-        format_minutes(end)
+        format_minutes(span.start_minutes),
+        format_minutes(span.end_minutes)
     )
-}
-
-pub(super) fn group_bands(rows: Vec<store::GuardrailBandRow>) -> Vec<GuardrailBandGroup> {
-    group_band_rows(rows)
-        .into_iter()
-        .map(|(id, start, end, weekdays)| GuardrailBandGroup {
-            id,
-            label: band_group_label(start, end, weekdays),
-        })
-        .collect()
 }
 
 fn format_minutes(total_minutes: i64) -> String {
@@ -110,8 +105,11 @@ fn weekdays_from_form(form: &GuardrailFormRequest) -> Vec<Weekday> {
 
 /// `"09:00"` into minutes since midnight, or `None` for anything that is
 /// not exactly that shape -- unparseable and absent are the same submitter
-/// mistake to `WellFormedGuardrailSubmission::from_fields` (`T-empty-equals-
-/// absent`'s reasoning, applied to a time instead of a life area name).
+/// mistake to `WellFormedGuardrailSubmission::from_fields`, which is
+/// `T-empty-equals-absent`'s reasoning applied to a time instead of a life
+/// area name. (Kept on one line on purpose: `scripts/ci/decision_slugs.sh`
+/// reads a citation broken across a line wrap as a slug that does not
+/// exist, and did.)
 fn parse_minutes(value: &str) -> Option<i64> {
     let (hours, minutes) = value.split_once(':')?;
     let hours: i64 = hours.parse().ok()?;
@@ -150,14 +148,7 @@ async fn existing_bands(pool: &SqlitePool, life_area_id: i64) -> Result<Vec<Band
     let rows = store::list_guardrail_bands(pool, life_area_id)
         .await
         .map_err(write_failed)?;
-    Ok(rows
-        .iter()
-        .map(|row| Band {
-            weekday: Weekday::parse(&row.weekday).expect("stored weekday is well-formed"),
-            start_minutes: row.start_minutes,
-            end_minutes: row.end_minutes,
-        })
-        .collect())
+    Ok(rows.iter().map(band_of).collect())
 }
 
 async fn insert_bands(
@@ -238,4 +229,152 @@ pub async fn remove_guardrail_band(
         .await
         .map_err(write_failed)?;
     super::render_life_areas_list(&pool, StatusCode::OK, None, None).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::platform::test_support::test_pool;
+    use proptest::prelude::*;
+    use scheduler_core::guardrail::AuthoredBand;
+
+    async fn work_id(pool: &SqlitePool) -> i64 {
+        store::find_by_name(pool, "Work").await.unwrap().unwrap().id
+    }
+
+    async fn authored_bands(pool: &SqlitePool, life_area_id: i64) -> Vec<AuthoredBand<i64>> {
+        let rows = store::list_guardrail_bands(pool, life_area_id)
+            .await
+            .unwrap();
+        group(rows.iter().map(|row| (row.id, band_of(row))))
+    }
+
+    async fn row_count(pool: &SqlitePool, life_area_id: i64) -> usize {
+        store::list_guardrail_bands(pool, life_area_id)
+            .await
+            .unwrap()
+            .len()
+    }
+
+    /// The weekday indices a generated submission checked, deduplicated the
+    /// way seven distinct checkboxes already are.
+    fn weekdays_of(indices: &[usize]) -> Vec<Weekday> {
+        let all = [
+            Weekday::Mon,
+            Weekday::Tue,
+            Weekday::Wed,
+            Weekday::Thu,
+            Weekday::Fri,
+            Weekday::Sat,
+            Weekday::Sun,
+        ];
+        let mut days: Vec<Weekday> = indices.iter().map(|&i| all[i]).collect();
+        days.sort();
+        days.dedup();
+        days
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig { cases: 24, ..ProptestConfig::default() })]
+
+        /// **The band the page shows and the band Remove takes are the same
+        /// band** — for any set of authored submissions, and whichever of
+        /// the resulting bands is removed.
+        ///
+        /// This is the one property in the slice that no type can carry.
+        /// "Which rows are one band" is now stated once, in
+        /// `scheduler_core::guardrail::group` — but only for the half that
+        /// runs in Rust. `store::remove_guardrail_band` states it a second
+        /// time in SQL (`WHERE life_area_id = ? AND start_minutes = ? AND
+        /// end_minutes = ?`), and no signature makes those two agree. Give
+        /// a band a third distinguishing field and the Rust half splits a
+        /// group the SQL half still deletes whole; the page would show two
+        /// bands whose Remove buttons each take both, and every example
+        /// test would still pass.
+        ///
+        /// Three invariants in one run: the removed band is gone, every
+        /// other band survives *untouched* — same handle, same label, same
+        /// order — and exactly the weekday rows that band displayed left
+        /// the table, no more and no fewer.
+        #[test]
+        #[ignore]
+        fn removing_a_band_removes_exactly_the_rows_that_band_displayed(
+            submissions in prop::collection::vec(
+                (prop::collection::vec(0..7usize, 1..8), 0..4i64, 1..4i64),
+                1..5,
+            ),
+            victim in 0..8usize,
+        ) {
+            let rt = tokio::runtime::Runtime::new().unwrap();
+            rt.block_on(async {
+                let (_dir, pool) = test_pool().await;
+                let life_area_id = work_id(&pool).await;
+
+                // Starts and lengths are drawn from a handful of values, not
+                // spread over the day. Two bands that share a start and differ
+                // only in their end are the case that separates "same band" from
+                // "same start", and a generator ranging over 1380 minutes
+                // essentially never produces one -- it passes while covering
+                // nothing, which is this repo's own recorded trap
+                // (life-areas-duplicate-03).
+                for (indices, start, length) in &submissions {
+                    for weekday in weekdays_of(indices) {
+                        store::insert_guardrail_band(
+                            &pool,
+                            life_area_id,
+                            weekday.as_str(),
+                            start * 60,
+                            start * 60 + length * 30,
+                        )
+                        .await
+                        .unwrap();
+                    }
+                }
+
+                let before = group_bands(
+                    store::list_guardrail_bands(&pool, life_area_id).await.unwrap(),
+                );
+                let rows_before = row_count(&pool, life_area_id).await;
+                prop_assume!(!before.is_empty());
+                let index = victim % before.len();
+                let removed_id = before[index].id;
+                let removed_weekdays = authored_bands(&pool, life_area_id).await[index]
+                    .weekdays
+                    .len();
+
+                store::remove_guardrail_band(&pool, removed_id).await.unwrap();
+
+                let after = group_bands(
+                    store::list_guardrail_bands(&pool, life_area_id).await.unwrap(),
+                );
+                let rows_after = row_count(&pool, life_area_id).await;
+
+                prop_assert!(
+                    !after.iter().any(|band| band.id == removed_id),
+                    "the removed band is still on the page"
+                );
+                let survivors: Vec<(i64, String)> = before
+                    .iter()
+                    .enumerate()
+                    .filter(|(i, _)| *i != index)
+                    .map(|(_, band)| (band.id, band.label.clone()))
+                    .collect();
+                let actual: Vec<(i64, String)> = after
+                    .iter()
+                    .map(|band| (band.id, band.label.clone()))
+                    .collect();
+                prop_assert_eq!(
+                    survivors,
+                    actual,
+                    "removing one band disturbed the others"
+                );
+                prop_assert_eq!(
+                    rows_before - rows_after,
+                    removed_weekdays,
+                    "the rows deleted are not the rows the band displayed"
+                );
+                Ok(())
+            })?;
+        }
+    }
 }

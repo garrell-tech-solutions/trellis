@@ -406,62 +406,48 @@ mod tests {
         assert_eq!(free_intervals(guardrail, range), Vec::new());
     }
 
-    /// An exception on days the guardrail does not cover removes nothing --
-    /// not an error, not a no-op to reject, simply a true statement about
-    /// empty days (`exceptions` QA doc).
-    #[test]
-    fn an_excluded_range_covering_no_guardrail_day_changes_nothing() {
+    /// Whether `excluded` makes any difference at all to what a Mon
+    /// 09:00-17:00 band projects over the standard fortnight. The shared
+    /// shape of every "this exception is a true statement that removes
+    /// nothing" case, asked as one question so each case is only its own
+    /// dates.
+    fn changes_nothing(excluded: &[DateRange]) -> bool {
         let tz = TimeZone::UTC;
         let bands = [band(Weekday::Mon, 9 * 60, 17 * 60)];
         let range = Range::horizon(date(2026, 8, 24), 14);
-        // 2026-08-22/23 is the weekend before the Monday band.
-        let excluded = [DateRange {
+        let projected = |excluded: &[DateRange]| {
+            free_intervals(
+                Guardrail {
+                    bands: &bands,
+                    timezone: &tz,
+                    excluded,
+                },
+                range,
+            )
+        };
+        projected(excluded) == projected(&[])
+    }
+
+    /// An exception on days the guardrail does not cover removes nothing --
+    /// not an error, not a no-op to reject, simply a true statement about
+    /// empty days (`exceptions` QA doc). 2026-08-22/23 is the weekend
+    /// before the Monday band.
+    #[test]
+    fn an_excluded_range_covering_no_guardrail_day_changes_nothing() {
+        assert!(changes_nothing(&[DateRange {
             start: date(2026, 8, 22),
             end: date(2026, 8, 23),
-        }];
-        let with_exclusion = Guardrail {
-            bands: &bands,
-            timezone: &tz,
-            excluded: &excluded,
-        };
-        let without_exclusion = Guardrail {
-            bands: &bands,
-            timezone: &tz,
-            excluded: &[],
-        };
-
-        assert_eq!(
-            free_intervals(with_exclusion, range),
-            free_intervals(without_exclusion, range)
-        );
+        }]));
     }
 
     /// An exception entirely outside the horizon changes nothing -- it is
     /// still a real, stored exception, just not one this projection reaches.
     #[test]
     fn an_excluded_range_entirely_outside_the_horizon_changes_nothing() {
-        let tz = TimeZone::UTC;
-        let bands = [band(Weekday::Mon, 9 * 60, 17 * 60)];
-        let range = Range::horizon(date(2026, 8, 24), 14);
-        let excluded = [DateRange {
+        assert!(changes_nothing(&[DateRange {
             start: date(2026, 9, 10),
             end: date(2026, 9, 20),
-        }];
-        let with_exclusion = Guardrail {
-            bands: &bands,
-            timezone: &tz,
-            excluded: &excluded,
-        };
-        let without_exclusion = Guardrail {
-            bands: &bands,
-            timezone: &tz,
-            excluded: &[],
-        };
-
-        assert_eq!(
-            free_intervals(with_exclusion, range),
-            free_intervals(without_exclusion, range)
-        );
+        }]));
     }
 
     /// Two overlapping exceptions subtract their union, not their sum --
@@ -503,47 +489,43 @@ mod tests {
     /// interacting with the fold correctly (`exceptions` QA doc).
     #[test]
     fn excluding_the_ordinary_sunday_leaves_the_fall_back_transition_day_at_its_true_length() {
+        // 2027-11-07 is the transition Sunday; 2027-11-14 is the ordinary one.
+        let only = lone_sunday_left_after_excluding(date(2027, 11, 6), date(2027, 11, 14));
+
+        assert_eq!(only.duration_ms(), 4 * 60 * 60 * 1000);
+    }
+
+    /// A 01:00-04:00 Sunday band over a fortnight containing one DST
+    /// transition, with the *ordinary* Sunday excluded -- so the one
+    /// interval left is the transition day's, and its length is the whole
+    /// assertion. `T-fold-counts-both-passes` is what makes the two
+    /// directions differ.
+    fn lone_sunday_left_after_excluding(from: Date, excluded_sunday: Date) -> Interval {
         let tz = TimeZone::get("America/New_York").unwrap();
         let bands = [band(Weekday::Sun, 60, 4 * 60)];
-        // 2027-11-07 is the transition Sunday; 2027-11-14 is the ordinary one.
-        let range = Range::horizon(date(2027, 11, 6), 14);
         let excluded = [DateRange {
-            start: date(2027, 11, 14),
-            end: date(2027, 11, 14),
+            start: excluded_sunday,
+            end: excluded_sunday,
         }];
-        let guardrail = Guardrail {
-            bands: &bands,
-            timezone: &tz,
-            excluded: &excluded,
-        };
-
-        let intervals = free_intervals(guardrail, range);
-
-        assert_eq!(intervals.len(), 1);
-        assert_eq!(intervals[0].duration_ms(), 4 * 60 * 60 * 1000);
+        let intervals = free_intervals(
+            Guardrail {
+                bands: &bands,
+                timezone: &tz,
+                excluded: &excluded,
+            },
+            Range::horizon(from, 14),
+        );
+        assert_eq!(intervals.len(), 1, "expected only the transition Sunday");
+        intervals[0]
     }
 
     /// The spring-forward mirror of the above: excluding the ordinary
     /// Sunday leaves the transition Sunday's two-hour span intact.
     #[test]
     fn excluding_the_ordinary_sunday_leaves_the_spring_forward_transition_day_at_its_true_length() {
-        let tz = TimeZone::get("America/New_York").unwrap();
-        let bands = [band(Weekday::Sun, 60, 4 * 60)];
         // 2027-03-14 is the transition Sunday; 2027-03-21 is the ordinary one.
-        let range = Range::horizon(date(2027, 3, 13), 14);
-        let excluded = [DateRange {
-            start: date(2027, 3, 21),
-            end: date(2027, 3, 21),
-        }];
-        let guardrail = Guardrail {
-            bands: &bands,
-            timezone: &tz,
-            excluded: &excluded,
-        };
+        let only = lone_sunday_left_after_excluding(date(2027, 3, 13), date(2027, 3, 21));
 
-        let intervals = free_intervals(guardrail, range);
-
-        assert_eq!(intervals.len(), 1);
-        assert_eq!(intervals[0].duration_ms(), 2 * 60 * 60 * 1000);
+        assert_eq!(only.duration_ms(), 2 * 60 * 60 * 1000);
     }
 }

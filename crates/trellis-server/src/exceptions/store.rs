@@ -1,9 +1,11 @@
 //! This capability's own reads and writes for the `exceptions` table
-//! (`T-capability-owns-its-queries`), plus its own life-area name lookup --
-//! validating a submitted scope at this boundary is this capability's
-//! concern, the same call `triage::store::find_active_life_area_id` already
-//! made for a different boundary, not a function borrowed from
-//! `life_areas`.
+//! (`T-capability-owns-its-queries`).
+//!
+//! Resolving a submitted scope's life-area *name* is deliberately not here.
+//! It is one question -- does this name a life area work may be filed
+//! under? -- and `life_areas::active_id_for_name` answers it for every
+//! boundary that asks (`T-one-front-door-per-capability`). It arrived here
+//! as a byte-identical copy of the one in `triage::store`.
 
 use sqlx::SqlitePool;
 
@@ -30,9 +32,8 @@ pub async fn list_all(pool: &SqlitePool) -> Result<Vec<ExceptionRow>, sqlx::Erro
 }
 
 /// Inserts one exception. Well-formed dates and a resolved scope are the
-/// caller's job (`scheduler_core::exception::well_formed_range` and this
-/// module's own `find_active_life_area_id`) -- this is the write, not the
-/// rule.
+/// caller's job (`scheduler_core::exception::well_formed_range` and
+/// `life_areas::active_id_for_name`) -- this is the write, not the rule.
 pub async fn insert(
     pool: &SqlitePool,
     life_area_id: Option<i64>,
@@ -65,30 +66,10 @@ pub async fn remove(pool: &SqlitePool, id: i64) -> Result<(), sqlx::Error> {
     Ok(())
 }
 
-/// The active life area named `name`, if any -- this capability's own
-/// validation query (`T-capability-owns-its-queries`), case-insensitive by
-/// the `life_areas.name` column's own collation.
-pub async fn find_active_life_area_id(
-    pool: &SqlitePool,
-    name: &str,
-) -> Result<Option<i64>, sqlx::Error> {
-    sqlx::query_scalar("SELECT id FROM life_areas WHERE name = ? AND archived_at IS NULL")
-        .bind(name)
-        .fetch_optional(pool)
-        .await
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::platform::test_support::test_pool;
-
-    async fn work_id(pool: &SqlitePool) -> i64 {
-        find_active_life_area_id(pool, "Work")
-            .await
-            .unwrap()
-            .unwrap()
-    }
+    use crate::platform::test_support::{seeded_life_area_id, test_pool};
 
     #[tokio::test]
     async fn list_all_is_empty_on_a_fresh_database() {
@@ -121,7 +102,7 @@ mod tests {
     #[tokio::test]
     async fn insert_stores_a_life_area_scoped_exception_with_its_label() {
         let (_dir, pool) = test_pool().await;
-        let work = work_id(&pool).await;
+        let work = seeded_life_area_id(&pool, "Work").await;
 
         let id = insert(&pool, Some(work), "2026-08-24", "2026-08-24", "vacation")
             .await
@@ -165,43 +146,5 @@ mod tests {
         remove(&pool, 999).await.unwrap();
 
         assert_eq!(list_all(&pool).await.unwrap(), Vec::new());
-    }
-
-    #[tokio::test]
-    async fn find_active_life_area_id_matches_case_insensitively() {
-        let (_dir, pool) = test_pool().await;
-
-        let found = find_active_life_area_id(&pool, "work").await.unwrap();
-
-        assert!(found.is_some());
-    }
-
-    #[tokio::test]
-    async fn find_active_life_area_id_reports_none_for_an_unknown_name() {
-        let (_dir, pool) = test_pool().await;
-
-        assert_eq!(
-            find_active_life_area_id(&pool, "Gardening").await.unwrap(),
-            None
-        );
-    }
-
-    #[tokio::test]
-    async fn find_active_life_area_id_excludes_an_archived_life_area() {
-        let (_dir, pool) = test_pool().await;
-        let learning = find_active_life_area_id(&pool, "Learning")
-            .await
-            .unwrap()
-            .unwrap();
-        sqlx::query("UPDATE life_areas SET archived_at = 1000 WHERE id = ?")
-            .bind(learning)
-            .execute(&pool)
-            .await
-            .unwrap();
-
-        assert_eq!(
-            find_active_life_area_id(&pool, "Learning").await.unwrap(),
-            None
-        );
     }
 }

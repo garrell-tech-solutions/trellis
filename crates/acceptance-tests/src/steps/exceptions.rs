@@ -255,6 +255,26 @@ fn dispatch_list_shows_for_starting(
 mod tests {
     use super::*;
 
+    /// The step text each dispatcher below is driven with, written once so
+    /// a test says which step it is exercising and nothing else.
+    const AWAY_ALL: &str =
+        r#"the dates "2026-08-24" to "2026-08-28" are marked away for all life areas"#;
+    const AWAY_SCOPED: &str =
+        r#"the dates "2026-08-24" to "2026-08-28" are marked away for the life area "Work""#;
+    const AWAY_LABELLED: &str = r#"the dates "2026-08-24" to "2026-08-28" are marked away for all life areas labelled "vacation""#;
+    /// Deliberately backwards -- the last day precedes the first.
+    const AWAY_BACKWARDS: &str =
+        r#"the dates "2026-08-28" to "2026-08-24" are marked away for all life areas"#;
+
+    /// A step's own captures. Every test here builds these the same way and
+    /// none is testing that a step regex matches its own text, so the
+    /// failure is one `expect` rather than a per-test `unwrap` chain.
+    fn caps<'t>(regex: &Regex, text: &'t str) -> regex::Captures<'t> {
+        regex
+            .captures(text)
+            .expect("a step's own text matches its own pattern")
+    }
+
     #[test]
     fn exception_row_finds_the_chunk_naming_the_start_date() {
         let section = concat!(
@@ -296,11 +316,7 @@ mod tests {
         dispatch_marked_away_all(
             &mut world,
             &example(&[]),
-            &WHEN_MARKED_AWAY_ALL
-                .captures(
-                    r#"the dates "2026-08-24" to "2026-08-28" are marked away for all life areas"#,
-                )
-                .unwrap(),
+            &caps(&WHEN_MARKED_AWAY_ALL, AWAY_ALL),
         )
         .await
         .unwrap();
@@ -315,11 +331,7 @@ mod tests {
         dispatch_marked_away_scoped(
             &mut world,
             &example(&[]),
-            &WHEN_MARKED_AWAY_SCOPED
-                .captures(
-                    r#"the dates "2026-08-24" to "2026-08-28" are marked away for the life area "Work""#,
-                )
-                .unwrap(),
+            &caps(&WHEN_MARKED_AWAY_SCOPED, AWAY_SCOPED),
         )
         .await
         .unwrap();
@@ -334,11 +346,7 @@ mod tests {
         dispatch_marked_away_labelled(
             &mut world,
             &example(&[]),
-            &WHEN_MARKED_AWAY_LABELLED
-                .captures(
-                    r#"the dates "2026-08-24" to "2026-08-28" are marked away for all life areas labelled "vacation""#,
-                )
-                .unwrap(),
+            &caps(&WHEN_MARKED_AWAY_LABELLED, AWAY_LABELLED),
         )
         .await
         .unwrap();
@@ -352,11 +360,7 @@ mod tests {
         dispatch_marked_away_all(
             &mut world,
             &example(&[]),
-            &WHEN_MARKED_AWAY_ALL
-                .captures(
-                    r#"the dates "2026-08-24" to "2026-08-28" are marked away for all life areas"#,
-                )
-                .unwrap(),
+            &caps(&WHEN_MARKED_AWAY_ALL, AWAY_ALL),
         )
         .await
         .unwrap();
@@ -381,11 +385,7 @@ mod tests {
         dispatch_marked_away_all(
             &mut world,
             &example(&[]),
-            &WHEN_MARKED_AWAY_ALL
-                .captures(
-                    r#"the dates "2026-08-28" to "2026-08-24" are marked away for all life areas"#,
-                )
-                .unwrap(),
+            &caps(&WHEN_MARKED_AWAY_ALL, AWAY_BACKWARDS),
         )
         .await
         .unwrap();

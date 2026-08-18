@@ -144,6 +144,27 @@ pub async fn find_by_name(
         .await
 }
 
+/// The id of the *active* row named `name`, case-insensitively via the
+/// column's own collation (`T-collation-enforces-name-identity`). `None`
+/// covers both a name that names no life area and one that names only an
+/// archived one -- every caller refuses both identically, so one query
+/// answering "does an active choice exist by this name" is enough.
+///
+/// `pub(super)`: reached through [`super::active_id_for_name`], so that
+/// what counts as an *active* life area is settled in one place. It is
+/// already two conditions away from obvious -- `archived_at IS NULL` today,
+/// and `pool_only` is a second dimension of usable that a caller could
+/// plausibly want folded in tomorrow.
+pub(super) async fn find_active_id_by_name(
+    pool: &SqlitePool,
+    name: &str,
+) -> Result<Option<i64>, sqlx::Error> {
+    sqlx::query_scalar("SELECT id FROM life_areas WHERE name = ? AND archived_at IS NULL")
+        .bind(name)
+        .fetch_optional(pool)
+        .await
+}
+
 /// Inserts a new life area and returns its id. `name` is assumed already
 /// well-formed (`scheduler_core::life_area::parse_name`) and not a duplicate
 /// (`find_by_name`) -- both are the caller's job, in that order.

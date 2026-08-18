@@ -558,23 +558,29 @@ mod tests {
         assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
     }
 
-    #[tokio::test]
-    async fn an_overlapping_band_on_the_same_life_area_is_rejected() {
-        let (_dir, pool) = test_pool().await;
-        let id = life_area_id(&pool, "Work").await;
+    /// "Work, already walled 09:00-12:00 on Monday, is sent a second band" --
+    /// the setup the overlap and touching cases share, differing only in
+    /// the second band's own hours.
+    async fn second_monday_band(
+        pool: &SqlitePool,
+        start: &str,
+        end: &str,
+    ) -> axum::response::Response {
+        let id = life_area_id(pool, "Work").await;
         post_guardrail(
-            &pool,
+            pool,
             id,
             &[("mon", "on"), ("start", "09:00"), ("end", "12:00")],
         )
         .await;
+        post_guardrail(pool, id, &[("mon", "on"), ("start", start), ("end", end)]).await
+    }
 
-        let response = post_guardrail(
-            &pool,
-            id,
-            &[("mon", "on"), ("start", "11:00"), ("end", "17:00")],
-        )
-        .await;
+    #[tokio::test]
+    async fn an_overlapping_band_on_the_same_life_area_is_rejected() {
+        let (_dir, pool) = test_pool().await;
+
+        let response = second_monday_band(&pool, "11:00", "17:00").await;
 
         assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
         let body = body_string(response).await;
@@ -584,20 +590,8 @@ mod tests {
     #[tokio::test]
     async fn touching_bands_are_both_kept() {
         let (_dir, pool) = test_pool().await;
-        let id = life_area_id(&pool, "Work").await;
-        post_guardrail(
-            &pool,
-            id,
-            &[("mon", "on"), ("start", "09:00"), ("end", "12:00")],
-        )
-        .await;
 
-        let response = post_guardrail(
-            &pool,
-            id,
-            &[("mon", "on"), ("start", "12:00"), ("end", "17:00")],
-        )
-        .await;
+        let response = second_monday_band(&pool, "12:00", "17:00").await;
 
         assert_eq!(response.status(), StatusCode::CREATED);
         let body = body_string(response).await;

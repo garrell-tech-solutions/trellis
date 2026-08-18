@@ -44,8 +44,9 @@ async fn render_exceptions_list(
 }
 
 /// The exception form's own fields. `life_area` blank or absent means
-/// global; a non-empty value must resolve through this capability's own
-/// `store::find_active_life_area_id` (`T-capability-owns-its-queries`).
+/// global; a non-empty value must resolve through
+/// `life_areas::active_id_for_name`, the one answer to "does this name a
+/// life area work may be filed under" (`T-one-front-door-per-capability`).
 /// `label` is the only free text an exception carries.
 #[derive(Deserialize, Default)]
 pub struct ExceptionFormRequest {
@@ -63,7 +64,7 @@ async fn resolve_scope(pool: &SqlitePool, life_area: Option<&str>) -> Result<Opt
     let Some(name) = life_area.filter(|name| !name.is_empty()) else {
         return Ok(None);
     };
-    store::find_active_life_area_id(pool, name)
+    crate::life_areas::active_id_for_name(pool, name)
         .await
         .map_err(|_| "the exception's life area could not be looked up".to_string())?
         .map(Some)

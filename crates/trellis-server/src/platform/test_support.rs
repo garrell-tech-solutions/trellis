@@ -27,3 +27,17 @@ pub(crate) async fn get_ok(pool: &SqlitePool, clock: Clock, uri: &str) -> String
     let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
     String::from_utf8(bytes.to_vec()).unwrap()
 }
+
+/// The id of a seeded life area, by name -- "give me Work" in one line.
+///
+/// Four modules had hand-rolled this as a local `work_id`/`fitness_id`,
+/// which is the same reason [`get_ok`] is here: a fixture repeated per
+/// module is one the fifth module writes slightly differently. It goes
+/// through `life_areas::active_id_for_name`, so a test setting one up sees
+/// exactly what production sees.
+pub(crate) async fn seeded_life_area_id(pool: &SqlitePool, name: &str) -> i64 {
+    crate::life_areas::active_id_for_name(pool, name)
+        .await
+        .expect("the life areas table is readable")
+        .unwrap_or_else(|| panic!("{name} is not a seeded life area"))
+}

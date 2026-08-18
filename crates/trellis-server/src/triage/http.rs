@@ -221,7 +221,7 @@ async fn decide_triage(
     {
         return Ok(TriageOutcome::Rejected(Rejection::CaptureNotOpen));
     }
-    let life_area_id = store::find_active_life_area_id(pool, &submission.life_area_name)
+    let life_area_id = crate::life_areas::active_id_for_name(pool, &submission.life_area_name)
         .await
         .map_err(write_failed)?;
     Ok(outcome_for_resolved_life_area(submission, life_area_id))

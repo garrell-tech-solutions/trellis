@@ -84,21 +84,7 @@ pub(crate) async fn list(pool: &SqlitePool) -> Result<Vec<ExceptionListItem>, sq
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::platform::test_support::test_pool;
-
-    async fn work_id(pool: &SqlitePool) -> i64 {
-        store::find_active_life_area_id(pool, "Work")
-            .await
-            .unwrap()
-            .unwrap()
-    }
-
-    async fn fitness_id(pool: &SqlitePool) -> i64 {
-        store::find_active_life_area_id(pool, "Fitness")
-            .await
-            .unwrap()
-            .unwrap()
-    }
+    use crate::platform::test_support::{seeded_life_area_id, test_pool};
 
     #[tokio::test]
     async fn for_life_area_includes_a_global_exception() {
@@ -106,7 +92,7 @@ mod tests {
         store::insert(&pool, None, "2026-08-24", "2026-08-28", "")
             .await
             .unwrap();
-        let work = work_id(&pool).await;
+        let work = seeded_life_area_id(&pool, "Work").await;
 
         let excluded = for_life_area(&pool, work).await.unwrap();
 
@@ -116,7 +102,7 @@ mod tests {
     #[tokio::test]
     async fn for_life_area_includes_its_own_scoped_exception() {
         let (_dir, pool) = test_pool().await;
-        let work = work_id(&pool).await;
+        let work = seeded_life_area_id(&pool, "Work").await;
         store::insert(&pool, Some(work), "2026-08-24", "2026-08-28", "")
             .await
             .unwrap();
@@ -129,11 +115,11 @@ mod tests {
     #[tokio::test]
     async fn for_life_area_excludes_another_life_areas_scoped_exception() {
         let (_dir, pool) = test_pool().await;
-        let fitness = fitness_id(&pool).await;
+        let fitness = seeded_life_area_id(&pool, "Fitness").await;
         store::insert(&pool, Some(fitness), "2026-08-24", "2026-08-28", "")
             .await
             .unwrap();
-        let work = work_id(&pool).await;
+        let work = seeded_life_area_id(&pool, "Work").await;
 
         let excluded = for_life_area(&pool, work).await.unwrap();
 
@@ -155,7 +141,7 @@ mod tests {
     #[tokio::test]
     async fn list_reports_a_scoped_exceptions_scope_as_its_life_areas_name() {
         let (_dir, pool) = test_pool().await;
-        let work = work_id(&pool).await;
+        let work = seeded_life_area_id(&pool, "Work").await;
         store::insert(&pool, Some(work), "2026-08-24", "2026-08-28", "")
             .await
             .unwrap();

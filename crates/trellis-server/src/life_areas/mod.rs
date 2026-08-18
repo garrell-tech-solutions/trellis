@@ -40,6 +40,37 @@ pub(crate) async fn active_options(pool: &SqlitePool) -> Result<Vec<LifeAreaOpti
         .collect())
 }
 
+/// Resolve a submitted name to the life area it names, if that life area is
+/// one work may currently be filed under.
+///
+/// **Two capabilities validate a submitted life-area name at their own
+/// boundary** -- triage, before writing a task, and exceptions, before
+/// writing a dated exception scoped to one life area. They arrived as two
+/// byte-identical `find_active_life_area_id` functions in two `store.rs`
+/// files, each citing `T-capability-owns-its-queries`.
+///
+/// That decision licenses separate copies for *two facts*: "two queries
+/// against one table for two different reasons". This is one fact asked
+/// twice for the same reason -- does this name resolve to a life area work
+/// may be filed under? -- and the answer is `life_areas`' to give, since it
+/// owns the table, the name-identity rule and the archived/active
+/// distinction. `T-one-front-door-per-capability` is the complement that
+/// says so, and names this exact failure: without it, "own your own
+/// queries" degenerates into every capability hand-assembling another's
+/// internals.
+///
+/// The cost of the copies was about to be real rather than theoretical.
+/// "Active" means `archived_at IS NULL` today, and `pool_only` is a second
+/// dimension of the same question sitting one slice away; a third caller
+/// (M3's borrowing, `#62`'s capacity) would have made three places to
+/// remember it in.
+pub(crate) async fn active_id_for_name(
+    pool: &SqlitePool,
+    name: &str,
+) -> Result<Option<i64>, sqlx::Error> {
+    store::find_active_id_by_name(pool, name).await
+}
+
 /// One life area's guardrail, as a reader outside this capability needs it:
 /// enough to compute free time from, nothing about how it is stored.
 ///
@@ -153,6 +184,38 @@ mod tests {
         let work = work_as_reported(&pool, false).await;
 
         assert_eq!(work.bands.len(), 1);
+    }
+
+    /// The three cases both former copies tested, kept once. Case
+    /// insensitivity is the column's collation doing its job
+    /// (`T-collation-enforces-name-identity`), not this function's.
+    #[tokio::test]
+    async fn active_id_for_name_resolves_a_seeded_name_case_insensitively() {
+        let (_dir, pool) = test_pool().await;
+
+        assert!(active_id_for_name(&pool, "work").await.unwrap().is_some());
+    }
+
+    #[tokio::test]
+    async fn active_id_for_name_is_none_for_a_name_that_names_nothing() {
+        let (_dir, pool) = test_pool().await;
+
+        assert_eq!(active_id_for_name(&pool, "Gardening").await.unwrap(), None);
+    }
+
+    /// Archived and never-existed are one answer on purpose: every caller
+    /// refuses both identically, so nothing downstream needs to tell them
+    /// apart.
+    #[tokio::test]
+    async fn active_id_for_name_is_none_once_the_life_area_is_archived() {
+        let (_dir, pool) = test_pool().await;
+        let learning = active_id_for_name(&pool, "Learning")
+            .await
+            .unwrap()
+            .unwrap();
+        store::archive(&pool, learning, 1_000).await.unwrap();
+
+        assert_eq!(active_id_for_name(&pool, "Learning").await.unwrap(), None);
     }
 
     #[tokio::test]

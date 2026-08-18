@@ -226,7 +226,12 @@ mod tests {
         let (status, body) = post_form(&pool, &format!("/exceptions/{id}/remove"), "").await;
 
         assert_eq!(status, StatusCode::OK);
+        assert!(body.contains("exceptions-list"), "not a re-render:\n{body}");
         assert!(!body.contains("2026-08-24"), "got:\n{body}");
+        assert!(
+            store::list_all(&pool).await.unwrap().is_empty(),
+            "the exception was not removed from storage"
+        );
     }
 
     #[test]

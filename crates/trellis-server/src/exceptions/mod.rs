@@ -96,7 +96,13 @@ mod tests {
 
         let excluded = for_life_area(&pool, work).await.unwrap();
 
-        assert_eq!(excluded.len(), 1);
+        assert_eq!(
+            excluded,
+            vec![DateRange {
+                start: "2026-08-24".parse().unwrap(),
+                end: "2026-08-28".parse().unwrap(),
+            }]
+        );
     }
 
     #[tokio::test]

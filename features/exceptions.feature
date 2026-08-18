@@ -1,3 +1,8 @@
+# mutation-stamp: sha256=dd6deda56ac18067f9f704875a63e0593b624e704ce15a9afd9596ad5965f9dd
+# acceptance-mutation-manifest-begin
+# {"version":1,"tested_at":"2026-08-18T18:21:09.237529453Z","feature_name":"A dated exception is how the owner says a week is not normal","feature_path":"features/exceptions.feature","background_hash":"3f8442aae7bdb91e27c54575b3c39ae37d76297e87aae2e0e8ab8b3d932330de","implementation_hash":"sha256:63be786f6f076249413a69c056a0dbec854211e6eb3913e400509b52605e5bbb","scenarios":[{"index":0,"name":"An exception removes those dates from free time","scenario_hash":"501477f6d837020a3a5a0ced156f438ee4b022427c5f87f8d87cbebcd4c55334","mutation_count":6,"result":{"Total":6,"Killed":6,"Survived":0,"Errors":0},"tested_at":"2026-08-18T18:21:09.237529453Z"},{"index":3,"name":"An exception for one life area leaves the others alone","scenario_hash":"3a341545bd1bd67e95e86d332f9506c07b2d2ee5151df04e724ca99baebc5a11","mutation_count":2,"result":{"Total":2,"Killed":2,"Survived":0,"Errors":0},"tested_at":"2026-08-18T18:21:09.237529453Z"},{"index":5,"name":"An exception whose dates have passed changes nothing and needs no cleanup","scenario_hash":"1f77a203ad1382ffacb3aab852f696ec86b3c25f3571af8b3a8d74eb31d4fa52","mutation_count":1,"result":{"Total":1,"Killed":1,"Survived":0,"Errors":0},"tested_at":"2026-08-18T18:21:09.237529453Z"},{"index":6,"name":"Removing an exception gives the hours back, and the exception is gone","scenario_hash":"5e456493d33fc0040be7dba1817005c2f5b0633baf91357c50f01fbbaa19673d","mutation_count":1,"result":{"Total":1,"Killed":1,"Survived":0,"Errors":0},"tested_at":"2026-08-18T18:21:09.237529453Z"},{"index":7,"name":"Overlapping exceptions subtract their union, not their sum","scenario_hash":"8c901834819a2728fb1a96008d043df8ea4339266a831f15ba6113c83a00d52d","mutation_count":1,"result":{"Total":1,"Killed":1,"Survived":0,"Errors":0},"tested_at":"2026-08-18T18:21:09.237529453Z"},{"index":8,"name":"An exception crossing a DST transition leaves the transition day its true length","scenario_hash":"9716e01f3c16121d0c2852005ec16ec892851f511812c3017a531187a0e42230","mutation_count":8,"result":{"Total":8,"Killed":8,"Survived":0,"Errors":0},"tested_at":"2026-08-18T18:21:09.237529453Z"},{"index":9,"name":"A life area given bands and then marked never scheduled has no free time","scenario_hash":"54a710eb4eca6314103a39d1b19cf786a97e2546758146f841235015173882e6","mutation_count":1,"result":{"Total":1,"Killed":1,"Survived":0,"Errors":0},"tested_at":"2026-08-18T18:21:09.237529453Z"}]}
+# acceptance-mutation-manifest-end
+
 # exceptions-removes-days-01: an exception removes those dates from every life area's free time
 # exceptions-scoped-to-one-life-area-02: an exception for one life area leaves the others alone
 # exceptions-scope-is-visible-03: the page says which life areas each exception applies to
@@ -62,8 +67,28 @@ Feature: A dated exception is how the owner says a week is not normal
       | from       | to         | hours |
       | 2026-08-24 | 2026-08-28 | 40    |
       | 2026-08-24 | 2026-08-24 | 72    |
-      | 2026-08-22 | 2026-08-23 | 80    |
-      | 2026-09-10 | 2026-09-20 | 80    |
+
+  # exceptions-removes-days-01: an exception removes those dates from every
+  # life area's free time
+  #
+  # No Examples table for the two rows below: each names a range that
+  # overlaps nothing the guardrail claims (a weekend, or a range past the
+  # 14-day horizon), so the reported hours stay 80 regardless of which
+  # weekend or which distant range it is -- a mutated date is still a
+  # weekend, or still outside the horizon. Two literal scenarios say what
+  # they test instead of columns gherkin-mutator could never observe
+  # changing.
+  Scenario: A weekend-only exception changes nothing, since the guardrail never claimed those days
+    When the dates "2026-08-22" to "2026-08-23" are marked away for all life areas
+    And the free time page is viewed
+    Then the free time page reports "80" hours free for "Work"
+
+  # exceptions-removes-days-01: an exception removes those dates from every
+  # life area's free time
+  Scenario: An exception outside the horizon changes nothing
+    When the dates "2026-09-10" to "2026-09-20" are marked away for all life areas
+    And the free time page is viewed
+    Then the free time page reports "80" hours free for "Work"
 
   # exceptions-scoped-to-one-life-area-02: an exception for one life area leaves the others alone
   Scenario: An exception for one life area leaves the others alone

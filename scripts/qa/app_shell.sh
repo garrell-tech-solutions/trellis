@@ -65,17 +65,18 @@ for m in re.finditer(r"<a href=\"([^\"]*)\"([^>]*)>([^<]*)</a>", header):
 ' "$header"
 }
 
-# --- Procedure: the same header on all five pages ---
-name="same-header-on-all-five-pages"
+# --- Procedure: the same header on all six pages ---
+name="same-header-on-all-six-pages"
 if qa_start_server "$BIN" "$TMP_DIR/$name.sqlite" "$TMP_DIR/$name.log"; then
   inbox_header="$(qa_header_of "$(qa_get /)")"
   life_areas_header="$(qa_header_of "$(qa_get /life-areas)")"
   free_time_header="$(qa_header_of "$(qa_get /free-time)")"
   capacity_header="$(qa_header_of "$(qa_get /capacity)")"
+  schedule_header="$(qa_header_of "$(qa_get /schedule)")"
   stats_header="$(qa_header_of "$(qa_get /stats)")"
 
   normalized_inbox="${inbox_header// aria-current=\"page\"/}"
-  for pair in "life areas:$life_areas_header" "free time:$free_time_header" "capacity:$capacity_header" "stats:$stats_header"; do
+  for pair in "life areas:$life_areas_header" "free time:$free_time_header" "capacity:$capacity_header" "schedule:$schedule_header" "stats:$stats_header"; do
     label="${pair%%:*}"
     header="${pair#*:}"
     normalized_other="${header// aria-current=\"page\"/}"
@@ -89,8 +90,8 @@ if qa_start_server "$BIN" "$TMP_DIR/$name.sqlite" "$TMP_DIR/$name.log"; then
 
   links="$(qa_header_links "$inbox_header")"
   labels="$(printf '%s\n' "$links" | cut -f1 | paste -sd, -)"
-  if [[ "$labels" != "Inbox,Life areas,Free time,Capacity,Stats" ]]; then
-    echo "FAIL: [$name] expected exactly the links Inbox,Life areas,Free time,Capacity,Stats in that order, got: $labels" >&2
+  if [[ "$labels" != "Inbox,Life areas,Free time,Capacity,Schedule,Stats" ]]; then
+    echo "FAIL: [$name] expected exactly the links Inbox,Life areas,Free time,Capacity,Schedule,Stats in that order, got: $labels" >&2
     FAILURES=1
   fi
 else
@@ -101,8 +102,8 @@ qa_stop_server
 # --- Procedure: the current page is marked, and only it ---
 name="current-page-marked-and-only-it"
 if qa_start_server "$BIN" "$TMP_DIR/$name.sqlite" "$TMP_DIR/$name.log"; then
-  declare -A expected=([/]="Inbox" [/life-areas]="Life areas" [/free-time]="Free time" [/capacity]="Capacity" [/stats]="Stats")
-  for path in / /life-areas /free-time /capacity /stats; do
+  declare -A expected=([/]="Inbox" [/life-areas]="Life areas" [/free-time]="Free time" [/capacity]="Capacity" [/schedule]="Schedule" [/stats]="Stats")
+  for path in / /life-areas /free-time /capacity /schedule /stats; do
     header="$(qa_header_of "$(qa_get "$path")")"
     links="$(qa_header_links "$header")"
     current_labels="$(printf '%s\n' "$links" | awk -F'\t' '$3 == "1" {print $1}')"
@@ -143,7 +144,7 @@ qa_stop_server
 # --- Procedure: the 422 swap handling is on every page now, and unchanged where it was ---
 name="422-swap-handling-on-every-page"
 if qa_start_server "$BIN" "$TMP_DIR/$name.sqlite" "$TMP_DIR/$name.log"; then
-  for path in / /life-areas /free-time /capacity /stats; do
+  for path in / /life-areas /free-time /capacity /schedule /stats; do
     page="$(qa_get "$path")"
     if [[ "$page" != *'responseHandling.unshift({code: "422"'* ]]; then
       echo "FAIL: [$name] $path does not declare the 422 swap handling" >&2
@@ -237,7 +238,7 @@ if qa_start_server "$BIN" "$TMP_DIR/$name.sqlite" "$TMP_DIR/$name.log"; then
   add_endpoint="$(qa_life_areas_add_endpoint "$(qa_get /life-areas)")"
   qa_add_life_area "$add_endpoint" "<script>alert('boom')</script>"
 
-  for path in / /life-areas /free-time /capacity /stats; do
+  for path in / /life-areas /free-time /capacity /schedule /stats; do
     header="$(qa_header_of "$(qa_get "$path")")"
     if [[ "$header" == *"<script>"* ]]; then
       echo "FAIL: [$name] $path's header contains an unescaped <script> tag" >&2

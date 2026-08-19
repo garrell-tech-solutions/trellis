@@ -100,7 +100,7 @@ qa_assert_stats_field() {
 qa_fixture_payload_for() {
   case "$1" in
     pool) echo '{"kind":"pool","life_area":"Work"}' ;;
-    committed) echo '{"kind":"committed","deadline":"2026-08-20T17:00:00Z","deadline_type":"hard","priority":"P1","life_area":"Work"}' ;;
+    committed) echo '{"kind":"committed","deadline":"2026-08-20T17:00:00Z","deadline_type":"hard","priority":"P1","estimated_minutes":180,"life_area":"Work"}' ;;
     quota) echo '{"kind":"quota","target_count":3,"target_minutes_each":45,"period":"week","life_area":"Work"}' ;;
   esac
 }

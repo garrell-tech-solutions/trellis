@@ -341,6 +341,18 @@ for m in re.finditer(r"<li>([^<]*)</li>", block):
 ' "$block"
 }
 
+# The exceptions form's own hx-post endpoint, read from the free time
+# page's markup -- not assumed.
+qa_exceptions_add_endpoint() {
+  local page="$1"
+  python3 -c '
+import re, sys
+page = sys.argv[1]
+m = re.search(r"<form hx-post=\"([^\"]+)\" hx-target=\"#exceptions-list\"", page)
+print(m.group(1) if m else "")
+' "$page"
+}
+
 # Extracts the contents of <ul id="html_id">...</ul> from a page, or prints
 # nothing if not found. The inbox page renders both the capture list and the
 # task list on one page (triage-from-page), so an assertion about one must

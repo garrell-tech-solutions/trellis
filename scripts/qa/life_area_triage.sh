@@ -177,7 +177,7 @@ if qa_start_server "$BIN" "$TMP_DIR/$name.sqlite" "$TMP_DIR/$name.log"; then
   qa_assert_rejected_naming "$name-pool" missing_field life_area
 
   CAPTURE_ID="$(qa_submit_capture "call the dentist")"
-  qa_triage "$CAPTURE_ID" '{"kind":"committed","deadline":"2026-08-20T17:00:00Z","deadline_type":"hard","priority":"P1"}'
+  qa_triage "$CAPTURE_ID" '{"kind":"committed","deadline":"2026-08-20T17:00:00Z","deadline_type":"hard","priority":"P1","estimated_minutes":180}'
   qa_assert_rejected_naming "$name-committed" missing_field life_area
 
   CAPTURE_ID="$(qa_submit_capture "go to the gym")"
@@ -360,7 +360,7 @@ $BODY" >&2
 
   committed_id="$(qa_submit_capture "call the dentist")"
   committed_endpoint="$(qa_shape_field "$(qa_extract_life_area_shapes "$(qa_get_inbox)" "$committed_id")" committed endpoint)"
-  qa_triage_form "$committed_endpoint" "kind=committed&deadline=2026-08-20T17%3A00%3A00Z&deadline_type=hard&priority=P1&life_area="
+  qa_triage_form "$committed_endpoint" "kind=committed&deadline=2026-08-20T17%3A00%3A00Z&deadline_type=hard&priority=P1&estimated_minutes=180&life_area="
   if [[ "$STATUS" != "422" ]]; then
     echo "FAIL: [$name-committed] expected 422, got $STATUS" >&2
     FAILURES=1

@@ -45,18 +45,6 @@ qa_get_life_areas() {
   curl -s "http://$ADDR/life-areas"
 }
 
-# The exceptions form's own hx-post endpoint, read from the free time
-# page's markup -- not assumed.
-qa_exceptions_add_endpoint() {
-  local page="$1"
-  python3 -c '
-import re, sys
-page = sys.argv[1]
-m = re.search(r"<form hx-post=\"([^\"]+)\" hx-target=\"#exceptions-list\"", page)
-print(m.group(1) if m else "")
-' "$page"
-}
-
 # POSTs the exception form and sets STATUS and BODY. life_area is the name
 # to scope to, or "" for all life areas.
 qa_mark_away() {

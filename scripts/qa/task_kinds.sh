@@ -77,7 +77,7 @@ run_committed_example() {
   local name="committed-$deadline_type"
   setup_scenario "$name" || return
   local body
-  body="$(printf '{"kind":"committed","deadline":"%s","deadline_type":"%s","priority":"%s","life_area":"Work"}' \
+  body="$(printf '{"kind":"committed","deadline":"%s","deadline_type":"%s","priority":"%s","estimated_minutes":180,"life_area":"Work"}' \
     "$deadline" "$deadline_type" "$priority")"
   assert_status_created "$name" "$body"
   if assert_one_task "$name"; then

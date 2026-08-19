@@ -576,14 +576,43 @@ consumes **nothing**, because pool is never placed
 
 ---
 
-## The invariants
+## The invariants — settled (`T-invariants-one-to-five`)
 
-M3's strongest acceptance criterion asserts "Invariants 1–5 hold under
-`proptest`, ≥1000 cases". Two are described somewhere in the project. Three are
-not, and until they are written down that criterion cannot be specified.
+`#11`'s strongest acceptance criterion asserts *"Invariants 1–5 hold under
+`proptest`, ≥1000 cases"*. **Ratified 2026-08-18.** Invariants 1, 3 and 4 had
+never existed anywhere in this project and were reconstructed; 2 and 5 were
+recovered from U4 (#7) and #11's own text.
 
 | # | Statement | |
 |---|---|---|
+| 1 | **No two blocks overlap** — with each other, or with `facts` (`in_progress`, `completed`, `missed` blocks) or pins. | specified |
+| 2 | A block lies entirely within **one** allowed window. | specified (U4, #7) |
+| 3 | **Conservation under splitting**: a placed task's chunks sum **exactly** to its estimate. | specified |
+| 4 | Every **placed** task with a **hard** deadline finishes at or before it; one that cannot is unplaceable, never placed late. Soft deadlines may be overrun and carry a projected finish. | specified (`T-hard-refuses-soft-slips`) |
+| 5 | The placed/unplaceable partition is **total**; every unplaceable task carries a reason from the closed enum. | specified (#11) |
+
+They cover **where** a block may be (1, 2), **how much** work survives (3),
+**when** it must finish (4), and that **nothing is silently dropped** (5).
+
+Invariant 1 names `facts` deliberately: `free_intervals` computes
+`mask − busy − pins − buffers`, which does not include them, while `schedule()`
+takes them as a separate input — so without saying so, the engine could place
+work over the block being worked right now.
+
+Invariant 3 is well-defined only because of `D-placed-whole-or-not-at-all`:
+a task is scheduled entirely or not at all, so chunks can be required to sum
+*exactly*.
+
+**Not invariants, on purpose:** *guardrails never yield*, *determinism* and
+*idempotence* are separate acceptance criteria on #11. An invariant here is a
+property a proptest can falsify from a `schedule()` output alone; those three
+are a different shape.
+
+Invariant 2 has a known cost, accepted deliberately: a 2h task allowed in both
+Work and Personal, with Work ending and Personal starting at 17:00, cannot use
+those two contiguous free hours.
+
+---|---|---|
 | 1 | — | **GAP** |
 | 2 | A block lies entirely within **one** allowed window. | specified (U4, #7) |
 | 3 | — | **GAP** |
@@ -739,9 +768,9 @@ Everything above marked **GAP**, in the order it blocks work:
 |---|---|---|
 | `end_minutes` bounds disagree: schema allows 1440, form caps at 1439, core panics on 1440 | nothing today; a second writer | #62 |
 | Walled and pool-only are not exclusive; pool-only cannot be un-marked | ~~#60~~ — the free-time reader now applies the rule; the state stays representable | #59 |
-| Invariants 1, 3, 4 undefined | M3 cannot be specified | #11 |
+| ~~Invariants 1, 3, 4 undefined~~ | ~~M3 cannot be specified~~ | **closed** — `T-invariants-one-to-five`, 2026-08-18 |
 | ~~Which five domains, and one concept or two~~ | ~~M1 S4, M9~~ | **closed** — `T-life-areas-are-data`, #47 |
 | ~~Per-life-area capacity vs `allowed_windows`~~ | ~~M2~~ | **closed** — `T-capacity-two-axes` + `D-life-area-owns-its-time`, #6 |
 | `Block::missed` unreachable under silence-means-done | M6 | #4 |
-| U2 / U3 / U4 — hard vs soft, backward-pass input, window crossing | M3 | #7 |
+| U3 / U4 — backward-pass input, window crossing | M3 | #7 · ~~U2~~ closed by `T-hard-refuses-soft-slips` |
 | ~~Crate layout ratification~~ | ~~nothing; cost grows~~ | **closed** — `T-package-by-business-domain`, #44 |

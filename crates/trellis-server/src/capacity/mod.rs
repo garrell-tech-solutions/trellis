@@ -141,6 +141,17 @@ mod tests {
         .unwrap();
     }
 
+    /// Fitness, walled to two hours every Saturday -- 4h available over the
+    /// 14-day horizon (two Saturdays), the fixture every demand-side test
+    /// below measures against.
+    async fn fitness_with_a_saturday_band(pool: &SqlitePool) -> i64 {
+        let fitness = seeded_life_area_id(pool, "Fitness").await;
+        crate::life_areas::store::insert_guardrail_band(pool, fitness, "Sat", 540, 660)
+            .await
+            .unwrap();
+        fitness
+    }
+
     async fn row_for(pool: &SqlitePool, name: &str) -> CapacityRow {
         rows(pool, &Clock::system())
             .await
@@ -164,10 +175,7 @@ mod tests {
     #[tokio::test]
     async fn a_committed_tasks_estimate_becomes_hours_of_demand() {
         let (_dir, pool) = test_pool().await;
-        let fitness = seeded_life_area_id(&pool, "Fitness").await;
-        crate::life_areas::store::insert_guardrail_band(&pool, fitness, "Sat", 540, 660)
-            .await
-            .unwrap();
+        let fitness = fitness_with_a_saturday_band(&pool).await;
         given_a_committed_task(&pool, fitness, 180).await;
 
         let row = row_for(&pool, "Fitness").await;
@@ -176,6 +184,51 @@ mod tests {
         assert_eq!(row.available_hours, 4.0);
         assert_eq!(row.percent_used, 75);
         assert_eq!(row.over_hours, None);
+    }
+
+    #[tokio::test]
+    async fn committed_and_quota_demand_are_summed_not_subtracted() {
+        let (_dir, pool) = test_pool().await;
+        let fitness = fitness_with_a_saturday_band(&pool).await;
+        given_a_committed_task(&pool, fitness, 180).await;
+        let capture_id = crate::capture::store::insert(&pool, "run", "web", 0)
+            .await
+            .unwrap();
+        crate::triage::store::insert_task(
+            &pool,
+            capture_id,
+            &TaskKind::Quota {
+                target_count: 1,
+                target_minutes_each: 60,
+                period: scheduler_core::task::Period::Week,
+            },
+            Some(fitness),
+            0,
+        )
+        .await
+        .unwrap();
+
+        let row = row_for(&pool, "Fitness").await;
+
+        // 180 minutes committed + 120 minutes quota (1/week x 60min over a
+        // 14-day horizon) = 300 minutes = 5.0h. A demand_minutes that
+        // subtracted instead of summed would report 1.0h.
+        assert_eq!(row.needed_hours, 5.0);
+    }
+
+    #[tokio::test]
+    async fn over_hours_is_computed_by_dividing_minutes_not_by_a_different_operator() {
+        let (_dir, pool) = test_pool().await;
+        let fitness = fitness_with_a_saturday_band(&pool).await;
+        given_a_committed_task(&pool, fitness, 360).await;
+
+        let row = row_for(&pool, "Fitness").await;
+
+        // available_hours is 4.0 (two Saturdays x 2h, per the sibling test
+        // above); needed_hours is 6.0, so over is 2 hours = 120 minutes.
+        // 120 / 60.0 = 2.0; 120 % 60.0 = 0.0; 120 * 60.0 = 7200.0 -- the
+        // three candidate mutations of the division all disagree with 2.0.
+        assert_eq!(row.over_hours, Some(2.0));
     }
 
     #[tokio::test]
@@ -197,10 +250,7 @@ mod tests {
     #[tokio::test]
     async fn an_unestimated_committed_task_is_not_counted_as_zero_but_is_surfaced() {
         let (_dir, pool) = test_pool().await;
-        let fitness = seeded_life_area_id(&pool, "Fitness").await;
-        crate::life_areas::store::insert_guardrail_band(&pool, fitness, "Sat", 540, 660)
-            .await
-            .unwrap();
+        let fitness = fitness_with_a_saturday_band(&pool).await;
         let capture_id = crate::capture::store::insert(&pool, "buy milk", "web", 0)
             .await
             .unwrap();

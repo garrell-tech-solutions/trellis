@@ -13,7 +13,7 @@
 use crate::exception::DateRange;
 use crate::guardrail::{Band, Weekday};
 use jiff::civil::{Date, DateTime, Time};
-use jiff::tz::{Disambiguation, TimeZone};
+use jiff::tz::{AmbiguousOffset, Disambiguation, TimeZone};
 use jiff::ToSpan;
 
 /// One free interval, as the instant span it actually covers -- UTC epoch
@@ -115,12 +115,32 @@ fn time_at_minutes(minutes: i64) -> Time {
     Time::new(hour, minute, 0, 0).expect("guardrail minutes are always within a single day")
 }
 
-/// A civil `(date, minutes)` reading resolved to the instant it names, under
-/// `disambiguation` for the rare reading a DST transition makes ambiguous.
+/// A civil `(date, minutes)` reading resolved to the instant it names.
+///
+/// A fold (repeated hour) uses `disambiguation` as the caller directs. A
+/// gap (skipped hour) always resolves *earlier* regardless of what the
+/// caller asked for: `Disambiguation::Later` for a gap does not slide the
+/// reading to "the nearest valid instant" the way it does for a fold --
+/// it adds the *entire* gap length, since it means "resolve using the
+/// offset that starts only after the gap ends." A band whose end fell one
+/// minute into a gap would then run a full gap-length *longer* than its
+/// civil span says, not shorter, which is backwards from "the missing hour
+/// disappears" and can push it past a same-day band that starts during or
+/// right after the gap (`free_intervals_is_always_disjoint_and_sorted`
+/// found exactly this in `Australia/Sydney` on a spring-forward date, both
+/// bands on `Sun`). Resolving every gap reading against the *earlier*
+/// offset -- the one already in effect, extended straight through as if
+/// the gap were not there -- keeps every reading on a transition date
+/// under one consistent offset, so instant order matches civil order the
+/// way it does on any ordinary day.
 fn to_instant_ms(tz: &TimeZone, date: Date, minutes: i64, disambiguation: Disambiguation) -> i64 {
     let dt = DateTime::from_parts(date, time_at_minutes(minutes));
-    tz.to_ambiguous_zoned(dt)
-        .disambiguate(disambiguation)
+    let ambiguous = tz.to_ambiguous_zoned(dt);
+    let resolved = match ambiguous.offset() {
+        AmbiguousOffset::Gap { .. } => ambiguous.earlier(),
+        _ => ambiguous.disambiguate(disambiguation),
+    };
+    resolved
         .expect("a datetime built from a valid date and time always resolves to some instant")
         .timestamp()
         .as_millisecond()
@@ -137,11 +157,9 @@ fn to_instant_ms(tz: &TimeZone, date: Date, minutes: i64, disambiguation: Disamb
 /// decision, not an accident of whichever offset a library tries first — and
 /// once made, it is invisible in the numbers this function returns.
 ///
-/// A gap needs no matching decision: `Disambiguation::Earlier` and `::Later`
-/// each resolve a gap the same way (the reading that would have existed
-/// slides to the valid instant nearest it), so the interval's start and end
-/// land on real instants regardless, and subtracting them as instants -- not
-/// as civil minutes -- is what makes the missing hour disappear on its own.
+/// A gap's own decision lives in [`to_instant_ms`], not here: it always
+/// resolves earlier, so passing `Disambiguation::Later` below only ever
+/// takes effect on a fold.
 fn band_interval(tz: &TimeZone, date: Date, band: Band) -> Interval {
     Interval {
         start_ms: to_instant_ms(tz, date, band.start_minutes, Disambiguation::Earlier),
@@ -344,6 +362,66 @@ mod tests {
 
         assert_eq!(intervals.len(), 1);
         assert_eq!(intervals[0].duration_ms(), 4 * 60 * 60 * 1000);
+    }
+
+    /// `2027-03-14`'s gap is `02:00-03:00`; a band ending at `02:30`, one
+    /// that never happens, must stop at the gap rather than run past it.
+    /// `Disambiguation::Later` on a gap picks the offset that starts only
+    /// after the gap ends, which does the opposite: it slides the reading
+    /// forward by the gap's *whole* length, so `02:30` -- one gap-length
+    /// early -- would land 30 minutes *after* the gap instead of 30
+    /// minutes before it.
+    #[test]
+    fn a_band_ending_inside_a_spring_forward_gap_stops_at_the_gap_not_past_it() {
+        let tz = TimeZone::get("America/New_York").unwrap();
+        let bands = [band(Weekday::Sun, 60, 2 * 60 + 30)];
+        let guardrail = Guardrail {
+            bands: &bands,
+            timezone: &tz,
+            excluded: &[],
+        };
+        let range = Range::horizon(date(2027, 3, 14), 1);
+
+        let intervals = free_intervals(guardrail, range);
+
+        assert_eq!(intervals.len(), 1);
+        // 01:00 to (a nonexistent) 02:30 is 90 civil minutes; the hour
+        // 02:00-03:00 never happens, so the real span is 30 minutes.
+        assert_eq!(intervals[0].duration_ms(), 30 * 60 * 1000);
+    }
+
+    /// The property this slice's own generator once could not produce:
+    /// `free_intervals_is_always_disjoint_and_sorted`'s pinned regression,
+    /// spelled out as a named case. One band ends inside the gap
+    /// (`00:00-02:01`); another starts right after it (`03:00-03:01`).
+    /// Resolving the first band's end with `Disambiguation::Later` (a gap
+    /// slides the whole gap length *forward*, not to the nearest instant)
+    /// used to land it exactly on the second band's own end, one minute
+    /// past the second band's start -- two bands that never touch in
+    /// civil minutes, overlapping in the instants they resolve to.
+    #[test]
+    fn two_bands_either_side_of_a_spring_forward_gap_do_not_overlap() {
+        let tz = TimeZone::get("Australia/Sydney").unwrap();
+        let bands = [
+            band(Weekday::Sun, 3 * 60, 3 * 60 + 1),
+            band(Weekday::Sun, 0, 2 * 60 + 1),
+        ];
+        let guardrail = Guardrail {
+            bands: &bands,
+            timezone: &tz,
+            excluded: &[],
+        };
+        // 2020-10-04 is Sydney's spring-forward date (02:00-03:00 AEST
+        // skips to 03:00 AEDT).
+        let range = Range::horizon(date(2020, 10, 4), 1);
+
+        let intervals = free_intervals(guardrail, range);
+
+        assert_eq!(intervals.len(), 2);
+        assert!(
+            intervals[0].end_ms <= intervals[1].start_ms,
+            "not disjoint: {intervals:?}"
+        );
     }
 
     #[test]

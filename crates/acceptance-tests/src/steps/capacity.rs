@@ -204,8 +204,17 @@ async fn dispatch_reports_needed_available(
     let available = resolve(example, &caps[2])?;
     let name = resolve(example, &caps[3])?;
     let section = capacity_row(world, &name).await?;
-    super::then_section_contains(section, &name, "report", &format!("{needed}h needed"))?;
-    super::then_section_contains(section, &name, "report", &format!("{available}h available"))
+    // Anchored on the template's own preceding text (`"— {needed}h needed, {available}h
+    // available"`) rather than a bare `"{needed}h needed"` needle: an unanchored needle
+    // is a substring of any decimal ending in the same digit -- "4.4h needed" contains
+    // "4h needed" -- so a wrong-by-a-fraction value would pass unnoticed.
+    super::then_section_contains(section, &name, "report", &format!("— {needed}h needed"))?;
+    super::then_section_contains(
+        section,
+        &name,
+        "report",
+        &format!("needed, {available}h available"),
+    )
 }
 
 async fn dispatch_reports_percent(

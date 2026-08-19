@@ -30,14 +30,16 @@ pub async fn insert_task(
     let attributes = kind.attributes();
     sqlx::query(
         "INSERT INTO tasks (capture_id, kind, deadline, deadline_type, priority, \
-         target_count, target_minutes_each, period, life_area_id, created_at_ms) \
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+         estimated_minutes, target_count, target_minutes_each, period, life_area_id, \
+         created_at_ms) \
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(capture_id)
     .bind(attributes.kind)
     .bind(attributes.deadline)
     .bind(attributes.deadline_type)
     .bind(attributes.priority)
+    .bind(attributes.estimated_minutes)
     .bind(attributes.target_count)
     .bind(attributes.target_minutes_each)
     .bind(attributes.period)
@@ -70,13 +72,14 @@ mod tests {
         Option<String>,
         Option<i64>,
         Option<i64>,
+        Option<i64>,
         Option<String>,
     );
 
     async fn stored_task(pool: &SqlitePool) -> StoredTask {
         sqlx::query_as(
-            "SELECT kind, deadline, deadline_type, priority, target_count, \
-             target_minutes_each, period FROM tasks",
+            "SELECT kind, deadline, deadline_type, priority, estimated_minutes, \
+             target_count, target_minutes_each, period FROM tasks",
         )
         .fetch_one(pool)
         .await
@@ -88,6 +91,7 @@ mod tests {
             deadline: 1787245200000,
             deadline_type: DeadlineType::Hard,
             priority: Priority::P1,
+            estimated_minutes: 180,
         }
     }
 
@@ -110,7 +114,7 @@ mod tests {
 
         assert_eq!(
             stored_task(&pool).await,
-            ("pool".to_string(), None, None, None, None, None, None)
+            ("pool".to_string(), None, None, None, None, None, None, None)
         );
     }
 
@@ -130,6 +134,7 @@ mod tests {
                 Some(1787245200000),
                 Some("hard".to_string()),
                 Some("P1".to_string()),
+                Some(180),
                 None,
                 None,
                 None,
@@ -150,6 +155,7 @@ mod tests {
             stored_task(&pool).await,
             (
                 "quota".to_string(),
+                None,
                 None,
                 None,
                 None,

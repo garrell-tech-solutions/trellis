@@ -12,11 +12,17 @@
 //!   domain is covered the moment it exists.
 //! - Every check asserts a **floor** on what it found, so a walk that starts
 //!   returning nothing fails loudly instead of passing vacuously.
-//! - **Nothing is exempt** — not even this file. The old check skipped
+//! - **No hand-written exception list.** The old check skipped
 //!   `store/mod.rs` because it named the forbidden words; the needles below
-//!   are instead spelled in halves, so the walk can cover its own source and
-//!   an exception list (the one place a real violation could hide) is not
-//!   needed at all.
+//!   are instead spelled in halves, so the walk can cover its own source
+//!   without anyone listing it. The one thing it does skip it *derives*:
+//!   a module its parent declares `#[cfg(test)] mod x;` compiles into no
+//!   shipped binary, so it is not production and the production rules do
+//!   not apply to it. That is [`production_source`]'s own reasoning — test
+//!   code legitimately writes SQL and reaches across capabilities — read at
+//!   file granularity instead of block granularity. Today it covers exactly
+//!   this file and `test_support`, and it covers them because their parent
+//!   says so, not because they are named here.
 //!
 //! What it enforces, all of it `T-module-boundary`'s dependency rule under
 //! the new directory shape:
@@ -74,6 +80,54 @@ const TECHNICAL_ROLE_DIRS: [&str; 13] = [
     "util",
     "utils",
 ];
+
+/// Modules their parent declares under `#[cfg(test)]`, so they compile into
+/// no shipped binary. Derived by reading every `mod.rs`/`lib.rs` for a
+/// `#[cfg(test)]` immediately above a `mod NAME;` declaration -- the same
+/// shape [`production_source`] looks for inline, one file up.
+fn test_only_modules() -> Vec<PathBuf> {
+    let mut modules = Vec::new();
+    for path in rust_sources() {
+        let Some(dir) = path.parent() else { continue };
+        let source = read(&path);
+        let lines: Vec<&str> = source.lines().collect();
+        for (index, line) in lines.iter().enumerate() {
+            if line.trim() != "#[cfg(test)]" {
+                continue;
+            }
+            let Some(next) = lines.get(index + 1) else {
+                continue;
+            };
+            let Some(name) = declared_module_name(next) else {
+                continue;
+            };
+            for candidate in [
+                dir.join(format!("{name}.rs")),
+                dir.join(&name).join("mod.rs"),
+            ] {
+                if candidate.is_file() {
+                    modules.push(candidate);
+                }
+            }
+        }
+    }
+    modules.sort();
+    modules.dedup();
+    modules
+}
+
+/// The name in a `mod x;` / `pub(crate) mod x;` declaration -- a
+/// declaration only, never a `mod x {` that opens a block.
+fn declared_module_name(line: &str) -> Option<String> {
+    let line = line.trim().strip_suffix(';')?;
+    let name = line.rsplit_once("mod ")?.1;
+    (!name.is_empty() && name.chars().all(|c| c.is_alphanumeric() || c == '_'))
+        .then(|| name.to_string())
+}
+
+fn is_test_only(path: &Path, test_only: &[PathBuf]) -> bool {
+    test_only.iter().any(|module| module == path)
+}
 
 fn src_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("src")
@@ -279,9 +333,10 @@ fn no_persistence_module_names_a_delivery_type() {
 #[test]
 fn only_a_persistence_module_writes_production_sql() {
     let needle = sql_needle();
+    let test_only = test_only_modules();
     let mut checked = 0;
     for path in rust_sources() {
-        if is_persistence(&path) {
+        if is_persistence(&path) || is_test_only(&path, &test_only) {
             continue;
         }
         checked += 1;
@@ -325,8 +380,12 @@ fn no_capability_names_another_capabilitys_store() {
         "only {} capabilities found, so this check covers almost nothing: {capabilities:?}",
         capabilities.len()
     );
+    let test_only = test_only_modules();
     let mut checked = 0;
     for path in rust_sources() {
+        if is_test_only(&path, &test_only) {
+            continue;
+        }
         let own = capability_of(&path);
         let source = production_source(&read(&path));
         for capability in &capabilities {
@@ -348,6 +407,44 @@ fn no_capability_names_another_capabilitys_store() {
         "only {checked} module/capability pairs were checked; the walk has \
          stopped covering the tree"
     );
+}
+
+/// The derivation itself, because a walk that silently started exempting
+/// everything would disable three of the four rules above. It asserts both
+/// ends: the modules that *are* test-only are found, and the count stays
+/// small enough that a production module has not quietly joined them.
+#[test]
+fn the_test_only_set_is_derived_and_stays_small() {
+    let test_only = test_only_modules();
+    assert!(
+        test_only.iter().any(|p| p.ends_with("test_support.rs")),
+        "test_support is declared #[cfg(test)] and should be found: {test_only:?}"
+    );
+    assert!(
+        test_only.iter().any(|p| p.ends_with("boundary.rs")),
+        "this file is declared #[cfg(test)] and should be found: {test_only:?}"
+    );
+    assert!(
+        test_only.len() <= 4,
+        "{} modules are exempt from the production rules, which is more than \
+         this crate should have; the rules cover less than they look like they \
+         do. Found {test_only:?}",
+        test_only.len()
+    );
+}
+
+#[test]
+fn a_module_declaration_is_read_but_a_module_block_is_not() {
+    assert_eq!(
+        declared_module_name("mod tests;"),
+        Some("tests".to_string())
+    );
+    assert_eq!(
+        declared_module_name("pub(crate) mod test_support;"),
+        Some("test_support".to_string())
+    );
+    assert_eq!(declared_module_name("mod tests {"), None);
+    assert_eq!(declared_module_name("use other::thing;"), None);
 }
 
 #[cfg(test)]

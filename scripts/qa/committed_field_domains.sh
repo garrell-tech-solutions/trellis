@@ -34,7 +34,7 @@ run_deadline_round_trip() {
   local name="round-trip-$(echo "$submitted_deadline" | tr -cs 'A-Za-z0-9' '-')"
   setup_scenario "$name" || return
   local body
-  body="$(printf '{"kind":"committed","deadline":"%s","deadline_type":"hard","priority":"P1","life_area":"Work"}' "$submitted_deadline")"
+  body="$(printf '{"kind":"committed","deadline":"%s","deadline_type":"hard","priority":"P1","estimated_minutes":180,"life_area":"Work"}' "$submitted_deadline")"
   qa_triage "$CAPTURE_ID" "$body"
   if [[ "$STATUS" != "201" ]]; then
     echo "FAIL: [$name] triage of \"$submitted_deadline\" returned status $STATUS, expected 201" >&2
@@ -58,7 +58,7 @@ run_invalid_deadline() {
   local name="invalid-deadline-$(echo "$bad_deadline" | tr -cs 'A-Za-z0-9' '-')"
   setup_scenario "$name" || return
   local body
-  body="$(python3 -c 'import json,sys; print(json.dumps({"kind":"committed","deadline":sys.argv[1],"deadline_type":"hard","priority":"P1"}))' "$bad_deadline")"
+  body="$(python3 -c 'import json,sys; print(json.dumps({"kind":"committed","deadline":sys.argv[1],"deadline_type":"hard","priority":"P1","estimated_minutes":180}))' "$bad_deadline")"
   qa_triage "$CAPTURE_ID" "$body"
   qa_assert_rejected_naming "$name" invalid_field deadline
   qa_stop_server
@@ -73,7 +73,7 @@ run_invalid_deadline_type() {
   local name="invalid-deadline-type-$bad_deadline_type"
   setup_scenario "$name" || return
   local body
-  body="$(printf '{"kind":"committed","deadline":"2026-08-20T17:00:00Z","deadline_type":"%s","priority":"P1"}' "$bad_deadline_type")"
+  body="$(printf '{"kind":"committed","deadline":"2026-08-20T17:00:00Z","deadline_type":"%s","priority":"P1","estimated_minutes":180}' "$bad_deadline_type")"
   qa_triage "$CAPTURE_ID" "$body"
   qa_assert_rejected_naming "$name" invalid_field deadline_type
   qa_stop_server
@@ -87,7 +87,7 @@ run_invalid_priority() {
   local name="invalid-priority-$bad_priority"
   setup_scenario "$name" || return
   local body
-  body="$(printf '{"kind":"committed","deadline":"2026-08-20T17:00:00Z","deadline_type":"hard","priority":"%s"}' "$bad_priority")"
+  body="$(printf '{"kind":"committed","deadline":"2026-08-20T17:00:00Z","deadline_type":"hard","priority":"%s","estimated_minutes":180}' "$bad_priority")"
   qa_triage "$CAPTURE_ID" "$body"
   qa_assert_rejected_naming "$name" invalid_field priority
   qa_stop_server

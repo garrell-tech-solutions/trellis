@@ -36,7 +36,7 @@ run_example() {
   body="$(python3 -c '
 import json, sys
 field, mode = sys.argv[1], sys.argv[2]
-payload = {"kind": "committed", "deadline": "2026-08-20T17:00:00Z", "deadline_type": "hard", "priority": "P1"}
+payload = {"kind": "committed", "deadline": "2026-08-20T17:00:00Z", "deadline_type": "hard", "priority": "P1", "estimated_minutes": 180}
 if mode == "omit":
     del payload[field]
 else:
@@ -50,10 +50,10 @@ print(json.dumps(payload))
   qa_stop_server
 }
 
-for field in deadline deadline_type priority; do
+for field in deadline deadline_type priority estimated_minutes; do
   run_example "$field" "omit"
 done
-for field in deadline deadline_type priority; do
+for field in deadline deadline_type priority estimated_minutes; do
   run_example "$field" "empty"
 done
 

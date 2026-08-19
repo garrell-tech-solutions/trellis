@@ -20,6 +20,10 @@ pub const VALID_DEADLINE: &str = "2026-08-20T17:00:00Z";
 /// adding one.
 pub const VALID_LIFE_AREA: &str = "Work";
 
+/// A committed estimate inside the domain (#62: required, and must be
+/// positive).
+pub const VALID_ESTIMATED_MINUTES: i64 = 180;
+
 pub fn pool() -> Value {
     json!({ "kind": "pool", "life_area": VALID_LIFE_AREA })
 }
@@ -30,6 +34,7 @@ pub fn committed() -> Value {
         "deadline": VALID_DEADLINE,
         "deadline_type": "hard",
         "priority": "P1",
+        "estimated_minutes": VALID_ESTIMATED_MINUTES,
         "life_area": VALID_LIFE_AREA,
     })
 }

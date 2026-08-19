@@ -2,6 +2,8 @@
 //! capability Trellis provides, each holding the code that delivers, renders
 //! and persists that capability (`T-package-by-business-domain`).
 //!
+//! - [`capacity`] — what each life area needs against what it has, over the
+//!   free-time horizon.
 //! - [`capture`] — raw text in, fast enough to use mid-thought.
 //! - [`triage`] — a capture becomes a typed task.
 //! - [`dismiss`] — the inbox's other exit: a capture leaves with no task.
@@ -44,6 +46,7 @@
 //! persistence module may write production SQL, and the walk fails loudly if
 //! it ever stops covering anything.
 
+pub mod capacity;
 pub mod capture;
 pub mod dismiss;
 pub mod exceptions;

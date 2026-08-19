@@ -1,19 +1,17 @@
 //! `GET /free-time`.
 //!
-//! Translation only, the same shape `stats::http` is: read the clock and
-//! the owner's zone, ask `scheduler_core::free_time::free_intervals` what
-//! each life area's guardrail projects to over the horizon minus whatever
-//! exceptions apply to it, render what it says. No arithmetic of its own
-//! beyond formatting -- summing durations and reading civil fields off an
-//! already-resolved `Zoned` is not a rule that survives changing HTTP, it
-//! is display.
+//! Translation only, the same shape `stats::http` is: ask [`super::
+//! free_time_by_life_area`] what each life area's guardrail projects to
+//! over the horizon minus whatever exceptions apply to it, render what it
+//! says. No arithmetic of its own beyond formatting -- summing durations
+//! and reading civil fields off an already-resolved `Zoned` is not a rule
+//! that survives changing HTTP, it is display.
 //!
-//! Also renders the exceptions list and its add form (`#61`): the
+//! Also renders the exceptions list and its add form (#61): the
 //! specifier's call was that the exception controls live here rather than
 //! on a page of their own, since this is the only page whose numbers they
 //! change. `exceptions::http` owns the writes; this handler only reads
-//! `exceptions::list` and `exceptions::for_life_area` back
-//! (`T-one-front-door-per-capability`).
+//! `exceptions::list` back (`T-one-front-door-per-capability`).
 
 use crate::exceptions::view::ExceptionListItem;
 use crate::life_areas::view::LifeAreaOption;
@@ -26,16 +24,8 @@ use axum::http::StatusCode;
 use axum::response::Response;
 use jiff::tz::TimeZone;
 use jiff::Timestamp;
-use scheduler_core::free_time::{free_intervals, Guardrail, Interval, Range};
+use scheduler_core::free_time::Interval;
 use sqlx::SqlitePool;
-
-/// The look-ahead this page reports over. Its own constant, not `stats::
-/// WINDOW_MS`: the two fourteens are the same number by coincidence, not by
-/// rule -- one is a retrospective instant window over past triage
-/// timestamps, this is a prospective civil-date horizon over a guardrail,
-/// and forcing them to share a constant would tie two unrelated views
-/// together for no benefit (open question 2, `free-time` brief, #60).
-const HORIZON_DAYS: i64 = 14;
 
 struct FreeTimeArea {
     id: i64,
@@ -52,13 +42,6 @@ struct FreeTimeTemplate {
     exception_error: Option<String>,
     life_area_options: Vec<LifeAreaOption>,
     nav: Vec<NavLink>,
-}
-
-/// The civil date "now" falls on, in `tz` -- what "the next fourteen days"
-/// starts counting from.
-fn today_in(now_ms: i64, tz: &TimeZone) -> Result<jiff::civil::Date, StatusCode> {
-    let now = Timestamp::from_millisecond(now_ms).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    Ok(now.to_zoned(tz.clone()).date())
 }
 
 /// One interval as the page shows it: the calendar date it falls on and its
@@ -82,75 +65,34 @@ fn format_interval(tz: &TimeZone, interval: Interval) -> Result<String, StatusCo
 }
 
 fn free_time_area(
-    id: i64,
-    name: String,
-    bands: &[scheduler_core::guardrail::Band],
+    area: super::LifeAreaFreeTime,
     tz: &TimeZone,
-    range: Range,
-    excluded: &[scheduler_core::exception::DateRange],
 ) -> Result<FreeTimeArea, StatusCode> {
-    let guardrail = Guardrail {
-        bands,
-        timezone: tz,
-        excluded,
-    };
-    let intervals = free_intervals(guardrail, range);
-    let total_ms: i64 = intervals.iter().map(|i| i.duration_ms()).sum();
-    let labels = intervals
+    let total_ms: i64 = area.intervals.iter().map(|i| i.duration_ms()).sum();
+    let labels = area
+        .intervals
         .iter()
         .map(|interval| format_interval(tz, *interval))
         .collect::<Result<Vec<_>, _>>()?;
     Ok(FreeTimeArea {
-        id,
-        name,
+        id: area.id,
+        name: area.name,
         total_hours: total_ms / 3_600_000,
         intervals: labels,
     })
-}
-
-/// The owner's zone and the civil-date horizon to project it over --
-/// [`show_free_time`]'s setup half, ahead of the per-life-area projection.
-async fn today_range(pool: &SqlitePool, clock: &Clock) -> Result<(TimeZone, Range), StatusCode> {
-    let zone_name = crate::settings::current_timezone(pool)
-        .await
-        .map_err(write_failed)?;
-    let tz = scheduler_core::timezone::resolve(&zone_name)
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    let today = today_in(clock.now_ms(), &tz)?;
-    Ok((tz.clone(), Range::horizon(today, HORIZON_DAYS)))
-}
-
-async fn free_time_areas(
-    pool: &SqlitePool,
-    tz: &TimeZone,
-    range: Range,
-) -> Result<Vec<FreeTimeArea>, StatusCode> {
-    let guardrails = crate::life_areas::guardrails(pool)
-        .await
-        .map_err(write_failed)?;
-    let mut life_areas = Vec::with_capacity(guardrails.len());
-    for area in guardrails {
-        let excluded = crate::exceptions::for_life_area(pool, area.id)
-            .await
-            .map_err(write_failed)?;
-        life_areas.push(free_time_area(
-            area.id,
-            area.name,
-            &area.bands,
-            tz,
-            range,
-            &excluded,
-        )?);
-    }
-    Ok(life_areas)
 }
 
 pub async fn show_free_time(
     State(pool): State<SqlitePool>,
     State(clock): State<Clock>,
 ) -> Result<Response, StatusCode> {
-    let (tz, range) = today_range(&pool, &clock).await?;
-    let life_areas = free_time_areas(&pool, &tz, range).await?;
+    let (areas, tz) = super::free_time_by_life_area(&pool, &clock)
+        .await
+        .map_err(write_failed)?;
+    let life_areas = areas
+        .into_iter()
+        .map(|area| free_time_area(area, &tz))
+        .collect::<Result<Vec<_>, _>>()?;
     let exceptions = crate::exceptions::list(&pool).await.map_err(write_failed)?;
     let life_area_options = crate::life_areas::active_options(&pool)
         .await
@@ -171,7 +113,7 @@ pub async fn show_free_time(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::platform::test_support::{get_ok, test_pool};
+    use crate::platform::test_support::{assert_life_area_name_is_escaped, get_ok, test_pool};
 
     async fn get_free_time(pool: &SqlitePool) -> String {
         get_ok(pool, Clock::system(), "/free-time").await
@@ -223,13 +165,7 @@ mod tests {
     #[tokio::test]
     async fn hostile_text_in_a_life_area_name_is_escaped() {
         let (_dir, pool) = test_pool().await;
-        crate::life_areas::store::insert(&pool, "<script>alert('boom')</script>")
-            .await
-            .unwrap();
 
-        let body = get_free_time(&pool).await;
-
-        assert!(!body.contains("<script>"), "got:\n{body}");
-        assert!(body.contains("boom"), "got:\n{body}");
+        assert_life_area_name_is_escaped(&pool, Clock::system(), "/free-time").await;
     }
 }

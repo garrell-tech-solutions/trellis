@@ -17,6 +17,7 @@ use std::sync::LazyLock;
 mod app_client;
 mod app_shell;
 mod build;
+mod capacity;
 mod capture;
 mod committed_empty_fields;
 mod committed_field_domains;
@@ -267,6 +268,9 @@ pub async fn dispatch(
         return outcome;
     }
     if let Some(outcome) = exceptions::dispatch(world, text, example).await {
+        return outcome;
+    }
+    if let Some(outcome) = capacity::dispatch(world, text, example).await {
         return outcome;
     }
 

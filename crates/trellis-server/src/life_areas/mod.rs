@@ -74,23 +74,30 @@ pub(crate) async fn active_id_for_name(
 /// One life area's guardrail, as a reader outside this capability needs it:
 /// enough to compute free time from, nothing about how it is stored.
 ///
-/// `pool_only` has no field of its own because it is **resolved before a
-/// reader sees it**: a pool-only life area reports no bands, which projects
-/// to zero free time -- the same answer a life area with no guardrail yet
-/// gives. `D-life-area-owns-its-time` settles that pool-only means never
-/// placed, so no reader should have to remember to check a second field to
-/// honour it.
+/// `bands` is **resolved before a reader sees it**: a pool-only life area
+/// reports no bands, which projects to zero free time -- the same answer a
+/// life area with no guardrail yet gives. `D-life-area-owns-its-time`
+/// settles that pool-only means never placed, so no reader should have to
+/// remember to check a second field to honour it for *that* purpose.
 ///
-/// It says "resolved" rather than "always empty" on purpose. Empty is what
-/// the stored rows *ought* to be and currently need not be: nothing forbids
-/// a life area from being marked pool-only while it still holds bands (the
-/// GAP in `docs/design/architecture.md`), and before [`guardrails`] began
-/// applying the rule, `/free-time` reported 32h for a life area the owner
-/// had marked never scheduled.
+/// `bands` says "resolved" rather than "always empty" on purpose. Empty is
+/// what the stored rows *ought* to be and currently need not be: nothing
+/// forbids a life area from being marked pool-only while it still holds
+/// bands (the GAP in `docs/design/architecture.md`), and before
+/// [`guardrails`] began applying the rule, `/free-time` reported 32h for a
+/// life area the owner had marked never scheduled.
+///
+/// `pool_only` rides along anyway, for a second purpose `bands` alone
+/// cannot serve: `#62`'s capacity page must tell "never scheduled" apart
+/// from "walled, currently zero available" -- the first reports no
+/// capacity at all, the second reports zero-available-and-possibly-over
+/// (`T-guardrail-well-formedness`). Anticipated in `active_id_for_name`'s
+/// own doc comment before this slice existed to need it.
 pub(crate) struct LifeAreaGuardrail {
     pub(crate) id: i64,
     pub(crate) name: String,
     pub(crate) bands: Vec<Band>,
+    pub(crate) pool_only: bool,
 }
 
 fn to_band(row: store::GuardrailBandRow) -> Band {
@@ -125,6 +132,7 @@ pub(crate) async fn guardrails(pool: &SqlitePool) -> Result<Vec<LifeAreaGuardrai
             id: row.id,
             name: row.name,
             bands,
+            pool_only: row.pool_only,
         });
     }
     Ok(guardrails)
@@ -175,6 +183,24 @@ mod tests {
             "a never-scheduled life area offered {} band(s) to project free time from",
             work.bands.len()
         );
+    }
+
+    #[tokio::test]
+    async fn a_pool_only_life_area_reports_pool_only_true() {
+        let (_dir, pool) = test_pool().await;
+
+        let work = work_as_reported(&pool, true).await;
+
+        assert!(work.pool_only);
+    }
+
+    #[tokio::test]
+    async fn a_walled_life_area_reports_pool_only_false() {
+        let (_dir, pool) = test_pool().await;
+
+        let work = work_as_reported(&pool, false).await;
+
+        assert!(!work.pool_only);
     }
 
     #[tokio::test]

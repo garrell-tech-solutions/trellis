@@ -4,6 +4,14 @@
 //! async. A triage decision can be made — and tested — with nothing but this
 //! module, which is the property T-core-no-tokio's "no tokio" rule exists to
 //! protect.
+//!
+//! [`fields`] holds the closed-domain vocabulary (which field a rejection
+//! names, and the fixed-set columns' parsing); this module composes that
+//! vocabulary into the triage decision itself.
+
+mod fields;
+
+pub use fields::{DeadlineType, Field, Period, Priority};
 
 /// The stored discriminant for each kind. These three strings are the durable
 /// contract shared by the `tasks.kind` column and every delivery mechanism.
@@ -27,6 +35,11 @@ pub struct TriageFields {
     pub target_count: Option<i64>,
     pub target_minutes_each: Option<i64>,
     pub period: Option<String>,
+    /// Required for a committed task only (#62's capacity number cannot
+    /// count what committed work asks for otherwise). Pool is never placed
+    /// (`D-no-pool-on-calendar`) and quota already carries
+    /// `target_minutes_each`, so neither needs this field.
+    pub estimated_minutes: Option<i64>,
     /// The life area submitted by name, required for every kind
     /// (`T-quota-targets-required`'s reasoning: a field the downstream
     /// cannot function without belongs required at the boundary). Whether
@@ -35,123 +48,6 @@ pub struct TriageFields {
     /// adapter's job (`T-capability-owns-its-queries`) once
     /// [`require_life_area`] has confirmed something was submitted at all.
     pub life_area: Option<String>,
-}
-
-/// A field a triage submission must supply, or supply a valid value for.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Field {
-    Deadline,
-    DeadlineType,
-    Priority,
-    TargetCount,
-    TargetMinutesEach,
-    Period,
-    LifeArea,
-}
-
-impl Field {
-    /// The name reported back to whoever submitted the triage.
-    pub fn name(self) -> &'static str {
-        match self {
-            Self::Deadline => "deadline",
-            Self::DeadlineType => "deadline_type",
-            Self::Priority => "priority",
-            Self::TargetCount => "target_count",
-            Self::TargetMinutesEach => "target_minutes_each",
-            Self::Period => "period",
-            Self::LifeArea => "life_area",
-        }
-    }
-}
-
-/// `deadline_type`'s closed domain (D-guardrails-never-yield: the M3
-/// scheduler branches on this field, so it cannot carry an undefined value).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum DeadlineType {
-    Hard,
-    Soft,
-}
-
-impl DeadlineType {
-    fn parse(value: &str) -> Option<Self> {
-        match value {
-            "hard" => Some(Self::Hard),
-            "soft" => Some(Self::Soft),
-            _ => None,
-        }
-    }
-
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Hard => "hard",
-            Self::Soft => "soft",
-        }
-    }
-}
-
-/// `priority`'s closed domain, for the same reason as [`DeadlineType`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Priority {
-    P1,
-    P2,
-    P3,
-    P4,
-}
-
-impl Priority {
-    fn parse(value: &str) -> Option<Self> {
-        match value {
-            "P1" => Some(Self::P1),
-            "P2" => Some(Self::P2),
-            "P3" => Some(Self::P3),
-            "P4" => Some(Self::P4),
-            _ => None,
-        }
-    }
-
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::P1 => "P1",
-            Self::P2 => "P2",
-            Self::P3 => "P3",
-            Self::P4 => "P4",
-        }
-    }
-}
-
-/// `period`'s closed domain (T-period-closed-set): the same M8 cadence-math
-/// reason as [`DeadlineType`] and [`Priority`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Period {
-    Week,
-    Month,
-}
-
-impl Period {
-    fn parse(value: &str) -> Option<Self> {
-        match value {
-            "week" => Some(Self::Week),
-            "month" => Some(Self::Month),
-            _ => None,
-        }
-    }
-
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Week => "week",
-            Self::Month => "month",
-        }
-    }
-}
-
-/// Parses a deadline to UTC epoch milliseconds (T-jiff-epoch-millis). Rejects
-/// anything that does not name a real instant — a syntactically plausible but
-/// invalid timestamp (`2026-13-45T99:99:99Z`) fails the same as free text.
-fn parse_deadline_ms(value: &str) -> Option<i64> {
-    value
-        .parse::<jiff::Timestamp>()
-        .ok()
-        .map(|ts| ts.as_millisecond())
 }
 
 /// Why a set of triage fields does not describe a task.
@@ -186,6 +82,13 @@ pub enum TaskKind {
         deadline: i64,
         deadline_type: DeadlineType,
         priority: Priority,
+        /// Required at triage (#62): capacity cannot report what a
+        /// committed task asks for if it carries no minutes. A stored task
+        /// predating this column reads back as `None` on
+        /// [`TaskAttributes`] -- this field itself is never optional,
+        /// because it is only ever built from a fresh, validated
+        /// submission.
+        estimated_minutes: i64,
     },
     /// T-quota-targets-required: a quota task cannot be scheduled at M8 or
     /// reported on at the reckoning without a target, so all three fields are
@@ -210,6 +113,7 @@ pub struct TaskAttributes {
     pub deadline: Option<i64>,
     pub deadline_type: Option<&'static str>,
     pub priority: Option<&'static str>,
+    pub estimated_minutes: Option<i64>,
     pub target_count: Option<i64>,
     pub target_minutes_each: Option<i64>,
     pub period: Option<&'static str>,
@@ -294,35 +198,40 @@ impl TaskKind {
     /// Required fields are checked before values, and in a fixed order, so a
     /// submission with several problems names the same one every time.
     fn committed_from(fields: &TriageFields) -> Result<Self, TriageRejection> {
-        let (deadline, deadline_type, priority) = Self::require_committed_fields(fields)?;
-        Self::parse_committed_fields(deadline, deadline_type, priority)
+        let (deadline, deadline_type, priority, estimated_minutes) =
+            Self::require_committed_fields(fields)?;
+        Self::parse_committed_fields(deadline, deadline_type, priority, estimated_minutes)
     }
 
     fn require_committed_fields(
         fields: &TriageFields,
-    ) -> Result<(String, String, String), TriageRejection> {
+    ) -> Result<(String, String, String, i64), TriageRejection> {
         let deadline = require(Field::Deadline, &fields.deadline)?;
         let deadline_type = require(Field::DeadlineType, &fields.deadline_type)?;
         let priority = require(Field::Priority, &fields.priority)?;
-        Ok((deadline, deadline_type, priority))
+        let estimated_minutes = require_i64(Field::EstimatedMinutes, fields.estimated_minutes)?;
+        Ok((deadline, deadline_type, priority, estimated_minutes))
     }
 
     fn parse_committed_fields(
         deadline: String,
         deadline_type: String,
         priority: String,
+        estimated_minutes: i64,
     ) -> Result<Self, TriageRejection> {
-        let deadline =
-            parse_deadline_ms(&deadline).ok_or(TriageRejection::InvalidField(Field::Deadline))?;
+        let deadline = fields::parse_deadline_ms(&deadline)
+            .ok_or(TriageRejection::InvalidField(Field::Deadline))?;
         let deadline_type = DeadlineType::parse(&deadline_type)
             .ok_or(TriageRejection::InvalidField(Field::DeadlineType))?;
         let priority =
             Priority::parse(&priority).ok_or(TriageRejection::InvalidField(Field::Priority))?;
+        let estimated_minutes = require_positive(Field::EstimatedMinutes, estimated_minutes)?;
 
         Ok(Self::Committed {
             deadline,
             deadline_type,
             priority,
+            estimated_minutes,
         })
     }
 
@@ -365,11 +274,13 @@ impl TaskKind {
                 deadline,
                 deadline_type,
                 priority,
+                estimated_minutes,
             } => TaskAttributes {
                 kind: COMMITTED,
                 deadline: Some(*deadline),
                 deadline_type: Some(deadline_type.as_str()),
                 priority: Some(priority.as_str()),
+                estimated_minutes: Some(*estimated_minutes),
                 ..TaskAttributes::default()
             },
             Self::Quota {
@@ -390,99 +301,6 @@ impl TaskKind {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    // --- parse_deadline_ms -------------------------------------------------
-
-    #[test]
-    fn parse_deadline_ms_agrees_on_the_same_instant_across_equivalent_textual_forms() {
-        for text in [
-            "2026-08-20T17:00:00Z",
-            "2026-08-20T17:00:00.000Z",
-            "2026-08-20T19:00:00+02:00",
-        ] {
-            assert_eq!(
-                parse_deadline_ms(text),
-                Some(1787245200000),
-                "form {text} did not round-trip to the expected instant"
-            );
-        }
-    }
-
-    #[test]
-    fn parse_deadline_ms_rejects_free_text() {
-        assert_eq!(parse_deadline_ms("banana"), None);
-    }
-
-    #[test]
-    fn parse_deadline_ms_rejects_a_syntactically_plausible_but_invalid_instant() {
-        assert_eq!(parse_deadline_ms("2026-13-45T99:99:99Z"), None);
-    }
-
-    #[test]
-    fn parse_deadline_ms_rejects_a_sql_injection_shaped_string() {
-        assert_eq!(parse_deadline_ms("'); DROP TABLE tasks;--"), None);
-    }
-
-    // --- DeadlineType --------------------------------------------------------
-
-    #[test]
-    fn deadline_type_parses_hard_and_soft() {
-        assert_eq!(DeadlineType::parse("hard"), Some(DeadlineType::Hard));
-        assert_eq!(DeadlineType::parse("soft"), Some(DeadlineType::Soft));
-    }
-
-    #[test]
-    fn deadline_type_rejects_values_outside_the_domain() {
-        assert_eq!(DeadlineType::parse("squishy"), None);
-        assert_eq!(
-            DeadlineType::parse("HARD"),
-            None,
-            "the domain is case-sensitive"
-        );
-    }
-
-    // --- Priority --------------------------------------------------------
-
-    #[test]
-    fn priority_parses_p1_through_p4() {
-        assert_eq!(Priority::parse("P1"), Some(Priority::P1));
-        assert_eq!(Priority::parse("P2"), Some(Priority::P2));
-        assert_eq!(Priority::parse("P3"), Some(Priority::P3));
-        assert_eq!(Priority::parse("P4"), Some(Priority::P4));
-    }
-
-    #[test]
-    fn priority_rejects_values_outside_the_domain() {
-        assert_eq!(Priority::parse("P9"), None);
-        assert_eq!(Priority::parse("p1"), None, "the domain is case-sensitive");
-    }
-
-    // --- Period --------------------------------------------------------
-
-    #[test]
-    fn period_parses_week_and_month() {
-        assert_eq!(Period::parse("week"), Some(Period::Week));
-        assert_eq!(Period::parse("month"), Some(Period::Month));
-    }
-
-    #[test]
-    fn period_rejects_values_outside_the_domain() {
-        assert_eq!(Period::parse("fortnight"), None);
-        assert_eq!(Period::parse("Week"), None, "the domain is case-sensitive");
-    }
-
-    // --- Field --------------------------------------------------------
-
-    #[test]
-    fn each_field_reports_the_name_the_submitter_used() {
-        assert_eq!(Field::Deadline.name(), "deadline");
-        assert_eq!(Field::DeadlineType.name(), "deadline_type");
-        assert_eq!(Field::Priority.name(), "priority");
-        assert_eq!(Field::TargetCount.name(), "target_count");
-        assert_eq!(Field::TargetMinutesEach.name(), "target_minutes_each");
-        assert_eq!(Field::Period.name(), "period");
-        assert_eq!(Field::LifeArea.name(), "life_area");
-    }
 
     // --- require_life_area --------------------------------------------------
 
@@ -620,6 +438,7 @@ mod tests {
             deadline: Some("2026-08-20T17:00:00Z".to_string()),
             deadline_type: Some("hard".to_string()),
             priority: Some("P1".to_string()),
+            estimated_minutes: Some(180),
             ..TriageFields::default()
         }
     }
@@ -632,6 +451,7 @@ mod tests {
                 deadline: 1787245200000,
                 deadline_type: DeadlineType::Hard,
                 priority: Priority::P1,
+                estimated_minutes: 180,
             })
         );
     }
@@ -646,8 +466,39 @@ mod tests {
                 deadline: Some(1787245200000),
                 deadline_type: Some("hard"),
                 priority: Some("P1"),
+                estimated_minutes: Some(180),
                 ..TaskAttributes::default()
             }
+        );
+    }
+
+    #[test]
+    fn committed_fields_without_an_estimate_are_rejected_as_missing() {
+        let mut fields = committed_fields();
+        fields.estimated_minutes = None;
+        assert_eq!(
+            TaskKind::from_fields(&fields),
+            Err(TriageRejection::MissingField(Field::EstimatedMinutes))
+        );
+    }
+
+    #[test]
+    fn committed_fields_with_a_zero_estimate_are_rejected_as_invalid() {
+        let mut fields = committed_fields();
+        fields.estimated_minutes = Some(0);
+        assert_eq!(
+            TaskKind::from_fields(&fields),
+            Err(TriageRejection::InvalidField(Field::EstimatedMinutes))
+        );
+    }
+
+    #[test]
+    fn committed_fields_with_a_negative_estimate_are_rejected_as_invalid() {
+        let mut fields = committed_fields();
+        fields.estimated_minutes = Some(-5);
+        assert_eq!(
+            TaskKind::from_fields(&fields),
+            Err(TriageRejection::InvalidField(Field::EstimatedMinutes))
         );
     }
 

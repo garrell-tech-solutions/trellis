@@ -127,6 +127,7 @@ async fn dispatch_triaged_as_committed(
         "deadline": deadline,
         "deadline_type": deadline_type,
         "priority": priority,
+        "estimated_minutes": payloads::VALID_ESTIMATED_MINUTES,
         "life_area": payloads::VALID_LIFE_AREA,
     });
     when_triaged(world, body).await

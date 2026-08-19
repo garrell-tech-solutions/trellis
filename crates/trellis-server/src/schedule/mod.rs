@@ -56,17 +56,16 @@ fn to_schedule_task(row: &store::CommittedTaskRow) -> ScheduleTask {
     }
 }
 
-fn reason_str(reason: UnplaceableReason) -> &'static str {
-    match reason {
-        UnplaceableReason::NoWindow => "no_window",
-        UnplaceableReason::DeadlineUnreachable => "deadline_unreachable",
-        UnplaceableReason::CapacityExceeded => "capacity_exceeded",
-        UnplaceableReason::ChunkPolicyUnsatisfiable => "chunk_policy_unsatisfiable",
-    }
-}
-
 /// Runs the forward pass over every active committed task and replaces the
 /// stored plan wholesale.
+///
+/// `schedule()`'s answer reaches [`store::replace_plan`] as the very types
+/// it returned. Flattening `PlacedBlock` into an `(i64, i64, i64)` on the
+/// way was three fields whose names survived only in the reader's head --
+/// two of them the same type, so transposing start and end still compiled
+/// -- and it forced the reason enum open a layer earlier than the row that
+/// stores it (`T-templates-take-view-models`' own reasoning, applied to a
+/// store: a boundary carries the shape its far side means, not a tuple).
 pub(crate) async fn generate(pool: &SqlitePool, clock: &Clock) -> Result<(), sqlx::Error> {
     let rows = store::committed_tasks(pool).await?;
     let tasks: Vec<ScheduleTask> = rows.iter().map(to_schedule_task).collect();
@@ -74,18 +73,7 @@ pub(crate) async fn generate(pool: &SqlitePool, clock: &Clock) -> Result<(), sql
 
     let result = schedule(&tasks, &[], &windows, &[], &[], &[], clock.now_ms());
 
-    let placed: Vec<(i64, i64, i64)> = result
-        .placed
-        .iter()
-        .map(|block| (block.task_id, block.start_ms, block.end_ms))
-        .collect();
-    let unplaceable: Vec<(i64, &str)> = result
-        .unplaceable
-        .iter()
-        .map(|task| (task.task_id, reason_str(task.reason)))
-        .collect();
-
-    store::replace_plan(pool, &placed, &unplaceable).await
+    store::replace_plan(pool, &result.placed, &result.unplaceable).await
 }
 
 /// `ms` as the RFC 3339 instant every acceptance scenario names literally
@@ -95,6 +83,19 @@ fn format_instant(ms: i64) -> String {
     jiff::Timestamp::from_millisecond(ms)
         .expect("a stored block instant is representable")
         .to_string()
+}
+
+/// A stored reason, back as the closed thing it was written from.
+///
+/// The `expect` states an invariant two independent gates already hold:
+/// nothing but [`store::replace_plan`] writes this column, and it writes
+/// `UnplaceableReason::as_str`; migration `0009`'s own `CHECK` refuses any
+/// other word. Re-closing it here is what stops the page rendering whatever
+/// text happened to be in the row -- the same move `to_schedule_task` makes
+/// for `deadline_type` and `priority`.
+fn parse_reason(stored: &str) -> UnplaceableReason {
+    UnplaceableReason::parse(stored)
+        .expect("a stored reason was written from UnplaceableReason::as_str")
 }
 
 /// Every currently placed block, earliest first.
@@ -121,7 +122,7 @@ pub(crate) async fn unplaceable_rows(
         .into_iter()
         .map(|row| view::UnplaceableRow {
             text: row.raw_text,
-            reason: row.reason,
+            reason: parse_reason(&row.reason).as_str(),
         })
         .collect())
 }

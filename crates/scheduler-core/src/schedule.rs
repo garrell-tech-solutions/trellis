@@ -16,7 +16,7 @@
 //! `tasks`, `busy`, `windows` and `now` are the four this slice actually
 //! reads.
 
-use crate::free_time::Interval;
+use crate::interval::{subtract_all, total_duration_ms, Interval};
 use crate::task::{DeadlineType, Priority};
 
 /// One committed task as [`schedule`] needs it -- already resolved to a
@@ -60,6 +60,64 @@ pub enum UnplaceableReason {
     /// Time remains, but no single free interval is long enough to hold the
     /// task whole (`D-placed-whole-or-not-at-all`'s own failure mode).
     ChunkPolicyUnsatisfiable,
+}
+
+/// Every reason paired with the word it is written as wherever it leaves
+/// this type -- a table, not a match, for the reason `guardrail::WEEKDAYS`
+/// and `task::fields::FIELD_NAMES` already are one (`T-complexity-8`).
+///
+/// **The spelling belongs here, not in the adapter that stores it.** #75
+/// shipped it as a `reason_str` in `trellis-server`, which made the closed
+/// vocabulary a fact about one delivery mechanism: the enum said there are
+/// four reasons, the server said what they are called, migration `0009`'s
+/// `CHECK` said it again, and nothing tied the three together. Every other
+/// closed domain that crosses the database boundary already answers for its
+/// own text next to the type -- `DeadlineType`, `Priority`, `Period`,
+/// `guardrail::Weekday` -- and this is the same job.
+const REASON_WORDS: [(UnplaceableReason, &str); 4] = [
+    (UnplaceableReason::NoWindow, "no_window"),
+    (
+        UnplaceableReason::DeadlineUnreachable,
+        "deadline_unreachable",
+    ),
+    (UnplaceableReason::CapacityExceeded, "capacity_exceeded"),
+    (
+        UnplaceableReason::ChunkPolicyUnsatisfiable,
+        "chunk_policy_unsatisfiable",
+    ),
+];
+
+impl UnplaceableReason {
+    /// Every variant, in the order [`REASON_WORDS`] lists them -- so a
+    /// caller that must cover the whole closed set (the schema round-trip
+    /// property, an exhaustive fixture) walks the list rather than
+    /// restating it, and gains the fifth reason for free.
+    pub const ALL: [UnplaceableReason; 4] = [
+        UnplaceableReason::NoWindow,
+        UnplaceableReason::DeadlineUnreachable,
+        UnplaceableReason::CapacityExceeded,
+        UnplaceableReason::ChunkPolicyUnsatisfiable,
+    ];
+
+    /// The word this reason is stored and shown as.
+    pub fn as_str(self) -> &'static str {
+        REASON_WORDS
+            .iter()
+            .find(|(reason, _)| *reason == self)
+            .map(|(_, word)| *word)
+            .expect("every UnplaceableReason variant is listed in REASON_WORDS")
+    }
+
+    /// The reason `value` names, if it names one. `pub` for the same reason
+    /// `DeadlineType::parse` is: a stored reason comes back as text, and the
+    /// read path re-closes it here rather than passing an open string
+    /// through to a template.
+    pub fn parse(value: &str) -> Option<Self> {
+        REASON_WORDS
+            .iter()
+            .find(|(_, word)| *word == value)
+            .map(|(reason, _)| *reason)
+    }
 }
 
 /// One task placed on the schedule. `end_ms` doubles as the projected
@@ -141,40 +199,6 @@ fn window_for(windows: &[LifeAreaWindow], life_area_id: i64) -> &[Interval] {
         .unwrap_or(&[])
 }
 
-/// `intervals`, minus every instant any interval in `remove` covers.
-/// General interval subtraction: each original interval may be split into
-/// zero, one or two pieces per subtrahend.
-fn subtract_all(intervals: &[Interval], remove: &[Interval]) -> Vec<Interval> {
-    let mut result = intervals.to_vec();
-    for cut in remove {
-        result = result
-            .into_iter()
-            .flat_map(|interval| subtract_one(interval, *cut))
-            .collect();
-    }
-    result
-}
-
-fn subtract_one(interval: Interval, remove: Interval) -> Vec<Interval> {
-    if remove.end_ms <= interval.start_ms || remove.start_ms >= interval.end_ms {
-        return vec![interval];
-    }
-    let mut pieces = Vec::new();
-    if remove.start_ms > interval.start_ms {
-        pieces.push(Interval {
-            start_ms: interval.start_ms,
-            end_ms: remove.start_ms,
-        });
-    }
-    if remove.end_ms < interval.end_ms {
-        pieces.push(Interval {
-            start_ms: remove.end_ms,
-            end_ms: interval.end_ms,
-        });
-    }
-    pieces
-}
-
 /// The earliest interval in `intervals` that can hold `estimate_ms` whole,
 /// finishing at or before `deadline_ms` when one applies
 /// (`D-placed-whole-or-not-at-all`: whole or not at all, never a partial
@@ -225,10 +249,6 @@ fn reachable_even_placed_first(
     hard_deadline.is_none() || earliest_fit(raw_window, estimate_ms, hard_deadline).is_some()
 }
 
-fn total_free_ms(free: &[Interval]) -> i64 {
-    free.iter().map(|interval| interval.duration_ms()).sum()
-}
-
 fn block_at(task: &ScheduleTask, interval: Interval, estimate_ms: i64) -> PlacedBlock {
     PlacedBlock {
         task_id: task.id,
@@ -268,7 +288,7 @@ fn place_one(
     }
 
     let free = subtract_all(&raw_window, occupied);
-    if total_free_ms(&free) < estimate_ms {
+    if total_duration_ms(&free) < estimate_ms {
         return Err(UnplaceableReason::CapacityExceeded);
     }
 
@@ -585,6 +605,59 @@ mod tests {
         );
     }
 
+    // --- the reason vocabulary ------------------------------------------------
+
+    #[test]
+    fn every_reason_round_trips_through_its_own_word() {
+        for reason in UnplaceableReason::ALL {
+            assert_eq!(
+                UnplaceableReason::parse(reason.as_str()),
+                Some(reason),
+                "{reason:?} did not survive its own word"
+            );
+        }
+    }
+
+    #[test]
+    fn the_four_reasons_are_spelled_the_way_the_schema_and_the_page_name_them() {
+        assert_eq!(UnplaceableReason::NoWindow.as_str(), "no_window");
+        assert_eq!(
+            UnplaceableReason::DeadlineUnreachable.as_str(),
+            "deadline_unreachable"
+        );
+        assert_eq!(
+            UnplaceableReason::CapacityExceeded.as_str(),
+            "capacity_exceeded"
+        );
+        assert_eq!(
+            UnplaceableReason::ChunkPolicyUnsatisfiable.as_str(),
+            "chunk_policy_unsatisfiable"
+        );
+    }
+
+    #[test]
+    fn no_two_reasons_share_a_word() {
+        let mut words: Vec<&str> = UnplaceableReason::ALL.iter().map(|r| r.as_str()).collect();
+        words.sort_unstable();
+        let count = words.len();
+        words.dedup();
+        assert_eq!(
+            words.len(),
+            count,
+            "two reasons are stored as the same word"
+        );
+    }
+
+    #[test]
+    fn parse_rejects_a_word_outside_the_domain() {
+        assert_eq!(UnplaceableReason::parse("no_room"), None);
+        assert_eq!(
+            UnplaceableReason::parse("NO_WINDOW"),
+            None,
+            "the domain is case-sensitive"
+        );
+    }
+
     // --- the empty partition -------------------------------------------------
 
     #[test]
@@ -619,31 +692,5 @@ mod tests {
                 reason: UnplaceableReason::NoWindow,
             }]
         );
-    }
-
-    // --- subtract_all / subtract_one -----------------------------------------
-
-    #[test]
-    fn subtract_one_splits_an_interval_around_a_middle_removal() {
-        let pieces = subtract_one(interval(0, 10), interval(4, 6));
-        assert_eq!(pieces, vec![interval(0, 4), interval(6, 10)]);
-    }
-
-    #[test]
-    fn subtract_one_leaves_a_non_overlapping_interval_untouched() {
-        let pieces = subtract_one(interval(0, 2), interval(4, 6));
-        assert_eq!(pieces, vec![interval(0, 2)]);
-    }
-
-    #[test]
-    fn subtract_one_consumes_an_interval_entirely_covered() {
-        let pieces = subtract_one(interval(2, 4), interval(0, 10));
-        assert_eq!(pieces, Vec::new());
-    }
-
-    #[test]
-    fn subtract_all_applies_every_removal_in_turn() {
-        let result = subtract_all(&[interval(0, 10)], &[interval(0, 2), interval(8, 10)]);
-        assert_eq!(result, vec![interval(2, 8)]);
     }
 }

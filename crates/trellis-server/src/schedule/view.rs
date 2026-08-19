@@ -14,14 +14,22 @@ pub struct PlacedRow {
 }
 
 /// One task the last generation could not place, and why.
+///
+/// `reason` is `&'static str` rather than `String` on purpose: the only
+/// values that exist are `UnplaceableReason::as_str`'s four, so the type
+/// itself says the page cannot render whatever text a row happened to hold.
+/// A `String` here would have been the stored column handed straight to the
+/// template, which is the shape `T-templates-take-view-models` exists to
+/// keep out of a view model.
 pub struct UnplaceableRow {
     pub text: String,
-    pub reason: String,
+    pub reason: &'static str,
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use scheduler_core::schedule::UnplaceableReason;
 
     #[test]
     fn a_placed_row_carries_its_own_fields() {
@@ -41,7 +49,7 @@ mod tests {
     fn an_unplaceable_row_carries_its_reason() {
         let row = UnplaceableRow {
             text: "rebuild the deck".to_string(),
-            reason: "chunk_policy_unsatisfiable".to_string(),
+            reason: UnplaceableReason::ChunkPolicyUnsatisfiable.as_str(),
         };
         assert_eq!(row.reason, "chunk_policy_unsatisfiable");
     }

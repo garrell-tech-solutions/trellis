@@ -5,6 +5,7 @@
 //! `schedule_unplaceable`, the infeasibility report alongside them
 //! (`T-fact-plan-line`).
 
+use scheduler_core::schedule::{PlacedBlock, Unplaceable};
 use sqlx::SqlitePool;
 
 /// A committed task as the forward pass needs it, plus its own text --
@@ -101,29 +102,32 @@ async fn clear_plan(tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>) -> Result<(), 
 
 async fn insert_placed_blocks(
     tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
-    placed: &[(i64, i64, i64)],
+    placed: &[PlacedBlock],
 ) -> Result<(), sqlx::Error> {
-    for (task_id, start_ms, end_ms) in placed {
+    for block in placed {
         sqlx::query(
             "INSERT INTO block (task_id, start_ms, end_ms, state) VALUES (?, ?, ?, 'proposed')",
         )
-        .bind(task_id)
-        .bind(start_ms)
-        .bind(end_ms)
+        .bind(block.task_id)
+        .bind(block.start_ms)
+        .bind(block.end_ms)
         .execute(&mut **tx)
         .await?;
     }
     Ok(())
 }
 
+/// Each reason as `UnplaceableReason::as_str` writes it -- the core owns
+/// the word, this owns the row. Migration `0009`'s `CHECK` names the same
+/// four and is the backstop, not the definition.
 async fn insert_unplaceable_reasons(
     tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
-    unplaceable: &[(i64, &str)],
+    unplaceable: &[Unplaceable],
 ) -> Result<(), sqlx::Error> {
-    for (task_id, reason) in unplaceable {
+    for task in unplaceable {
         sqlx::query("INSERT INTO schedule_unplaceable (task_id, reason) VALUES (?, ?)")
-            .bind(task_id)
-            .bind(*reason)
+            .bind(task.task_id)
+            .bind(task.reason.as_str())
             .execute(&mut **tx)
             .await?;
     }
@@ -137,8 +141,8 @@ async fn insert_unplaceable_reasons(
 /// still standing, or the reverse.
 pub async fn replace_plan(
     pool: &SqlitePool,
-    placed: &[(i64, i64, i64)],
-    unplaceable: &[(i64, &str)],
+    placed: &[PlacedBlock],
+    unplaceable: &[Unplaceable],
 ) -> Result<(), sqlx::Error> {
     let mut tx = pool.begin().await?;
     clear_plan(&mut tx).await?;
@@ -151,6 +155,7 @@ pub async fn replace_plan(
 mod tests {
     use super::*;
     use crate::platform::test_support::{seeded_life_area_id, test_pool};
+    use scheduler_core::schedule::UnplaceableReason;
     use scheduler_core::task::{DeadlineType, Priority, TaskKind};
 
     async fn given_a_committed_task(pool: &SqlitePool, life_area_id: i64, raw_text: &str) -> i64 {
@@ -176,6 +181,18 @@ mod tests {
             .fetch_one(pool)
             .await
             .unwrap()
+    }
+
+    fn block(task_id: i64, start_ms: i64, end_ms: i64) -> PlacedBlock {
+        PlacedBlock {
+            task_id,
+            start_ms,
+            end_ms,
+        }
+    }
+
+    fn refused(task_id: i64, reason: UnplaceableReason) -> Unplaceable {
+        Unplaceable { task_id, reason }
     }
 
     #[tokio::test]
@@ -257,7 +274,7 @@ mod tests {
         let work = seeded_life_area_id(&pool, "Work").await;
         let task_id = given_a_committed_task(&pool, work, "write the Q3 deck").await;
 
-        replace_plan(&pool, &[(task_id, 1_000, 2_000)], &[])
+        replace_plan(&pool, &[block(task_id, 1_000, 2_000)], &[])
             .await
             .unwrap();
 
@@ -275,9 +292,16 @@ mod tests {
         let work = seeded_life_area_id(&pool, "Work").await;
         let task_id = given_a_committed_task(&pool, work, "rebuild the deck").await;
 
-        replace_plan(&pool, &[], &[(task_id, "chunk_policy_unsatisfiable")])
-            .await
-            .unwrap();
+        replace_plan(
+            &pool,
+            &[],
+            &[refused(
+                task_id,
+                UnplaceableReason::ChunkPolicyUnsatisfiable,
+            )],
+        )
+        .await
+        .unwrap();
 
         let unplaceable = unplaceable_tasks(&pool).await.unwrap();
         assert_eq!(
@@ -289,6 +313,43 @@ mod tests {
         );
     }
 
+    /// **The schema and the core agree about the four reasons, and this is
+    /// what makes them agree.** Migration `0009`'s `CHECK (reason IN ...)`
+    /// and `UnplaceableReason::as_str` are two independent statements of one
+    /// closed vocabulary, in two languages, with nothing tying them -- the
+    /// same shape `removing_a_band_removes_exactly_the_rows_that_band
+    /// _displayed` exists for over in guardrails. A fifth reason added to
+    /// the enum and not to a migration fails here rather than at the first
+    /// run that produces it.
+    ///
+    /// It walks `ALL` rather than listing the four, so the fifth reason is
+    /// covered by existing, and it is exhaustive rather than sampled
+    /// because the set is closed and has four members -- a property test
+    /// over it would be strictly weaker.
+    #[tokio::test]
+    async fn every_reason_the_core_can_produce_is_a_reason_the_schema_accepts() {
+        let (_dir, pool) = test_pool().await;
+        let work = seeded_life_area_id(&pool, "Work").await;
+        let task_id = given_a_committed_task(&pool, work, "rebuild the deck").await;
+
+        for reason in UnplaceableReason::ALL {
+            replace_plan(&pool, &[], &[refused(task_id, reason)])
+                .await
+                .unwrap_or_else(|error| panic!("the schema refused {reason:?}: {error}"));
+
+            let stored = unplaceable_tasks(&pool).await.unwrap();
+            assert_eq!(
+                stored
+                    .iter()
+                    .map(|row| row.reason.as_str())
+                    .collect::<Vec<_>>(),
+                vec![reason.as_str()],
+                "{reason:?} did not survive the round trip through the row"
+            );
+            assert_eq!(UnplaceableReason::parse(&stored[0].reason), Some(reason));
+        }
+    }
+
     #[tokio::test]
     async fn replace_plan_wholly_replaces_the_previous_plan() {
         let (_dir, pool) = test_pool().await;
@@ -296,10 +357,10 @@ mod tests {
         let first = given_a_committed_task(&pool, work, "first").await;
         let second = given_a_committed_task(&pool, work, "second").await;
 
-        replace_plan(&pool, &[(first, 1_000, 2_000)], &[])
+        replace_plan(&pool, &[block(first, 1_000, 2_000)], &[])
             .await
             .unwrap();
-        replace_plan(&pool, &[(second, 3_000, 4_000)], &[])
+        replace_plan(&pool, &[block(second, 3_000, 4_000)], &[])
             .await
             .unwrap();
 
@@ -315,9 +376,13 @@ mod tests {
         let first = given_a_committed_task(&pool, work, "first").await;
         let second = given_a_committed_task(&pool, work, "second").await;
 
-        replace_plan(&pool, &[(second, 3_000, 4_000), (first, 1_000, 2_000)], &[])
-            .await
-            .unwrap();
+        replace_plan(
+            &pool,
+            &[block(second, 3_000, 4_000), block(first, 1_000, 2_000)],
+            &[],
+        )
+        .await
+        .unwrap();
 
         let placed = placed_blocks(&pool).await.unwrap();
         assert_eq!(

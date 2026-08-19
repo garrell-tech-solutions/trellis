@@ -375,7 +375,7 @@ least slack with priority as tiebreak; splitting under chunk policy. Approach is
 greedy-with-repair, not a solver (`T-greedy-with-repair`) — the interface stays
 clean so an optimiser can be swapped in behind it.
 
-### Infeasibility report — closed enum (M3, #11)
+### Infeasibility report — closed enum (M3, #11) — built at S1
 
 ```
 no_window · capacity_exceeded · deadline_unreachable · chunk_policy_unsatisfiable
@@ -383,6 +383,31 @@ no_window · capacity_exceeded · deadline_unreachable · chunk_policy_unsatisfi
 
 Every unplaceable task is named with one of these. The placed/unplaceable
 partition is total.
+
+**Which one is reported when more than one is true is part of the contract**,
+and it is the order `UnplaceableReason`'s variants are declared in — a life
+area with no hours at all is `no_window` before it is anything else, and a
+hard deadline unreachable *even placed first* outranks losing the hours to
+competition.
+
+**The enum owns its own spelling** — `UnplaceableReason::as_str` and
+`::parse`, beside the type, like `DeadlineType`, `Priority`, `Period` and
+`guardrail::Weekday` before it. It shipped at `#75` with the four words
+written out in `trellis-server`, which made a closed core vocabulary a fact
+about one delivery mechanism: the enum said there were four reasons, the
+server said what they were called, migration `0009`'s `CHECK` said it again,
+and nothing tied the three. The read path re-closes too, so
+`view::UnplaceableRow::reason` is a `&'static str` from `as_str` rather than
+whatever text the row held — a stored column reaching a template is the
+shape `T-templates-take-view-models` exists to keep out of a view model.
+
+The `CHECK` and the enum are still two statements in two languages, and what
+ties them is a test: `every_reason_the_core_can_produce_is_a_reason_the_
+schema_accepts` walks `UnplaceableReason::ALL`, stores each, and reads it
+back. Same shape as `removing_a_band_removes_exactly_the_rows_that_band_
+displayed` over in guardrails, and for the same reason — a fifth reason
+added to the enum and not to a migration fails there rather than at the
+first run that produces it.
 
 ### Pins — specified, lands at M3 (`T-pins-in-constraints`)
 
@@ -426,7 +451,32 @@ owns a constant the other reads.
 `Interval` is instants (`start_ms`, `end_ms`), not civil times, because
 intervals that are adjacent or overlapping only make sense compared as
 instants — a DST transition can reorder civil clock readings. That is the
-type M3's `schedule()` will consume and M4's calendar sync will produce.
+type M3's `schedule()` consumes and M4's calendar sync will produce.
+
+**It lives in `scheduler_core::interval`, with the algebra over it**, and
+not in `free_time` where it started (moved 2026-08-19, at M3 S1). The type's
+own doc had always said it "was never named after a producer"; it was still
+*housed* by one, and that cost twice. `schedule` had to name `free_time` in
+its imports while having nothing to do with projecting a guardrail. And the
+paragraph below — written at `#61`, predicting that pins and calendar busy
+"need interval-minus-interval subtraction, which does not exist here yet" —
+came true in the shape it did not predict: `#75` built exactly that
+subtraction as two private helpers inside `schedule`, where the second
+producer cannot reach it and would write it again. A value type and its
+operations belong together, in a module named after the value.
+
+```
+interval::Interval { start_ms, end_ms }   duration_ms · contains · subtract
+interval::subtract_all(intervals, remove) -> Vec<Interval>
+interval::total_duration_ms(intervals)    -> i64
+```
+
+`subtract_all` **preserves order rather than restoring it**: each interval's
+pieces come out in start order and in its own place, so a sorted disjoint
+input stays sorted and disjoint and the function owes no sort. `schedule`'s
+`earliest_fit` depends on that; `tests/interval_properties.rs` states it,
+along with subtraction itself — an instant survives iff it was in the input
+and in nothing removed.
 
 **Exceptions narrow, and only narrow** (`#61`). A dated exception is the
 owner saying a week is not normal; it removes civil dates from what a

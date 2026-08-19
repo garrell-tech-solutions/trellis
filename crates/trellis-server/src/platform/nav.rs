@@ -17,6 +17,7 @@ pub(crate) enum Page {
     Stats,
     FreeTime,
     Capacity,
+    Schedule,
 }
 
 impl Page {
@@ -27,6 +28,7 @@ impl Page {
             Self::Stats => "Stats",
             Self::FreeTime => "Free time",
             Self::Capacity => "Capacity",
+            Self::Schedule => "Schedule",
         }
     }
 
@@ -37,6 +39,7 @@ impl Page {
             Self::Stats => "/stats",
             Self::FreeTime => "/free-time",
             Self::Capacity => "/capacity",
+            Self::Schedule => "/schedule",
         }
     }
 }
@@ -58,11 +61,12 @@ pub(crate) struct NavLink {
 /// author of a new variant here; this list is the one step it cannot force,
 /// which is why `app`'s `every_header_link_reaches_the_page_it_names` walks
 /// it rather than a list of its own.
-pub(crate) const ALL: [Page; 5] = [
+pub(crate) const ALL: [Page; 6] = [
     Page::Inbox,
     Page::LifeAreas,
     Page::FreeTime,
     Page::Capacity,
+    Page::Schedule,
     Page::Stats,
 ];
 
@@ -88,7 +92,14 @@ mod tests {
         let nav = links(Page::Inbox);
         assert_eq!(
             nav.iter().map(|l| l.label).collect::<Vec<_>>(),
-            vec!["Inbox", "Life areas", "Free time", "Capacity", "Stats"]
+            vec![
+                "Inbox",
+                "Life areas",
+                "Free time",
+                "Capacity",
+                "Schedule",
+                "Stats"
+            ]
         );
     }
 
@@ -99,7 +110,8 @@ mod tests {
         assert_eq!(nav[1].path, "/life-areas");
         assert_eq!(nav[2].path, "/free-time");
         assert_eq!(nav[3].path, "/capacity");
-        assert_eq!(nav[4].path, "/stats");
+        assert_eq!(nav[4].path, "/schedule");
+        assert_eq!(nav[5].path, "/stats");
     }
 
     #[test]

@@ -11,5 +11,6 @@ pub mod free_time;
 pub mod guardrail;
 pub mod life_area;
 pub mod ratio;
+pub mod schedule;
 pub mod task;
 pub mod timezone;

@@ -53,7 +53,11 @@ pub enum DeadlineType {
 }
 
 impl DeadlineType {
-    pub(super) fn parse(value: &str) -> Option<Self> {
+    /// `pub` because a stored committed task's `deadline_type` column comes
+    /// back as text: #75's schedule reads it back to reconstruct the task
+    /// it places, the same reason `Period::parse` is `pub` for a stored
+    /// quota row's `period`.
+    pub fn parse(value: &str) -> Option<Self> {
         match value {
             "hard" => Some(Self::Hard),
             "soft" => Some(Self::Soft),
@@ -79,7 +83,9 @@ pub enum Priority {
 }
 
 impl Priority {
-    pub(super) fn parse(value: &str) -> Option<Self> {
+    /// `pub` for the same reason as [`DeadlineType::parse`]: #75's schedule
+    /// reads a stored committed task's `priority` column back as text.
+    pub fn parse(value: &str) -> Option<Self> {
         match value {
             "P1" => Some(Self::P1),
             "P2" => Some(Self::P2),

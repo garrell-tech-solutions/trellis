@@ -308,6 +308,13 @@ pub enum Period       { Week, Month }
 `deadline` is **UTC epoch milliseconds** (`T-jiff-epoch-millis`), parsed with
 `jiff` at the boundary. Never a string, in the type or the column.
 
+**Committed tasks carry a `splittable` flag, unticked by default**
+(`T-splitting-is-opt-in`). Unticked, the task is one block or it does not fit —
+and is *told* so, rather than quietly chopped. Ticked, the scheduler may chunk
+it under the chunk policy. Nothing orders the pieces of a task the owner splits
+by hand: **ordering between tasks is a dependency and Trellis has no such
+concept.**
+
 Each variant carries exactly the fields that kind means, so "a pool task has no
 deadline" is a fact about the type rather than a claim about one payload.
 `TaskAttributes` is the nullable row-shaped projection; at most one attribute
@@ -381,8 +388,9 @@ under chunk policy.
 
 **Chunk policy — specified (`T-minimum-session-per-life-area`).** Each life area
 carries a **minimum session length**, the smallest piece of a split worth
-scheduling. It governs **committed** tasks only: pool is never placed, and a
-quota task's `target_minutes_each` already defines its session. A task shorter
+scheduling. **It governs only tasks the owner marked splittable** (`T-splitting-is-opt-in`),
+and committed tasks only: pool is never placed, and a quota task's
+`target_minutes_each` already defines its session. A task shorter
 than the minimum is placed **whole**; every chunk of a split must clear it, or
 the task is `chunk_policy_unsatisfiable`. Seeded Work 90 · Learning 45 ·
 Family 30 · Fitness 20 · Home 15, new life areas defaulting to 30. **No
@@ -407,6 +415,14 @@ pin { task_id, start, end, source }
 
 A first-class Constraints-layer entity, not a column on `Block`. **One interval
 — there is no recurrence rule on a pin** (`D-recurrence-is-re-commitment`).
+
+**A pin binds a task, never a chunk** (`T-pin-binds-a-task-not-a-chunk`). For a
+non-splittable task that is the whole block; for a splittable one, a piece of
+exactly that interval is placed there and the remainder schedules around it.
+Chunks have no identity — `R-incremental-patching` regenerates them — so a pin
+that referenced one could not survive a recompute. **A pin is exempt from the
+minimum session**: the minimum stops the *engine* manufacturing fragments and
+has no business overruling the owner.
 
 **Recurring commitments** — *"Learning with a friend every Tuesday 20:00"* —
 compose from three things that already exist rather than a fourth: **cadence**
@@ -629,7 +645,7 @@ recovered from U4 (#7) and #11's own text.
 
 | # | Statement | |
 |---|---|---|
-| 1 | **No two blocks overlap** — with each other, or with `facts` (`in_progress`, `completed`, `missed` blocks) or pins. | specified |
+| 1 | **No two blocks overlap** — with each other, or with `facts` (`in_progress`, `completed`, `missed` blocks) or pins, **other than the pin binding a block's own task** (`T-pin-binds-a-task-not-a-chunk`). | specified |
 | 2 | A block lies entirely within **one** allowed window. | specified (U4, #7) |
 | 3 | **Conservation under splitting**: a placed task's chunks sum **exactly** to its estimate. | specified |
 | 4 | Every **placed** task with a **hard** deadline finishes at or before it; one that cannot is unplaceable, never placed late. Soft deadlines may be overrun and carry a projected finish. | specified (`T-hard-refuses-soft-slips`) |

@@ -89,6 +89,47 @@ pub async fn unplaceable_tasks(pool: &SqlitePool) -> Result<Vec<UnplaceableTaskR
     .await
 }
 
+async fn clear_plan(tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>) -> Result<(), sqlx::Error> {
+    sqlx::query("DELETE FROM block WHERE state IN ('proposed', 'published')")
+        .execute(&mut **tx)
+        .await?;
+    sqlx::query("DELETE FROM schedule_unplaceable")
+        .execute(&mut **tx)
+        .await?;
+    Ok(())
+}
+
+async fn insert_placed_blocks(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    placed: &[(i64, i64, i64)],
+) -> Result<(), sqlx::Error> {
+    for (task_id, start_ms, end_ms) in placed {
+        sqlx::query(
+            "INSERT INTO block (task_id, start_ms, end_ms, state) VALUES (?, ?, ?, 'proposed')",
+        )
+        .bind(task_id)
+        .bind(start_ms)
+        .bind(end_ms)
+        .execute(&mut **tx)
+        .await?;
+    }
+    Ok(())
+}
+
+async fn insert_unplaceable_reasons(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    unplaceable: &[(i64, &str)],
+) -> Result<(), sqlx::Error> {
+    for (task_id, reason) in unplaceable {
+        sqlx::query("INSERT INTO schedule_unplaceable (task_id, reason) VALUES (?, ?)")
+            .bind(task_id)
+            .bind(*reason)
+            .execute(&mut **tx)
+            .await?;
+    }
+    Ok(())
+}
+
 /// Replaces the whole stored plan: every placed block and every
 /// unplaceable reason, wholesale (`R-incremental-patching`: recomputed
 /// from scratch, never patched). One transaction, so a reader never sees a
@@ -100,29 +141,9 @@ pub async fn replace_plan(
     unplaceable: &[(i64, &str)],
 ) -> Result<(), sqlx::Error> {
     let mut tx = pool.begin().await?;
-    sqlx::query("DELETE FROM block WHERE state IN ('proposed', 'published')")
-        .execute(&mut *tx)
-        .await?;
-    sqlx::query("DELETE FROM schedule_unplaceable")
-        .execute(&mut *tx)
-        .await?;
-    for (task_id, start_ms, end_ms) in placed {
-        sqlx::query(
-            "INSERT INTO block (task_id, start_ms, end_ms, state) VALUES (?, ?, ?, 'proposed')",
-        )
-        .bind(task_id)
-        .bind(start_ms)
-        .bind(end_ms)
-        .execute(&mut *tx)
-        .await?;
-    }
-    for (task_id, reason) in unplaceable {
-        sqlx::query("INSERT INTO schedule_unplaceable (task_id, reason) VALUES (?, ?)")
-            .bind(task_id)
-            .bind(*reason)
-            .execute(&mut *tx)
-            .await?;
-    }
+    clear_plan(&mut tx).await?;
+    insert_placed_blocks(&mut tx, placed).await?;
+    insert_unplaceable_reasons(&mut tx, unplaceable).await?;
     tx.commit().await
 }
 

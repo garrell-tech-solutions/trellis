@@ -264,17 +264,29 @@ fn unplaceable_section(world: &World) -> Result<&str, String> {
 /// The `<li>...</li>` markup for the row naming `needle`, found by content
 /// rather than position -- the same shape `app_shell`'s own
 /// `header_link_html` uses to find one link among several.
-fn row_containing<'a>(section: &'a str, needle: &str) -> Result<&'a str, String> {
-    let at = section
-        .find(needle)
-        .ok_or_else(|| format!("expected {needle:?} in:\n{section}"))?;
+/// The `<li>` markup's own start and end offsets around whichever
+/// occurrence of `needle` `at` names -- [`row_containing`]'s bounds-finding
+/// half, split out from locating `needle` itself.
+fn li_bounds(section: &str, at: usize, needle: &str) -> Result<(usize, usize), String> {
     let start = section[..at]
         .rfind("<li>")
         .ok_or_else(|| format!("malformed row markup near {needle:?}"))?;
     let end = section[start..]
         .find("</li>")
         .ok_or_else(|| format!("unterminated row near {needle:?}"))?;
+    Ok((start, end))
+}
+
+fn row_containing<'a>(section: &'a str, needle: &str) -> Result<&'a str, String> {
+    let at = section
+        .find(needle)
+        .ok_or_else(|| format!("expected {needle:?} in:\n{section}"))?;
+    let (start, end) = li_bounds(section, at, needle)?;
     Ok(&section[start..start + end + "</li>".len()])
+}
+
+fn placed_row<'a>(world: &'a World, text: &str) -> Result<&'a str, String> {
+    row_containing(placed_section(world)?, text)
 }
 
 fn dispatch_places(
@@ -285,8 +297,7 @@ fn dispatch_places(
     let text = resolve(example, &caps[1])?;
     let start = resolve(example, &caps[2])?;
     let end = resolve(example, &caps[3])?;
-    let section = placed_section(world)?;
-    let row = row_containing(section, &text)?;
+    let row = placed_row(world, &text)?;
     super::then_section_contains(row, &text, "start at", &start)?;
     super::then_section_contains(row, &text, "end at", &end)
 }

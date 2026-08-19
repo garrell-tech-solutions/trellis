@@ -96,18 +96,19 @@ mod tests {
         assert!(body.contains("Nothing to schedule"), "got:\n{body}");
     }
 
-    #[tokio::test]
-    async fn generating_then_viewing_shows_the_placed_task() {
-        let (_dir, pool) = test_pool().await;
-        let work = seeded_life_area_id(&pool, "Work").await;
-        crate::life_areas::store::insert_guardrail_band(&pool, work, "Mon", 540, 1020)
+    /// A committed task that fits Monday's 09:00-17:00 band whole -- the
+    /// setup shared by every test whose task is meant to place, not to
+    /// exercise a particular deadline or estimate.
+    async fn given_a_placeable_committed_task(pool: &SqlitePool, raw_text: &str) {
+        let work = seeded_life_area_id(pool, "Work").await;
+        crate::life_areas::store::insert_guardrail_band(pool, work, "Mon", 540, 1020)
             .await
             .unwrap();
-        let capture_id = crate::capture::store::insert(&pool, "write the Q3 deck", "web", 0)
+        let capture_id = crate::capture::store::insert(pool, raw_text, "web", 0)
             .await
             .unwrap();
         crate::triage::store::insert_task(
-            &pool,
+            pool,
             capture_id,
             &TaskKind::Committed {
                 deadline: 1_786_957_200_000 + 4 * 24 * 3_600_000,
@@ -120,6 +121,12 @@ mod tests {
         )
         .await
         .unwrap();
+    }
+
+    #[tokio::test]
+    async fn generating_then_viewing_shows_the_placed_task() {
+        let (_dir, pool) = test_pool().await;
+        given_a_placeable_committed_task(&pool, "write the Q3 deck").await;
 
         let (status, body) = post_generate(&pool, pinned_monday_nine()).await;
         assert_eq!(status, StatusCode::OK);
@@ -166,28 +173,7 @@ mod tests {
     #[tokio::test]
     async fn hostile_task_text_stays_escaped() {
         let (_dir, pool) = test_pool().await;
-        let work = seeded_life_area_id(&pool, "Work").await;
-        crate::life_areas::store::insert_guardrail_band(&pool, work, "Mon", 540, 1020)
-            .await
-            .unwrap();
-        let capture_id =
-            crate::capture::store::insert(&pool, "<script>alert('boom')</script>", "web", 0)
-                .await
-                .unwrap();
-        crate::triage::store::insert_task(
-            &pool,
-            capture_id,
-            &TaskKind::Committed {
-                deadline: 1_786_957_200_000 + 4 * 24 * 3_600_000,
-                deadline_type: DeadlineType::Hard,
-                priority: Priority::P2,
-                estimated_minutes: 120,
-            },
-            Some(work),
-            0,
-        )
-        .await
-        .unwrap();
+        given_a_placeable_committed_task(&pool, "<script>alert('boom')</script>").await;
 
         post_generate(&pool, pinned_monday_nine()).await;
         let body = get_ok(&pool, pinned_monday_nine(), "/schedule").await;

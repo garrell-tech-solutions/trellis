@@ -250,6 +250,17 @@ were discussing different subjects.
 
 Bare "domain" is always the life area. If you mean packaging, write both words.
 
+## And "overlap" means guardrails, never blocks
+
+The fourth word, pinned after conflating three things cost a round trip on
+2026-08-19.
+
+| Term | Means |
+|---|---|
+| **overlap** | Two **guardrails** claiming the same hours. Legal and expected — the life areas compete for that time (`D-life-area-owns-its-time`). |
+| ~~overlapping blocks~~ | **Cannot happen.** Invariant 1. Two blocks never share an instant, and never share one with a fact or a pin. |
+| **adjacency** | Two guardrails **meeting at a seam** — Work ending at 17:00 where Learning begins. Not overlap. This is what U4 was about, and a block never crosses one (`T-blocks-do-not-cross-guardrail-seams`). |
+
 ## And "window" is not used at all
 
 The fourth overloaded word, caught before M2 wrote it into code rather than
@@ -608,9 +619,13 @@ a task is scheduled entirely or not at all, so chunks can be required to sum
 property a proptest can falsify from a `schedule()` output alone; those three
 are a different shape.
 
-Invariant 2 has a known cost, accepted deliberately: a 2h task allowed in both
-Work and Personal, with Work ending and Personal starting at 17:00, cannot use
-those two contiguous free hours.
+**Invariant 2's cost, corrected 2026-08-19** (`T-blocks-do-not-cross-guardrail-seams`).
+It was recorded as *"a 2h task … cannot use those two contiguous free hours"*,
+which is only true of a task that cannot be **split**. The ordinary case places
+the work at exactly the hours it wanted, as two adjacent blocks — 16:00–17:00 in
+Work's hours, 17:00–19:00 in Learning's, worked straight through. **The cost
+that survives is narrow:** a task whose minimum chunk forbids the smaller piece
+is unplaceable where a crossing block would have fitted.
 
 ---|---|---|
 | 1 | — | **GAP** |
@@ -772,5 +787,5 @@ Everything above marked **GAP**, in the order it blocks work:
 | ~~Which five domains, and one concept or two~~ | ~~M1 S4, M9~~ | **closed** — `T-life-areas-are-data`, #47 |
 | ~~Per-life-area capacity vs `allowed_windows`~~ | ~~M2~~ | **closed** — `T-capacity-two-axes` + `D-life-area-owns-its-time`, #6 |
 | `Block::missed` unreachable under silence-means-done | M6 | #4 |
-| U3 / U4 — backward-pass input, window crossing | M3 | #7 · ~~U2~~ closed by `T-hard-refuses-soft-slips` |
+| U3 — backward-pass input | M3 | #7 · ~~U2~~ `T-hard-refuses-soft-slips` · ~~U4~~ `T-blocks-do-not-cross-guardrail-seams` |
 | ~~Crate layout ratification~~ | ~~nothing; cost grows~~ | **closed** — `T-package-by-business-domain`, #44 |

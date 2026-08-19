@@ -8,16 +8,17 @@
 # app-shell-stats-03: the stats page carries the shared header and marks itself current
 # app-shell-free-time-04: the free time page carries the shared header and marks itself current
 # app-shell-capacity-05: the capacity page carries the shared header and marks itself current
-# app-shell-links-go-where-they-say-06: following a header link reaches the page it names
-# app-shell-fragment-swap-07: a fragment swap leaves the header alone and carries no header of its own
-# app-shell-plain-links-08: header links are ordinary links, not htmx requests
-# app-shell-renders-no-user-data-09: the header renders no capture or life area text
+# app-shell-schedule-06: the schedule page carries the shared header and marks itself current
+# app-shell-links-go-where-they-say-07: following a header link reaches the page it names
+# app-shell-fragment-swap-08: a fragment swap leaves the header alone and carries no header of its own
+# app-shell-plain-links-09: header links are ordinary links, not htmx requests
+# app-shell-renders-no-user-data-10: the header renders no capture or life area text
 #
-# 01 to 05 are the same three assertions made literally on each page rather
+# 01 to 06 are the same three assertions made literally on each page rather
 # than once over an Examples table of page names, per the life-areas-
 # duplicate-03 lesson: a scenario whose subject is sameness across pages
 # gives the mutator only invalid page names to produce, which error rather
-# than fail. Five literal scenarios cost five copies and can each fail.
+# than fail. Six literal scenarios cost six copies and can each fail.
 #
 # 04 arrived with the free time page (#60). T-nav-is-the-site-map makes that
 # automatic rather than a judgement: every page in the route table is in the
@@ -46,7 +47,7 @@ Feature: Every page carries the same navigation header
 
     Examples:
       | links                               | label     |
-      | Inbox, Life areas, Free time, Capacity, Stats | Inbox     |
+      | Inbox, Life areas, Free time, Capacity, Schedule, Stats | Inbox     |
 
   # app-shell-life-areas-02: the life areas page carries the shared header and marks itself current
   Scenario: The life areas page carries the shared header and marks itself current
@@ -58,7 +59,7 @@ Feature: Every page carries the same navigation header
 
     Examples:
       | links                               | label      |
-      | Inbox, Life areas, Free time, Capacity, Stats | Life areas |
+      | Inbox, Life areas, Free time, Capacity, Schedule, Stats | Life areas |
 
   # app-shell-stats-03: the stats page carries the shared header and marks itself current
   Scenario: The stats page carries the shared header and marks itself current
@@ -70,7 +71,7 @@ Feature: Every page carries the same navigation header
 
     Examples:
       | links                               | label     |
-      | Inbox, Life areas, Free time, Capacity, Stats | Stats     |
+      | Inbox, Life areas, Free time, Capacity, Schedule, Stats | Stats     |
 
   # app-shell-free-time-04: the free time page carries the shared header and marks itself current
   Scenario: The free time page carries the shared header and marks itself current
@@ -82,7 +83,7 @@ Feature: Every page carries the same navigation header
 
     Examples:
       | links                               | label     |
-      | Inbox, Life areas, Free time, Capacity, Stats | Free time |
+      | Inbox, Life areas, Free time, Capacity, Schedule, Stats | Free time |
 
   # app-shell-capacity-05: the capacity page carries the shared header and marks itself current
   Scenario: The capacity page carries the shared header and marks itself current
@@ -94,9 +95,21 @@ Feature: Every page carries the same navigation header
 
     Examples:
       | links                                         | label    |
-      | Inbox, Life areas, Free time, Capacity, Stats | Capacity |
+      | Inbox, Life areas, Free time, Capacity, Schedule, Stats | Capacity |
 
-  # app-shell-links-go-where-they-say-06: following a header link reaches the page it names
+  # app-shell-schedule-06: the schedule page carries the shared header and marks itself current
+  Scenario: The schedule page carries the shared header and marks itself current
+    When the schedule page is viewed
+    Then the header links are exactly "<links>"
+    And the header marks "<label>" as the current page
+    And the header marks exactly one link as the current page
+    And the page declares the 422 swap handling
+
+    Examples:
+      | links                                                   | label    |
+      | Inbox, Life areas, Free time, Capacity, Schedule, Stats | Schedule |
+
+  # app-shell-links-go-where-they-say-07: following a header link reaches the page it names
   Scenario: Each header link points at the page it names and reaches it
     When the inbox is viewed
     Then the header link "<label>" points at "<path>"
@@ -109,9 +122,10 @@ Feature: Every page carries the same navigation header
       | Life areas | /life-areas |
       | Free time  | /free-time  |
       | Capacity   | /capacity   |
+      | Schedule   | /schedule   |
       | Stats      | /stats      |
 
-  # app-shell-fragment-swap-07: a fragment swap leaves the header alone and carries no header of its own
+  # app-shell-fragment-swap-08: a fragment swap leaves the header alone and carries no header of its own
   Scenario: A fragment swap leaves the header alone and carries no header of its own
     Given a capture with raw text "buy milk" is waiting in the untriaged queue
     When the capture is triaged as a pool task through the page
@@ -119,12 +133,12 @@ Feature: Every page carries the same navigation header
     When the inbox is viewed
     Then the header appears exactly once
 
-  # app-shell-plain-links-08: header links are ordinary links, not htmx requests
+  # app-shell-plain-links-09: header links are ordinary links, not htmx requests
   Scenario: Header links are ordinary links, not htmx requests
     When the inbox is viewed
     Then every header link is an ordinary link that loads a full page
 
-  # app-shell-renders-no-user-data-09: the header renders no capture or life area text
+  # app-shell-renders-no-user-data-10: the header renders no capture or life area text
   Scenario: The header renders no capture or life area text
     Given a capture with raw text "<script>alert('boom')</script>" is waiting in the untriaged queue
     And a life area named "<script>alert('boom')</script>" was added

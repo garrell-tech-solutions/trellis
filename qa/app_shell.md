@@ -25,8 +25,8 @@ looks at the source.
 ## By-hand walkthrough — do this once, in a real browser
 
 1. `cargo run -p trellis-server -- serve --db <fresh path>`.
-2. Open `http://localhost:8080`. Confirm there is a header with five links:
-   **Inbox**, **Life areas**, **Free time**, **Capacity**, **Stats**.
+2. Open `http://localhost:8080`. Confirm there is a header with six links:
+   **Inbox**, **Life areas**, **Free time**, **Capacity**, **Schedule**, **Stats**.
 3. Confirm the header shows you are on **Inbox** — and that the other two are
    not also marked.
 4. Click **Life areas**. Confirm you land on the life-areas page, its content
@@ -59,18 +59,18 @@ looks at the source.
 
 ## Procedure — the same header on all three pages
 
-1. `GET /`, `GET /life-areas`, the free time page, the capacity page and `GET /stats`.
+1. `GET /`, `GET /life-areas`, the free time page, the capacity page, the schedule page and `GET /stats`.
 2. Extract the header region from each.
-3. Compare the five, ignoring only the current-page marking.
+3. Compare the six, ignoring only the current-page marking.
 
 ### Expected Observable Outcomes
-- All five carry a header offering exactly **Inbox**, **Life areas**,
-  **Free time**, **Capacity** and **Stats** — the same five, in the same order, with the
+- All six carry a header offering exactly **Inbox**, **Life areas**,
+  **Free time**, **Capacity**, **Schedule** and **Stats** — the same six, in the same order, with the
   same labels and the same targets.
-- Apart from which entry is marked current, the five are **identical**. Any
+- Apart from which entry is marked current, the six are **identical**. Any
   difference at all is the failure this procedure exists to catch: a header
   that was copied rather than shared has already started to drift.
-- **Exactly five links.** `#59` added guardrails to the life areas page rather
+- **Exactly six links.** `#59` added guardrails to the life areas page rather
   than a page of its own, so there is no guardrails link; `#60` added Free time and `#62` added
   Capacity, each page and link together. A link to a page that does not exist is worse
   than no link.
@@ -78,7 +78,7 @@ looks at the source.
 ## Procedure — the current page is marked, and only it
 
 1. `GET /` and read the header.
-2. Repeat for `GET /life-areas`, the free time page, the capacity page and `GET /stats`.
+2. Repeat for `GET /life-areas`, the free time page, the capacity page, the schedule page and `GET /stats`.
 
 ### Expected Observable Outcomes
 - Each page marks **its own** entry as current: the inbox marks Inbox, the
@@ -94,13 +94,13 @@ looks at the source.
 
 ## Procedure — every link goes where it says
 
-1. `GET /` and read the five links' targets out of the header.
+1. `GET /` and read the six links' targets out of the header.
 2. Request each target.
 3. On each response, read the header again.
 
 ### Expected Observable Outcomes
 - The link labelled **Inbox** reaches a page marking Inbox current; the same
-  for Life areas, Free time, Capacity and Stats.
+  for Life areas, Free time, Capacity, Schedule and Stats.
 - This is the pairing that catches a crossed link. Each page marking itself
   correctly (the procedure above) and each link reaching a page that marks the
   label you clicked are two different facts, and a nav wired one entry off
@@ -111,7 +111,7 @@ looks at the source.
 ## Procedure — the 422 swap handling is on every page now, and unchanged where it was
 
 1. `GET /` and confirm the page declares htmx's 422 swap handling.
-2. Repeat for `GET /life-areas`, the free time page, the capacity page and `GET /stats`.
+2. Repeat for `GET /life-areas`, the free time page, the capacity page, the schedule page and `GET /stats`.
 3. On the inbox, submit a triage with no life area chosen. Confirm the
    rejection still comes back `422` and its body still swaps onto the row.
 4. On the life-areas page, submit a duplicate life area name. Confirm the same.
@@ -164,7 +164,7 @@ looks at the source.
 
 1. Submit a capture with raw text `<script>alert('boom')</script>`.
 2. Add a life area with the same name.
-3. `GET /`, `GET /life-areas`, the free time page, the capacity page and `GET /stats`, and read
+3. `GET /`, `GET /life-areas`, the free time page, the capacity page, the schedule page and `GET /stats`, and read
    the **header region** of each raw response.
 
 ### Expected Observable Outcomes

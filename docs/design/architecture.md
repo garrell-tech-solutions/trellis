@@ -390,10 +390,22 @@ partition is total.
 pin { task_id, start, end, source }
 ```
 
-A first-class Constraints-layer entity, not a column on `Block`. Two questions
-it raises are unanswered: which chunk a pin binds when a task splits, and
-whether a pin ever expires. The reason enum above has no code for "a stale pin
-is in the way".
+A first-class Constraints-layer entity, not a column on `Block`. **One interval
+— there is no recurrence rule on a pin** (`D-recurrence-is-re-commitment`).
+
+**Recurring commitments** — *"Learning with a friend every Tuesday 20:00"* —
+compose from three things that already exist rather than a fourth: **cadence**
+from quota's `period`, **placement** from a pin, and **survival** from
+re-committing at the weekly review, prompted at each task's own period boundary.
+A skipped review changes nothing; the commitment ends the first time the owner
+attends a review and does not re-commit (U7). **So M3 builds the pin above
+unchanged; the recurrence is M8's.**
+
+One question it raises is still unanswered: **which chunk a pin binds when a
+task splits** across days, given chunks have no identity to refer to — or
+whether pinning suppresses splitting entirely. The reason enum above has no code
+for "a stale pin is in the way". *(Pin lifetime is answered for recurring pins —
+they die at the period boundary unless renewed — but not for one-off pins.)*
 
 ### Guardrails and free time — built (M2 slices 1–2, `#59`, `#60`)
 

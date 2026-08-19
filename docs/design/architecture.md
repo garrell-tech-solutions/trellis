@@ -370,8 +370,14 @@ The plan is recomputed from scratch on every trigger — never patched
 
 ### Passes
 
-Backward pass over hard-deadline tasks by latest-feasible start; forward pass by
-least slack with priority as tiebreak; splitting under chunk policy.
+**Backward pass** over **hard-deadline tasks only**, placed at latest-feasible
+start **minus a safety margin** (`T-backward-pass-with-margin`). The margin is
+best-effort: it pulls placement earlier, falls back to latest-feasible-start
+where there is no room, and **never turns a placeable task into
+`deadline_unreachable`**. Seeded at 20% of the task's estimate. **Forward pass**
+by least slack with priority as tiebreak — a P1 with a *soft* deadline enters
+here, at the front of the tiebreak, not in the backward pass. Then splitting
+under chunk policy.
 
 **Chunk policy — specified (`T-minimum-session-per-life-area`).** Each life area
 carries a **minimum session length**, the smallest piece of a split worth

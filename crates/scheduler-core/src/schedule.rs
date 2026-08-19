@@ -666,6 +666,85 @@ mod tests {
         assert_eq!(result, ScheduleResult::default());
     }
 
+    // --- slack_ms is the exact arithmetic, not just its sign -----------------
+
+    #[test]
+    fn slack_ms_is_deadline_minus_now_minus_the_estimate_in_milliseconds() {
+        let t = hard(1, 90, 5); // deadline NOW + 5h, estimate 90min = 1.5h
+        assert_eq!(slack_ms(&t, NOW), 5 * HOUR_MS - 90 * 60_000);
+    }
+
+    #[test]
+    fn slack_ms_of_zero_means_the_deadline_is_exactly_the_estimate_away() {
+        let t = hard(1, 120, 2); // estimate exactly fills the two hours to deadline
+        assert_eq!(slack_ms(&t, NOW), 0);
+    }
+
+    // --- priority only breaks a tie that id does not already break -----------
+
+    #[test]
+    fn a_better_priority_wins_at_equal_slack_even_when_its_id_is_higher() {
+        let windows = [window(1, vec![interval(0, 2), interval(2, 4)])];
+        let mut worse_priority_lower_id = soft(1, 60, 4);
+        worse_priority_lower_id.priority = Priority::P3;
+        let mut better_priority_higher_id = soft(2, 60, 4);
+        better_priority_higher_id.priority = Priority::P1;
+
+        let result = schedule(
+            &[worse_priority_lower_id, better_priority_higher_id],
+            &[],
+            &windows,
+            &[],
+            &[],
+            &[],
+            NOW,
+        );
+
+        let placed_for = |id: i64| result.placed.iter().find(|b| b.task_id == id).unwrap();
+        assert_eq!(
+            placed_for(2).start_ms,
+            NOW,
+            "P1 (task 2) should be placed before P3 (task 1) despite the higher id"
+        );
+        assert_eq!(placed_for(1).start_ms, NOW + HOUR_MS);
+    }
+
+    // --- drop_if_past's own boundary ------------------------------------------
+
+    #[test]
+    fn a_window_that_ends_exactly_at_now_contributes_nothing() {
+        let windows = [window(1, vec![interval(-4, 0)])];
+        let result = schedule(&[soft(1, 60, 200)], &[], &windows, &[], &[], &[], NOW);
+
+        assert_eq!(
+            result.unplaceable,
+            vec![Unplaceable {
+                task_id: 1,
+                reason: UnplaceableReason::NoWindow,
+            }],
+            "an interval ending exactly at now is already over"
+        );
+    }
+
+    // --- reachable_even_placed_first is checked before competition -----------
+
+    #[test]
+    fn a_deadline_unreachable_even_placed_first_is_reported_that_way_even_when_busy_time_would_also_exhaust_capacity(
+    ) {
+        let windows = [window(1, vec![interval(0, 8)])];
+        let busy = [interval(0, 8)]; // would independently zero out capacity
+        let result = schedule(&[hard(1, 120, 1)], &busy, &windows, &[], &[], &[], NOW);
+
+        assert_eq!(
+            result.unplaceable,
+            vec![Unplaceable {
+                task_id: 1,
+                reason: UnplaceableReason::DeadlineUnreachable,
+            }],
+            "unreachable against the raw window is decided before competition is considered"
+        );
+    }
+
     // --- forward pass never places in the past --------------------------------
 
     /// An interval already open at `now` is not clamped forward to `now`

@@ -195,6 +195,17 @@ mod tests {
         Unplaceable { task_id, reason }
     }
 
+    /// Two committed tasks, "first" and "second", in a fresh `Work` life
+    /// area -- the pair [`replace_plan_wholly_replaces_the_previous_plan`]
+    /// and [`placed_blocks_is_ordered_by_start_time`] both place blocks
+    /// for, in opposite orders.
+    async fn two_tasks_in_work(pool: &SqlitePool) -> (i64, i64) {
+        let work = seeded_life_area_id(pool, "Work").await;
+        let first = given_a_committed_task(pool, work, "first").await;
+        let second = given_a_committed_task(pool, work, "second").await;
+        (first, second)
+    }
+
     #[tokio::test]
     async fn committed_tasks_is_empty_against_a_fresh_database() {
         let (_dir, pool) = test_pool().await;
@@ -353,9 +364,7 @@ mod tests {
     #[tokio::test]
     async fn replace_plan_wholly_replaces_the_previous_plan() {
         let (_dir, pool) = test_pool().await;
-        let work = seeded_life_area_id(&pool, "Work").await;
-        let first = given_a_committed_task(&pool, work, "first").await;
-        let second = given_a_committed_task(&pool, work, "second").await;
+        let (first, second) = two_tasks_in_work(&pool).await;
 
         replace_plan(&pool, &[block(first, 1_000, 2_000)], &[])
             .await
@@ -372,9 +381,7 @@ mod tests {
     #[tokio::test]
     async fn placed_blocks_is_ordered_by_start_time() {
         let (_dir, pool) = test_pool().await;
-        let work = seeded_life_area_id(&pool, "Work").await;
-        let first = given_a_committed_task(&pool, work, "first").await;
-        let second = given_a_committed_task(&pool, work, "second").await;
+        let (first, second) = two_tasks_in_work(&pool).await;
 
         replace_plan(
             &pool,

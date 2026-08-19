@@ -144,13 +144,23 @@ async fn committed_fixture(
     triage_fixture(world, text, body).await
 }
 
+/// The task text and life area every `Given a ... task` regex captures in
+/// its first two groups, resolved together -- the two-line prologue
+/// [`dispatch_committed_long`], [`dispatch_committed_short`], [`dispatch_pool`]
+/// and [`dispatch_quota`] all otherwise repeated identically.
+fn resolve_text_and_life_area(
+    example: &BTreeMap<String, String>,
+    caps: &regex::Captures<'_>,
+) -> Result<(String, String), String> {
+    Ok((resolve(example, &caps[1])?, resolve(example, &caps[2])?))
+}
+
 async fn dispatch_committed_long(
     world: &mut World,
     example: &BTreeMap<String, String>,
     caps: &regex::Captures<'_>,
 ) -> Result<(), String> {
-    let text = resolve(example, &caps[1])?;
-    let life_area = resolve(example, &caps[2])?;
+    let (text, life_area) = resolve_text_and_life_area(example, caps)?;
     let estimated_minutes = resolve(example, &caps[3])?;
     let deadline = resolve(example, &caps[4])?;
     let deadline_type = resolve(example, &caps[5])?;
@@ -174,8 +184,7 @@ async fn dispatch_committed_short(
     example: &BTreeMap<String, String>,
     caps: &regex::Captures<'_>,
 ) -> Result<(), String> {
-    let text = resolve(example, &caps[1])?;
-    let life_area = resolve(example, &caps[2])?;
+    let (text, life_area) = resolve_text_and_life_area(example, caps)?;
     let estimated_minutes = resolve(example, &caps[3])?;
     let deadline = resolve(example, &caps[4])?;
     committed_fixture(
@@ -195,8 +204,7 @@ async fn dispatch_pool(
     example: &BTreeMap<String, String>,
     caps: &regex::Captures<'_>,
 ) -> Result<(), String> {
-    let text = resolve(example, &caps[1])?;
-    let life_area = resolve(example, &caps[2])?;
+    let (text, life_area) = resolve_text_and_life_area(example, caps)?;
     let body = payloads::with_field(payloads::pool(), "life_area", Value::from(life_area));
     triage_fixture(world, &text, body).await
 }
@@ -206,8 +214,7 @@ async fn dispatch_quota(
     example: &BTreeMap<String, String>,
     caps: &regex::Captures<'_>,
 ) -> Result<(), String> {
-    let text = resolve(example, &caps[1])?;
-    let life_area = resolve(example, &caps[2])?;
+    let (text, life_area) = resolve_text_and_life_area(example, caps)?;
     let target_count = super::capacity::resolved_i64(example, &caps[3], "target_count")?;
     let target_minutes_each =
         super::capacity::resolved_i64(example, &caps[4], "target_minutes_each")?;
@@ -289,12 +296,26 @@ fn placed_row<'a>(world: &'a World, text: &str) -> Result<&'a str, String> {
     row_containing(placed_section(world)?, text)
 }
 
+fn unplaceable_row<'a>(world: &'a World, text: &str) -> Result<&'a str, String> {
+    row_containing(unplaceable_section(world)?, text)
+}
+
+/// The literal every `Then` regex in this module resolves its first
+/// capture group as -- the row-naming task text, whichever section it is
+/// later looked up in.
+fn resolve_text(
+    example: &BTreeMap<String, String>,
+    caps: &regex::Captures<'_>,
+) -> Result<String, String> {
+    resolve(example, &caps[1])
+}
+
 fn dispatch_places(
     world: &mut World,
     example: &BTreeMap<String, String>,
     caps: &regex::Captures<'_>,
 ) -> Result<(), String> {
-    let text = resolve(example, &caps[1])?;
+    let text = resolve_text(example, caps)?;
     let start = resolve(example, &caps[2])?;
     let end = resolve(example, &caps[3])?;
     let row = placed_row(world, &text)?;
@@ -316,9 +337,8 @@ fn dispatch_finishes_after(
     example: &BTreeMap<String, String>,
     caps: &regex::Captures<'_>,
 ) -> Result<(), String> {
-    let text = resolve(example, &caps[1])?;
-    let section = placed_section(world)?;
-    let row = row_containing(section, &text)?;
+    let text = resolve_text(example, caps)?;
+    let row = placed_row(world, &text)?;
     super::then_section_contains(row, &text, "report", "finishes after its deadline")
 }
 
@@ -327,10 +347,9 @@ fn dispatch_unplaceable_because(
     example: &BTreeMap<String, String>,
     caps: &regex::Captures<'_>,
 ) -> Result<(), String> {
-    let text = resolve(example, &caps[1])?;
+    let text = resolve_text(example, caps)?;
     let reason = resolve(example, &caps[2])?;
-    let section = unplaceable_section(world)?;
-    let row = row_containing(section, &text)?;
+    let row = unplaceable_row(world, &text)?;
     super::then_section_contains(row, &text, "report", &reason)
 }
 
@@ -339,7 +358,7 @@ fn dispatch_does_not_mention(
     example: &BTreeMap<String, String>,
     caps: &regex::Captures<'_>,
 ) -> Result<(), String> {
-    let text = resolve(example, &caps[1])?;
+    let text = resolve_text(example, caps)?;
     super::then_html_body_excludes(world, &text, "no schedule response recorded")
 }
 
@@ -391,13 +410,21 @@ mod tests {
         assert!(row_containing(section, "missing").is_err());
     }
 
-    #[test]
-    fn dispatch_places_passes_when_the_row_names_both_instants() {
+    /// The placed row `dispatch_places`'s own tests share: "write the Q3
+    /// deck", 09:00-11:00Z -- only the example each test resolves against
+    /// it differs.
+    fn world_with_the_q3_deck_placed_row() -> World {
         let mut world = World::new();
         world.last_html_body = Some(
             r#"<ul id="schedule-placed"><li>write the Q3 deck — 2026-08-17T09:00:00Z to 2026-08-17T11:00:00Z</li></ul>"#
                 .to_string(),
         );
+        world
+    }
+
+    #[test]
+    fn dispatch_places_passes_when_the_row_names_both_instants() {
+        let mut world = world_with_the_q3_deck_placed_row();
         let ex = example(&[
             ("start", "2026-08-17T09:00:00Z"),
             ("end", "2026-08-17T11:00:00Z"),
@@ -412,6 +439,22 @@ mod tests {
     }
 
     #[test]
+    fn dispatch_places_errors_when_the_row_is_missing_the_end_instant() {
+        let mut world = world_with_the_q3_deck_placed_row();
+        let ex = example(&[
+            ("start", "2026-08-17T09:00:00Z"),
+            ("end", "2026-08-17T12:00:00Z"),
+        ]);
+        let caps = THEN_PLACES
+            .captures(
+                r#"the schedule places "write the Q3 deck" starting "<start>" and ending "<end>""#,
+            )
+            .unwrap();
+
+        assert!(dispatch_places(&mut world, &ex, &caps).is_err());
+    }
+
+    #[test]
     fn dispatch_reports_placed_reads_the_summary_line() {
         let mut world = World::new();
         world.last_html_body = Some(r#"<p id="schedule-summary">2 placed</p>"#.to_string());
@@ -421,6 +464,50 @@ mod tests {
             .unwrap();
 
         assert_eq!(dispatch_reports_placed(&mut world, &ex, &caps), Ok(()));
+    }
+
+    #[test]
+    fn dispatch_reports_placed_errors_when_the_summary_names_a_different_count() {
+        let mut world = World::new();
+        world.last_html_body = Some(r#"<p id="schedule-summary">1 placed</p>"#.to_string());
+        let ex = example(&[("placed", "2")]);
+        let caps = THEN_REPORTS_PLACED
+            .captures(r#"the schedule reports "<placed>" placed blocks"#)
+            .unwrap();
+
+        assert!(dispatch_reports_placed(&mut world, &ex, &caps).is_err());
+    }
+
+    #[test]
+    fn dispatch_finishes_after_finds_the_overrun_report_in_the_placed_row() {
+        let mut world = World::new();
+        world.last_html_body = Some(
+            r#"<ul id="schedule-placed"><li>renew the passport — report: finishes after its deadline</li></ul>"#
+                .to_string(),
+        );
+        let ex = example(&[]);
+        let caps = THEN_FINISHES_AFTER
+            .captures(
+                r#"the schedule reports "renew the passport" as finishing after its deadline"#,
+            )
+            .unwrap();
+
+        assert_eq!(dispatch_finishes_after(&mut world, &ex, &caps), Ok(()));
+    }
+
+    #[test]
+    fn dispatch_finishes_after_errors_when_the_row_carries_no_overrun_report() {
+        let mut world = World::new();
+        world.last_html_body =
+            Some(r#"<ul id="schedule-placed"><li>renew the passport</li></ul>"#.to_string());
+        let ex = example(&[]);
+        let caps = THEN_FINISHES_AFTER
+            .captures(
+                r#"the schedule reports "renew the passport" as finishing after its deadline"#,
+            )
+            .unwrap();
+
+        assert!(dispatch_finishes_after(&mut world, &ex, &caps).is_err());
     }
 
     #[test]
@@ -441,6 +528,23 @@ mod tests {
     }
 
     #[test]
+    fn dispatch_unplaceable_because_errors_when_the_row_names_a_different_reason() {
+        let mut world = World::new();
+        world.last_html_body = Some(
+            r#"<ul id="schedule-unplaceable"><li>rebuild the deck — unplaceable: no_window</li></ul>"#
+                .to_string(),
+        );
+        let ex = example(&[]);
+        let caps = THEN_UNPLACEABLE_BECAUSE
+            .captures(
+                r#"the schedule reports "rebuild the deck" as unplaceable because "chunk_policy_unsatisfiable""#,
+            )
+            .unwrap();
+
+        assert!(dispatch_unplaceable_because(&mut world, &ex, &caps).is_err());
+    }
+
+    #[test]
     fn dispatch_does_not_mention_passes_when_the_text_is_absent() {
         let mut world = World::new();
         world.last_html_body = Some("<p>Nothing to schedule.</p>".to_string());
@@ -450,6 +554,18 @@ mod tests {
             .unwrap();
 
         assert_eq!(dispatch_does_not_mention(&mut world, &ex, &caps), Ok(()));
+    }
+
+    #[test]
+    fn dispatch_does_not_mention_errors_when_the_text_is_present() {
+        let mut world = World::new();
+        world.last_html_body = Some("<p>read the spec</p>".to_string());
+        let ex = example(&[]);
+        let caps = THEN_DOES_NOT_MENTION
+            .captures(r#"the schedule does not mention "read the spec""#)
+            .unwrap();
+
+        assert!(dispatch_does_not_mention(&mut world, &ex, &caps).is_err());
     }
 
     #[test]
@@ -482,6 +598,75 @@ mod tests {
             .unwrap();
 
         assert_eq!(dispatch_contains_word(&mut world, &ex, &caps), Ok(()));
+    }
+
+    #[test]
+    fn dispatch_contains_word_errors_when_the_word_is_absent() {
+        let mut world = World::new();
+        world.last_html_body = Some(r#"<ul id="schedule-placed"><li>bust</li></ul>"#.to_string());
+        let ex = example(&[]);
+        let caps = THEN_CONTAINS_WORD
+            .captures(r#"the schedule page contains the word "boom""#)
+            .unwrap();
+
+        assert!(dispatch_contains_word(&mut world, &ex, &caps).is_err());
+    }
+
+    #[test]
+    fn then_html_body_contains_passes_when_the_body_carries_the_expected_text() {
+        let mut world = World::new();
+        world.last_html_body = Some("<p>Nothing to schedule.</p>".to_string());
+
+        assert_eq!(
+            then_html_body_contains(&mut world, "Nothing to schedule"),
+            Ok(())
+        );
+    }
+
+    #[test]
+    fn then_html_body_contains_errors_when_the_body_lacks_the_expected_text() {
+        let mut world = World::new();
+        world.last_html_body = Some("<p>2 placed</p>".to_string());
+
+        assert!(then_html_body_contains(&mut world, "Nothing to schedule").is_err());
+    }
+
+    #[tokio::test]
+    async fn dispatch_pool_creates_a_pool_task_in_the_named_life_area() {
+        let mut world = migrated_world().await;
+        let ex = example(&[]);
+        let caps = GIVEN_POOL
+            .captures(r#"a pool task "read the spec" in life area "Work" is triaged"#)
+            .unwrap();
+
+        dispatch_pool(&mut world, &ex, &caps).await.unwrap();
+
+        let task: (String,) = sqlx::query_as("SELECT kind FROM tasks LIMIT 1")
+            .fetch_one(world.pool().unwrap())
+            .await
+            .unwrap();
+        assert_eq!(task.0, "pool");
+    }
+
+    #[tokio::test]
+    async fn dispatch_quota_records_the_recurring_target() {
+        let mut world = migrated_world().await;
+        let ex = example(&[]);
+        let caps = GIVEN_QUOTA
+            .captures(
+                r#"a quota task "swim laps" in life area "Work" targeting "3" sessions of "45" minutes per "week" is triaged"#,
+            )
+            .unwrap();
+
+        dispatch_quota(&mut world, &ex, &caps).await.unwrap();
+
+        let task: (String, i64, i64, String) = sqlx::query_as(
+            "SELECT kind, target_count, target_minutes_each, period FROM tasks LIMIT 1",
+        )
+        .fetch_one(world.pool().unwrap())
+        .await
+        .unwrap();
+        assert_eq!(task, ("quota".to_string(), 3, 45, "week".to_string()));
     }
 
     #[tokio::test]

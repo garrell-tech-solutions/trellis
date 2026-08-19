@@ -172,6 +172,31 @@ mod tests {
         work
     }
 
+    /// The narrower fixture a test needs when the free window itself must
+    /// be exactly the two hours 09:00-11:00 this Monday, not the whole
+    /// working week [`work_with_a_weekday_guardrail`] opens up.
+    async fn work_with_a_monday_morning_guardrail(pool: &SqlitePool) -> i64 {
+        let work = seeded_life_area_id(pool, "Work").await;
+        crate::life_areas::store::insert_guardrail_band(pool, work, "Mon", 540, 660)
+            .await
+            .unwrap();
+        work
+    }
+
+    /// "write the Q3 deck", 120 minutes, due four days out with a hard
+    /// deadline -- the placed-task fixture two tests below both start from.
+    async fn given_the_q3_deck_task(pool: &SqlitePool, life_area_id: i64) {
+        given_a_committed_task(
+            pool,
+            life_area_id,
+            "write the Q3 deck",
+            120,
+            1_786_957_200_000 + 4 * 24 * 3_600_000,
+            DeadlineType::Hard,
+        )
+        .await;
+    }
+
     fn pinned_monday_nine() -> Clock {
         Clock::pinned_at(1_786_957_200_000) // 2026-08-17T09:00:00Z
     }
@@ -180,15 +205,7 @@ mod tests {
     async fn generate_places_a_committed_task_inside_its_life_areas_hours() {
         let (_dir, pool) = test_pool().await;
         let work = work_with_a_weekday_guardrail(&pool).await;
-        given_a_committed_task(
-            &pool,
-            work,
-            "write the Q3 deck",
-            120,
-            1_786_957_200_000 + 4 * 24 * 3_600_000,
-            DeadlineType::Hard,
-        )
-        .await;
+        given_the_q3_deck_task(&pool, work).await;
 
         generate(&pool, &pinned_monday_nine()).await.unwrap();
 
@@ -204,10 +221,7 @@ mod tests {
     #[tokio::test]
     async fn generate_reports_an_unplaceable_task_with_its_reason() {
         let (_dir, pool) = test_pool().await;
-        let work = seeded_life_area_id(&pool, "Work").await;
-        crate::life_areas::store::insert_guardrail_band(&pool, work, "Mon", 540, 660)
-            .await
-            .unwrap();
+        let work = work_with_a_monday_morning_guardrail(&pool).await;
         given_a_committed_task(
             &pool,
             work,
@@ -248,15 +262,7 @@ mod tests {
     async fn generate_replaces_the_previous_plan_rather_than_appending_to_it() {
         let (_dir, pool) = test_pool().await;
         let work = work_with_a_weekday_guardrail(&pool).await;
-        given_a_committed_task(
-            &pool,
-            work,
-            "write the Q3 deck",
-            120,
-            1_786_957_200_000 + 4 * 24 * 3_600_000,
-            DeadlineType::Hard,
-        )
-        .await;
+        given_the_q3_deck_task(&pool, work).await;
         generate(&pool, &pinned_monday_nine()).await.unwrap();
         assert_eq!(placed_rows(&pool).await.unwrap().len(), 1);
 
@@ -280,10 +286,7 @@ mod tests {
     #[tokio::test]
     async fn a_soft_task_placed_past_its_deadline_reports_the_overrun() {
         let (_dir, pool) = test_pool().await;
-        let work = seeded_life_area_id(&pool, "Work").await;
-        crate::life_areas::store::insert_guardrail_band(&pool, work, "Mon", 540, 660)
-            .await
-            .unwrap();
+        let work = work_with_a_monday_morning_guardrail(&pool).await;
         // The only free interval is 09:00-11:00 this Monday; the deadline
         // is inside it, but a soft task placed there still finishes at
         // 11:00, after a deadline set to 10:00.
@@ -307,10 +310,7 @@ mod tests {
     #[tokio::test]
     async fn the_tighter_deadline_is_placed_first_and_the_looser_one_overruns() {
         let (_dir, pool) = test_pool().await;
-        let work = seeded_life_area_id(&pool, "Work").await;
-        crate::life_areas::store::insert_guardrail_band(&pool, work, "Mon", 540, 660)
-            .await
-            .unwrap();
+        let work = work_with_a_monday_morning_guardrail(&pool).await;
         given_a_committed_task(
             &pool,
             work,

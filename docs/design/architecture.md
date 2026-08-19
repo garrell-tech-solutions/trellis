@@ -371,7 +371,16 @@ The plan is recomputed from scratch on every trigger — never patched
 ### Passes
 
 Backward pass over hard-deadline tasks by latest-feasible start; forward pass by
-least slack with priority as tiebreak; splitting under chunk policy. Approach is
+least slack with priority as tiebreak; splitting under chunk policy.
+
+**Chunk policy — specified (`T-minimum-session-per-life-area`).** Each life area
+carries a **minimum session length**, the smallest piece of a split worth
+scheduling. It governs **committed** tasks only: pool is never placed, and a
+quota task's `target_minutes_each` already defines its session. A task shorter
+than the minimum is placed **whole**; every chunk of a split must clear it, or
+the task is `chunk_policy_unsatisfiable`. Seeded Work 90 · Learning 45 ·
+Family 30 · Fitness 20 · Home 15, new life areas defaulting to 30. **No
+maximum** — if six contiguous hours exist, use them. Approach is
 greedy-with-repair, not a solver (`T-greedy-with-repair`) — the interface stays
 clean so an optimiser can be swapped in behind it.
 
@@ -413,6 +422,12 @@ they die at the period boundary unless renewed — but not for one-off pins.)*
 free_intervals(guardrail, range) -> disjoint, sorted intervals
                                     each a subset of (mask - busy - pins - buffers)
 ```
+
+> **`buffers` is a GAP** (#80). It appears in this formula and **nowhere else in
+> the project** — no decision, no acceptance criterion, no code. `busy` is M4's,
+> `pins` are M3's, exceptions are built; `buffers` has never had a definition or
+> an owner. Nothing supplies it, so subtracting it is a no-op today. **Do not
+> reason from it** until #80 either defines it or removes it.
 
 `free_intervals` exists, in `scheduler_core::free_time`, and today subtracts
 nothing: busy, pins and buffers arrive with the calendar and the scheduler,

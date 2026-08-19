@@ -28,7 +28,8 @@ use crate::platform::clock::Clock;
 use jiff::civil::Date;
 use jiff::tz::TimeZone;
 use jiff::Timestamp;
-use scheduler_core::free_time::{free_intervals, Guardrail, Interval, Range};
+use scheduler_core::free_time::{free_intervals, Guardrail, Range};
+use scheduler_core::interval::Interval;
 use sqlx::SqlitePool;
 
 /// The look-ahead every reader of this capability projects across. Fourteen

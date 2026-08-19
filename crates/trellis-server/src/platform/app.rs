@@ -27,6 +27,7 @@ use crate::life_areas::http::{
 };
 use crate::platform::assets::htmx_js;
 use crate::platform::clock::Clock;
+use crate::schedule::http::{generate_schedule, show_schedule};
 use crate::settings::http::set_timezone;
 use crate::stats::http::show_stats;
 use crate::triage::http::create_triage;
@@ -69,6 +70,8 @@ pub fn build_app(pool: SqlitePool, clock: Clock) -> Router {
         .route("/exceptions", post(add_exception))
         .route("/exceptions/{id}/remove", post(remove_exception))
         .route("/capacity", get(show_capacity))
+        .route("/schedule", get(show_schedule))
+        .route("/schedule/generate", post(generate_schedule))
         .with_state(AppState { pool, clock })
 }
 

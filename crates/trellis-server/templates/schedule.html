@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block title %}Trellis — Schedule{% endblock %}
+{% block content %}
+<h1>Schedule</h1>
+<form hx-post="/schedule/generate" hx-target="body">
+<button type="submit">Generate</button>
+</form>
+<p id="schedule-summary">{{ placed_count }} placed</p>
+{% if placed.is_empty() && unplaceable.is_empty() %}
+<p>Nothing to schedule. Triage a committed task to get started.</p>
+{% else %}
+<h2>Placed</h2>
+<ul id="schedule-placed">
+{% for row in placed %}
+<li>{{ row.text }}{% if let Some(life_area) = row.life_area_name %} ({{ life_area }}){% endif %} — {{ row.start }} to {{ row.end }}{% if row.overruns_deadline %} (finishes after its deadline){% endif %}</li>
+{% endfor %}
+</ul>
+<h2>Won't fit</h2>
+<ul id="schedule-unplaceable">
+{% for row in unplaceable %}
+<li>{{ row.text }} — unplaceable: {{ row.reason }}</li>
+{% endfor %}
+</ul>
+{% endif %}
+{% endblock %}

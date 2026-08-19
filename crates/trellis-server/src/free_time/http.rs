@@ -24,7 +24,7 @@ use axum::http::StatusCode;
 use axum::response::Response;
 use jiff::tz::TimeZone;
 use jiff::Timestamp;
-use scheduler_core::free_time::Interval;
+use scheduler_core::interval::Interval;
 use sqlx::SqlitePool;
 
 struct FreeTimeArea {

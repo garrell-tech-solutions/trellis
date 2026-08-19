@@ -5,33 +5,21 @@
 //! exactly the case `T-jiff-epoch-millis` exists to force into the open.
 //!
 //! **Exceptions are the first subtrahend; pins and calendar busy are not
-//! here yet.** Pins arrive at M3, calendar busy at M4. `excluded` is shaped
-//! so both are additional inputs of the same kind rather than a second
-//! mechanism -- `Interval` was never named after a producer for exactly this
-//! reason.
+//! here yet.** Pins arrive at M3, calendar busy at M4. `excluded` is
+//! date-granular and those two are not, so they cannot arrive as more of
+//! the same input -- they need interval-minus-interval subtraction, which
+//! now exists as `crate::interval::subtract_all` rather than as private
+//! helpers inside whichever module happened to need it first.
+//!
+//! [`Interval`] itself lives in [`crate::interval`], not here: it was never
+//! named after a producer, and it is no longer housed by one either.
 
 use crate::exception::DateRange;
 use crate::guardrail::{Band, Weekday};
+use crate::interval::Interval;
 use jiff::civil::{Date, DateTime, Time};
 use jiff::tz::{AmbiguousOffset, Disambiguation, TimeZone};
 use jiff::ToSpan;
-
-/// One free interval, as the instant span it actually covers -- UTC epoch
-/// milliseconds (`T-jiff-epoch-millis`). An interval is what a scheduler
-/// could place work into, and that is an instant question: two intervals
-/// that are adjacent or overlapping only make sense compared as instants,
-/// not as civil clock readings that a DST transition can reorder.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Interval {
-    pub start_ms: i64,
-    pub end_ms: i64,
-}
-
-impl Interval {
-    pub fn duration_ms(self) -> i64 {
-        self.end_ms - self.start_ms
-    }
-}
 
 /// A window of civil dates to project a guardrail across: `start`
 /// inclusive, `end` exclusive.

@@ -96,7 +96,7 @@ fn html_body(world: &World) -> Result<&str, String> {
     super::html_body(world, "no page response recorded")
 }
 
-async fn insert_capture(world: &World, raw_text: &str) -> Result<i64, String> {
+pub(super) async fn insert_capture(world: &World, raw_text: &str) -> Result<i64, String> {
     let pool = world.pool()?;
     sqlx::query_scalar(
         "INSERT INTO captures (raw_text, source, created_at_ms) VALUES (?, 'web', 0) RETURNING id",
@@ -110,7 +110,17 @@ async fn insert_capture(world: &World, raw_text: &str) -> Result<i64, String> {
 /// Triages a fresh, throwaway capture with `body`, erroring out if the
 /// triage was refused -- these are setup steps, so a rejection here means
 /// the fixture itself is wrong, not something under test.
-async fn triage_fixture(world: &mut World, raw_text: &str, body: Value) -> Result<(), String> {
+///
+/// `pub(super)`: `schedule`'s own fixtures need the identical "insert a
+/// throwaway capture, triage it, fail loud if refused" shape this module
+/// already has (`schedule` triages committed, pool and quota tasks the same
+/// way capacity's own fixtures do) -- reached through here rather than a
+/// second copy of the same two functions.
+pub(super) async fn triage_fixture(
+    world: &mut World,
+    raw_text: &str,
+    body: Value,
+) -> Result<(), String> {
     let capture_id = insert_capture(world, raw_text).await?;
     let uri = format!("/captures/{capture_id}/triage");
     let response = super::app_client::post_json(world, &uri, &body).await?;
@@ -152,7 +162,14 @@ async fn dispatch_pool_task(
 /// integer, naming `field` in the error so a bad fixture points back at its
 /// source. Split out so [`dispatch_quota_task`]'s own body carries only the
 /// four fields it assembles, not each one's own resolve-then-parse.
-fn resolved_i64(example: &BTreeMap<String, String>, raw: &str, field: &str) -> Result<i64, String> {
+/// `pub(super)`: `schedule`'s own quota fixture needs the identical
+/// resolve-then-parse `dispatch_quota_task` already extracted here, for the
+/// same reason `triage_fixture` is shared rather than copied.
+pub(super) fn resolved_i64(
+    example: &BTreeMap<String, String>,
+    raw: &str,
+    field: &str,
+) -> Result<i64, String> {
     let value = resolve(example, raw)?;
     value
         .parse()

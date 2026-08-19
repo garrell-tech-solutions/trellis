@@ -31,6 +31,7 @@ mod life_areas;
 mod migrations;
 mod payloads;
 mod quota_triage_validation;
+mod schedule;
 mod stats_ratio;
 mod triage;
 mod triage_from_page;
@@ -271,6 +272,9 @@ pub async fn dispatch(
         return outcome;
     }
     if let Some(outcome) = capacity::dispatch(world, text, example).await {
+        return outcome;
+    }
+    if let Some(outcome) = schedule::dispatch(world, text, example).await {
         return outcome;
     }
 

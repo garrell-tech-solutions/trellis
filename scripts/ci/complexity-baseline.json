@@ -86,8 +86,14 @@
     {
       "file": "crates/acceptance-tests/src/steps/mod.rs",
       "function": "dispatch",
-      "cyclomatic_complexity": 19,
-      "why": "Top-level step dispatcher; delegates to one step module per arm. 18 -> 19 for the new capacity module's arm (capacity brief, #62): a new step, not new logic."
+      "cyclomatic_complexity": 20,
+      "why": "Top-level step dispatcher; delegates to one step module per arm. 19 -> 20 for the new schedule module's arm (schedule brief, #75): a new step, not new logic."
+    },
+    {
+      "file": "crates/acceptance-tests/src/steps/schedule.rs",
+      "function": "dispatch",
+      "cyclomatic_complexity": 15,
+      "why": "Gherkin step dispatcher; regex chain, one-line delegation per arm. New module for features/schedule.feature (schedule brief, #75)."
     },
     {
       "file": "crates/acceptance-tests/src/steps/stats_ratio.rs",

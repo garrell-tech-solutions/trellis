@@ -16,6 +16,8 @@
 //!   each carrying its own weekly guardrail.
 //! - [`settings`] — the owner's timezone, one value for the whole product.
 //! - [`stats`] — the rolling committed:pool ratio, R2's instrumentation.
+//! - [`schedule`] — places committed tasks into free time, least slack
+//!   first, and says why the rest did not fit. Forward pass only.
 //! - [`platform`] — deliberately *not* a capability: the route table, the
 //!   database, the clock, the vendored static assets. It is named so that a
 //!   reader can tell at a glance which directories are the product and which
@@ -54,6 +56,7 @@ pub mod free_time;
 pub mod inbox;
 pub mod life_areas;
 pub mod platform;
+pub mod schedule;
 pub mod settings;
 pub mod stats;
 pub mod triage;

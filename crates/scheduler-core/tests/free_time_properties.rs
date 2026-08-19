@@ -22,8 +22,9 @@ use jiff::tz::TimeZone;
 use jiff::ToSpan;
 use proptest::prelude::*;
 use scheduler_core::exception::DateRange;
-use scheduler_core::free_time::{free_intervals, weekday_of, Guardrail, Interval, Range};
+use scheduler_core::free_time::{free_intervals, weekday_of, Guardrail, Range};
 use scheduler_core::guardrail::{Band, Weekday};
+use scheduler_core::interval::Interval;
 
 const ALL_WEEKDAYS: [Weekday; 7] = [
     Weekday::Mon,

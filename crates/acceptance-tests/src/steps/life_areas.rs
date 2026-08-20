@@ -634,6 +634,159 @@ mod tests {
     }
 
     #[test]
+    fn dispatch_life_areas_listed_exactly_passes_when_the_names_match_in_order() {
+        let mut world = World::new();
+        world.last_html_body = Some(format!(
+            r#"<ul id="life-areas">{}</ul>"#,
+            concat!(
+                r#"<li id="life-area-row-1"><span class="life-area-name">Work</span></li>"#,
+                r#"<li id="life-area-row-2"><span class="life-area-name">Fitness</span></li>"#,
+            )
+        ));
+        let ex = example(&[("names", "Work, Fitness")]);
+        let caps = THEN_LIFE_AREAS_LISTED_EXACTLY
+            .captures(r#"the life areas listed are exactly "<names>""#)
+            .unwrap();
+
+        assert_eq!(
+            dispatch_life_areas_listed_exactly(&mut world, &ex, &caps),
+            Ok(())
+        );
+    }
+
+    #[test]
+    fn dispatch_life_areas_listed_exactly_errors_when_the_names_differ() {
+        let mut world = World::new();
+        world.last_html_body = Some(
+            r#"<ul id="life-areas"><li id="life-area-row-1"><span class="life-area-name">Work</span></li></ul>"#
+                .to_string(),
+        );
+        let ex = example(&[("names", "Work, Fitness")]);
+        let caps = THEN_LIFE_AREAS_LISTED_EXACTLY
+            .captures(r#"the life areas listed are exactly "<names>""#)
+            .unwrap();
+
+        assert!(dispatch_life_areas_listed_exactly(&mut world, &ex, &caps).is_err());
+    }
+
+    #[test]
+    fn then_life_areas_list_excludes_passes_when_the_forbidden_text_is_absent() {
+        let mut world = World::new();
+        world.last_html_body = Some(r#"<ul id="life-areas"><li>Work</li></ul>"#.to_string());
+
+        assert_eq!(
+            then_life_areas_list_excludes(&mut world, "<script>"),
+            Ok(())
+        );
+    }
+
+    #[test]
+    fn then_life_areas_list_excludes_errors_when_the_forbidden_text_is_present() {
+        let mut world = World::new();
+        world.last_html_body =
+            Some(r#"<ul id="life-areas"><li><script>boom</script></li></ul>"#.to_string());
+
+        assert!(then_life_areas_list_excludes(&mut world, "<script>").is_err());
+    }
+
+    #[test]
+    fn then_life_areas_list_contains_passes_when_the_expected_text_is_present() {
+        let mut world = World::new();
+        world.last_html_body = Some(r#"<ul id="life-areas"><li>Work</li></ul>"#.to_string());
+
+        assert_eq!(then_life_areas_list_contains(&mut world, "Work"), Ok(()));
+    }
+
+    #[test]
+    fn then_life_areas_list_contains_errors_when_the_expected_text_is_absent() {
+        let mut world = World::new();
+        world.last_html_body = Some(r#"<ul id="life-areas"><li>Fitness</li></ul>"#.to_string());
+
+        assert!(then_life_areas_list_contains(&mut world, "Work").is_err());
+    }
+
+    #[test]
+    fn rejection_reports_unknown_life_area_passes_when_the_name_matches() {
+        let body = json!({ "unknown_life_area": "Gardening" });
+        assert_eq!(
+            rejection_reports_unknown_life_area(&body, "Gardening"),
+            Ok(())
+        );
+    }
+
+    #[test]
+    fn rejection_reports_unknown_life_area_errors_when_the_name_differs() {
+        let body = json!({ "unknown_life_area": "Gardening" });
+        assert!(rejection_reports_unknown_life_area(&body, "Fitness").is_err());
+    }
+
+    #[test]
+    fn dispatch_rejection_says_already_errors_when_the_message_is_absent() {
+        let mut world = World::new();
+        world.last_html_body = Some("<p>something else entirely</p>".to_string());
+        let ex = example(&[]);
+        let caps = THEN_REJECTION_SAYS_ALREADY
+            .captures(r#"the rejection says "Work" is already a life area"#)
+            .unwrap();
+
+        assert!(dispatch_rejection_says_already(&mut world, &ex, &caps).is_err());
+    }
+
+    #[test]
+    fn dispatch_rejection_says_not_a_life_area_errors_when_no_body_was_recorded() {
+        let mut world = World::new();
+        let ex = example(&[]);
+        let caps = THEN_REJECTION_SAYS_NOT_A_LIFE_AREA
+            .captures(r#"the rejection says "Gardening" is not a life area"#)
+            .unwrap();
+
+        assert!(dispatch_rejection_says_not_a_life_area(&mut world, &ex, &caps).is_err());
+    }
+
+    #[tokio::test]
+    async fn dispatch_triage_choices_exactly_errors_when_the_choices_differ() {
+        let mut world = migrated_world().await;
+        let ex = example(&[("choices", "Work, Fitness")]);
+        let caps = THEN_TRIAGE_CHOICES_EXACTLY
+            .captures(r#"the triage life area choices are exactly "<choices>""#)
+            .unwrap();
+
+        assert!(dispatch_triage_choices_exactly(&mut world, &ex, &caps)
+            .await
+            .is_err());
+    }
+
+    fn row_with_life_area_preselected(value: &str) -> String {
+        format!(
+            r#"<li><form><select name="life_area"><option value="{value}">{value}</option></select></form><details></details></li>"#
+        )
+    }
+
+    #[test]
+    fn dispatch_kind_form_preselects_none_errors_when_a_real_life_area_is_preselected() {
+        let mut world = World::new();
+        world.last_html_body = Some(format!(
+            r#"<ul id="captures">{}</ul>"#,
+            row_with_life_area_preselected("Work")
+        ));
+        let ex = example(&[("kind", "pool")]);
+        let re = Regex::new(r"^the <(\w+)> triage form preselects no life area$").unwrap();
+        let caps = re
+            .captures("the <kind> triage form preselects no life area")
+            .unwrap();
+
+        assert!(dispatch_kind_form_preselects_none(&mut world, &ex, &caps).is_err());
+    }
+
+    #[test]
+    fn then_quick_add_pool_preselects_none_errors_when_a_real_life_area_is_preselected() {
+        let mut world = World::new();
+        world.last_html_body = Some(row_with_life_area_preselected("Work"));
+
+        assert!(then_quick_add_pool_preselects_none(&mut world).is_err());
+    }
+
+    #[test]
     fn then_not_redirect_passes_for_a_non_redirect_status() {
         let mut world = World::new();
         world.last_status = Some(201);

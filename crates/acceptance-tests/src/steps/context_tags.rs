@@ -291,6 +291,21 @@ mod tests {
     }
 
     #[test]
+    fn dispatch_inbox_lists_tagged_errors_when_the_row_names_a_different_tag() {
+        let mut world = World::new();
+        world.last_html_body = Some(
+            r#"<ul id="captures"><li id="capture-row-1">buy screws @lowes<form></form></li></ul>"#
+                .to_string(),
+        );
+        let ex = example(&[]);
+        let caps = THEN_INBOX_LISTS_TAGGED
+            .captures(r#"the inbox lists "buy screws" tagged "@homedepot""#)
+            .unwrap();
+
+        assert!(dispatch_inbox_lists_tagged(&mut world, &ex, &caps).is_err());
+    }
+
+    #[test]
     fn dispatch_inbox_shows_no_tag_passes_when_the_row_carries_none() {
         let mut world = World::new();
         world.last_html_body = Some(

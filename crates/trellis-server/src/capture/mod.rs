@@ -168,6 +168,33 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn distinct_tags_lists_every_tag_used_earliest_first() {
+        let (_dir, pool) = test_pool().await;
+        create(&pool, "buy screws", "web", Some("@homedepot"), 0)
+            .await
+            .unwrap();
+        create(&pool, "call mom", "web", Some("@family"), 1)
+            .await
+            .unwrap();
+        create(&pool, "buy milk", "web", Some("@homedepot"), 2)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            distinct_tags(&pool).await.unwrap(),
+            vec!["@homedepot".to_string(), "@family".to_string()]
+        );
+    }
+
+    #[tokio::test]
+    async fn distinct_tags_is_empty_when_nothing_is_tagged() {
+        let (_dir, pool) = test_pool().await;
+        create(&pool, "buy milk", "web", None, 0).await.unwrap();
+
+        assert_eq!(distinct_tags(&pool).await.unwrap(), Vec::<String>::new());
+    }
+
+    #[tokio::test]
     async fn retag_with_no_tag_leaves_the_existing_tag_untouched() {
         let (_dir, pool) = test_pool().await;
         let (id, _) = create(&pool, "buy screws", "web", Some("@homedepot"), 0)

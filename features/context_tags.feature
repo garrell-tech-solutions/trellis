@@ -1,3 +1,7 @@
+# acceptance-mutation-manifest-begin
+# {"version":1,"tested_at":"2026-08-20T21:20:21.461565878Z","feature_name":"A capture carries a context tag, and the tags autocomplete on what came before","feature_path":"features/context_tags.feature","background_hash":"304f93e93e2b217b49069c091950b87589f0c7e789e2d0dc3aaa8d845450cb64","implementation_hash":"sha256:961151af8f97250f4e57762b431d0a22ef3479a560ad384b259c47e242a7bcce","scenarios":[{"index":3,"name":"Surrounding whitespace is not part of a tag","scenario_hash":"4363f9f6a696954d3be6562d588f8a551c50250719e064ed94b5bf1a5853ae73","mutation_count":1,"result":{"Total":1,"Killed":1,"Survived":0,"Errors":0},"tested_at":"2026-08-20T21:20:21.461565878Z"},{"index":4,"name":"The tag control offers every tag used before","scenario_hash":"3da9687fb520f8152c22d560f9ef0554c7d06ee4974ed11e5a650ce584587aaa","mutation_count":1,"result":{"Total":1,"Killed":1,"Survived":0,"Errors":0},"tested_at":"2026-08-20T21:20:21.461565878Z"},{"index":5,"name":"Two spellings differing only in case are one tag, shown as first typed","scenario_hash":"ad1ec500ca82e52144b2eedd17f3971243ca01a501ce591eea116945ff777334","mutation_count":2,"result":{"Total":2,"Killed":2,"Survived":0,"Errors":0},"tested_at":"2026-08-20T21:20:21.461565878Z"}]}
+# acceptance-mutation-manifest-end
+
 # context-tags-captured-with-a-tag-01: a capture keeps the context tag it was given
 # context-tags-optional-02: a capture with no context tag is accepted, not rejected
 # context-tags-blank-is-absent-03: a tag of only whitespace is the same as no tag at all

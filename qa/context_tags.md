@@ -50,9 +50,9 @@ checked.**
   tag that fragments, and a fragmented tag is worse than none — it looks like
   a grouping and is not.
 - **Step 4 is the change most likely to be specified at the boundary and
-  forgotten in the form**, which is exactly what `T-required-fields-are-
-  specified-per-transport` was written about after #73 shipped a committed
-  form that could never succeed.
+  forgotten in the form**, which is exactly what
+  `T-required-fields-are-specified-per-transport` was written about after
+  #73 shipped a committed form that could never succeed.
 
 ## Setup — repeat before each procedure below
 

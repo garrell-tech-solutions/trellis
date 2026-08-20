@@ -8,16 +8,15 @@
 //! gets back the new row's markup to swap into the page; a JSON request (the
 //! existing API) gets back exactly what it always has, unchanged.
 
-use crate::capture::store;
 use crate::inbox::view::CaptureRow;
 use crate::life_areas::view::LifeAreaOption;
 use crate::platform::clock::Clock;
 use crate::platform::request::content_type_is_json;
-use crate::platform::response::{render_template, write_failed};
+use crate::platform::response::write_failed;
 use askama::Template;
 use axum::extract::{FromRequest, Request, State};
 use axum::http::StatusCode;
-use axum::response::{IntoResponse, Response};
+use axum::response::{Html, IntoResponse, Response};
 use axum::{Form, Json};
 use serde::Deserialize;
 use sqlx::SqlitePool;
@@ -26,6 +25,12 @@ use sqlx::SqlitePool;
 pub struct CaptureRequest {
     pub raw_text: String,
     pub source: String,
+    /// Optional and free text (#82, `D-context-tags-are-the-taxonomy`).
+    /// `#[serde(default)]`: the JSON API's existing callers never sent this
+    /// field, and an absent key must not fail deserialization
+    /// (`T-empty-equals-absent`'s reasoning applied to the transport itself).
+    #[serde(default)]
+    pub context_tag: Option<String>,
 }
 
 /// A capture request extracted from either an `application/json` body (the
@@ -71,31 +76,70 @@ struct CaptureRowTemplate<'a> {
     life_areas: Vec<LifeAreaOption>,
 }
 
+/// The tag control's `<datalist>`, out-of-band (`hx-swap-oob`): the
+/// quick-add form's own response only swaps the new row into `#captures`
+/// (`hx-swap="afterbegin"`), which does not reach the datalist that lives
+/// beside it in `#lists`. A genuinely new tag would otherwise not be
+/// offered until the next full page load -- exactly the live behaviour
+/// `qa/context_tags.md` calls out as the one step its own by-hand
+/// walkthrough exists to check (`context-tags-suggestions-05`'s automated
+/// half only proves what a fresh `GET /` sends).
+#[derive(Template)]
+#[template(path = "context_tag_suggestions_oob.html")]
+struct ContextTagSuggestionsOob {
+    suggestions: Vec<String>,
+}
+
+fn render_capture_row_response(
+    status: StatusCode,
+    row: &CaptureRowTemplate<'_>,
+    suggestions: &ContextTagSuggestionsOob,
+) -> Result<Response, StatusCode> {
+    let row_html = row
+        .render()
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let oob_html = suggestions
+        .render()
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    Ok((status, Html(format!("{row_html}{oob_html}"))).into_response())
+}
+
 pub async fn create_capture(
     State(pool): State<SqlitePool>,
     State(clock): State<Clock>,
     CaptureInput { payload, from_form }: CaptureInput,
 ) -> Result<Response, StatusCode> {
-    let id = store::insert(&pool, &payload.raw_text, &payload.source, clock.now_ms())
-        .await
-        .map_err(write_failed)?;
+    let (id, context_tag) = crate::capture::create(
+        &pool,
+        &payload.raw_text,
+        &payload.source,
+        payload.context_tag.as_deref(),
+        clock.now_ms(),
+    )
+    .await
+    .map_err(write_failed)?;
 
     if from_form {
         let capture = CaptureRow {
             id,
             text: payload.raw_text,
+            context_tag,
             error: None,
         };
         let life_areas = crate::life_areas::active_options(&pool)
             .await
             .map_err(write_failed)?;
-        Ok(render_template(
+        let suggestions = crate::capture::distinct_tags(&pool)
+            .await
+            .map_err(write_failed)?;
+        render_capture_row_response(
             StatusCode::CREATED,
             &CaptureRowTemplate {
                 capture: &capture,
                 life_areas,
             },
-        ))
+            &ContextTagSuggestionsOob { suggestions },
+        )
     } else {
         Ok(StatusCode::CREATED.into_response())
     }

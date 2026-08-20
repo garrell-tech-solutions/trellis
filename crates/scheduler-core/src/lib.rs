@@ -6,6 +6,7 @@
 //! and persistence adapters depend on this crate; it depends on neither.
 
 pub mod capacity;
+pub mod context_tag;
 pub mod exception;
 pub mod free_time;
 pub mod guardrail;

@@ -48,6 +48,12 @@
       "why": "Gherkin step dispatcher; regex chain, one-line delegation per arm."
     },
     {
+      "file": "crates/acceptance-tests/src/steps/context_tags.rs",
+      "function": "dispatch",
+      "cyclomatic_complexity": 9,
+      "why": "Gherkin step dispatcher; regex chain, one-line delegation per arm. New module for features/context_tags.feature (context-tags brief, #82)."
+    },
+    {
       "file": "crates/acceptance-tests/src/steps/dismiss.rs",
       "function": "dispatch",
       "cyclomatic_complexity": 11,
@@ -80,14 +86,14 @@
     {
       "file": "crates/acceptance-tests/src/steps/life_areas.rs",
       "function": "dispatch",
-      "cyclomatic_complexity": 22,
-      "why": "Gherkin step dispatcher; regex chain, one-line delegation per arm. 18 -> 22: four new one-line arms for features/life_area_triage.feature's no-preselection, quick-add-picker and page-required scenarios (dismiss-capture brief, #48) -- new steps, not new logic. Every helper it delegates to was itself kept under threshold (dispatch_archive_life_area's own request-building was extracted into life_area_id_by_name and inbox_view::html_response rather than inlined here)."
+      "cyclomatic_complexity": 24,
+      "why": "Gherkin step dispatcher; regex chain, one-line delegation per arm. 18 -> 22: four new one-line arms for features/life_area_triage.feature's no-preselection, quick-add-picker and page-required scenarios (dismiss-capture brief, #48) -- new steps, not new logic. Every helper it delegates to was itself kept under threshold (dispatch_archive_life_area's own request-building was extracted into life_area_id_by_name and inbox_view::html_response rather than inlined here). 22 -> 24 for two new arms, 'the triage succeeds' and 'the task list shows ... with no life area' (context-tags brief, #82): T-life-area-required-at-triage's two now-inverted scenarios needed new assertions, not new logic."
     },
     {
       "file": "crates/acceptance-tests/src/steps/mod.rs",
       "function": "dispatch",
-      "cyclomatic_complexity": 20,
-      "why": "Top-level step dispatcher; delegates to one step module per arm. 19 -> 20 for the new schedule module's arm (schedule brief, #75): a new step, not new logic."
+      "cyclomatic_complexity": 21,
+      "why": "Top-level step dispatcher; delegates to one step module per arm. 19 -> 20 for the new schedule module's arm (schedule brief, #75): a new step, not new logic. 20 -> 21 for the new context_tags module's arm (context-tags brief, #82): same reason."
     },
     {
       "file": "crates/acceptance-tests/src/steps/schedule.rs",

@@ -1,7 +1,8 @@
 <li id="capture-row-{{ capture.id }}">
-{{ capture.text }}
+{{ capture.text }}{% if let Some(tag) = capture.context_tag %} {{ tag }}{% endif %}
 <form style="display:inline" hx-post="/captures/{{ capture.id }}/triage" hx-target="#lists" hx-swap="outerHTML">
 <input type="hidden" name="kind" value="pool">
+<label>Tag <input type="text" name="context_tag" list="context-tag-suggestions" placeholder="@homedepot"></label>
 <label>Life area
 <select name="life_area">
 <option value="">— choose —</option>
@@ -32,6 +33,7 @@
 </select>
 </label>
 <label>Estimate (minutes) <input type="number" name="estimated_minutes" placeholder="180"></label>
+<label>Tag <input type="text" name="context_tag" list="context-tag-suggestions" placeholder="@homedepot"></label>
 <label>Life area
 <select name="life_area">
 <option value="">— choose —</option>
@@ -55,6 +57,7 @@
 <option value="month">month</option>
 </select>
 </label>
+<label>Tag <input type="text" name="context_tag" list="context-tag-suggestions" placeholder="@homedepot"></label>
 <label>Life area
 <select name="life_area">
 <option value="">— choose —</option>

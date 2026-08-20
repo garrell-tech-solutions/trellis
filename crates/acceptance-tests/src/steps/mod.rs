@@ -21,6 +21,7 @@ mod capacity;
 mod capture;
 mod committed_empty_fields;
 mod committed_field_domains;
+mod context_tags;
 mod dismiss;
 mod exceptions;
 mod free_time;
@@ -230,6 +231,9 @@ pub async fn dispatch(
         return outcome;
     }
     if let Some(outcome) = committed_field_domains::dispatch(world, text, example).await {
+        return outcome;
+    }
+    if let Some(outcome) = context_tags::dispatch(world, text, example).await {
         return outcome;
     }
     if let Some(outcome) = quota_triage_validation::dispatch(world, text, example).await {

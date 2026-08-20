@@ -48,12 +48,11 @@ Feature: Triage tags a task with a life area
     And the task list shows "buy milk" tagged "Home"
 
   # life-area-triage-optional-03: triage without a life area succeeds, whatever the kind
-  Scenario: Triage without a life area is rejected, whatever the kind
+  Scenario: Triage without a life area succeeds, whatever the kind
     When the capture is triaged as a <kind> task with "life_area" omitted
-    Then the triage is rejected
-    And the rejection names "life_area"
-    And the task list is still empty
-    And the capture is still waiting in the untriaged queue
+    Then the triage succeeds
+    And the inbox is viewed
+    And the task list shows "sketch the landing page" with no life area
 
     Examples:
       | kind      |
@@ -102,12 +101,10 @@ Feature: Triage tags a task with a life area
     Then the quick-add response's pool triage form preselects no life area
 
   # life-area-triage-page-optional-09: triage submitted from the page with no life area chosen succeeds
-  Scenario: Triage submitted from the page with no life area chosen is refused on that row
+  Scenario: Triage submitted from the page with no life area chosen succeeds
     When the capture is triaged as a <kind> task through the page with no life area chosen
-    Then the triage is rejected
-    And the rejection message on the capture's row names "life_area"
-    And the task list is still empty
-    And the capture is still waiting in the untriaged queue
+    Then the triage succeeds
+    And the task list shows "sketch the landing page" with no life area
 
     Examples:
       | kind      |

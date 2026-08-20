@@ -41,6 +41,9 @@ pub(super) struct ListsTemplate {
     pub(super) captures: Vec<CaptureRow>,
     pub(super) tasks: Vec<TaskRow>,
     pub(super) life_areas: Vec<LifeAreaOption>,
+    /// Every distinct context tag used before, earliest first -- what the
+    /// tag control's `<datalist>` offers (`context-tags-suggestions-05`).
+    pub(super) context_tag_suggestions: Vec<String>,
 }
 
 /// `T-forms-swap-one-fragment`'s response contract, implemented once:
@@ -79,6 +82,7 @@ pub(super) async fn build_lists(
         captures: build_capture_rows(pool, error).await?,
         tasks: build_task_rows(pool).await?,
         life_areas: crate::life_areas::active_options(pool).await?,
+        context_tag_suggestions: crate::capture::distinct_tags(pool).await?,
     })
 }
 
@@ -96,6 +100,7 @@ async fn build_capture_rows(
                 .filter(|(id, _)| *id == capture.id)
                 .map(|(_, message)| message.clone()),
             text: capture.raw_text,
+            context_tag: capture.context_tag,
         })
         .collect())
 }
@@ -108,6 +113,7 @@ async fn build_task_rows(pool: &SqlitePool) -> Result<Vec<TaskRow>, sqlx::Error>
             kind: task.kind,
             text: task.raw_text,
             life_area: task.life_area_name,
+            context_tag: task.context_tag,
         })
         .collect())
 }

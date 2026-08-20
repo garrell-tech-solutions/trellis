@@ -6,6 +6,9 @@
 //! of their own, only parsing and the name each reports back.
 
 /// A field a triage submission must supply, or supply a valid value for.
+/// Life area is not one of these any more: `T-life-area-required-at-triage`
+/// is superseded by `D-context-tags-are-the-taxonomy`, and there is nothing
+/// left that can reject a submission for its life area alone.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Field {
     Deadline,
@@ -15,14 +18,13 @@ pub enum Field {
     TargetCount,
     TargetMinutesEach,
     Period,
-    LifeArea,
 }
 
 /// Every field paired with the name reported back to whoever submitted the
 /// triage -- a table, not a match, for the reason `guardrail::WEEKDAYS`
-/// already is one (`T-complexity-8`: eight arms of no logic beyond the
+/// already is one (`T-complexity-8`: seven arms of no logic beyond the
 /// lookup should not cost against the threshold).
-const FIELD_NAMES: [(Field, &str); 8] = [
+const FIELD_NAMES: [(Field, &str); 7] = [
     (Field::Deadline, "deadline"),
     (Field::DeadlineType, "deadline_type"),
     (Field::Priority, "priority"),
@@ -30,7 +32,6 @@ const FIELD_NAMES: [(Field, &str); 8] = [
     (Field::TargetCount, "target_count"),
     (Field::TargetMinutesEach, "target_minutes_each"),
     (Field::Period, "period"),
-    (Field::LifeArea, "life_area"),
 ];
 
 impl Field {
@@ -238,6 +239,5 @@ mod tests {
         assert_eq!(Field::TargetCount.name(), "target_count");
         assert_eq!(Field::TargetMinutesEach.name(), "target_minutes_each");
         assert_eq!(Field::Period.name(), "period");
-        assert_eq!(Field::LifeArea.name(), "life_area");
     }
 }

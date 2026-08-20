@@ -42,9 +42,46 @@ pub fn parse_name(raw: &str) -> Result<String, NameRejection> {
     }
 }
 
+/// Trims `raw` and collapses blank (or absent) to `None` -- the triage-time
+/// reading of a life area name, now that `T-life-area-required-at-triage`
+/// is superseded by `D-context-tags-are-the-taxonomy`: a life area is still
+/// validated against the active set when one is given (the adapter's job,
+/// unchanged), but giving none is no longer a rejection. [`parse_name`]
+/// stays the rule for a life area's own required name -- adding one still
+/// demands it.
+pub fn optional_name(raw: Option<&str>) -> Option<String> {
+    raw.and_then(|value| {
+        let trimmed = value.trim();
+        (!trimmed.is_empty()).then(|| trimmed.to_string())
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn optional_name_trims_surrounding_whitespace() {
+        assert_eq!(
+            optional_name(Some("  Side project  ")),
+            Some("Side project".to_string())
+        );
+    }
+
+    #[test]
+    fn optional_name_is_none_for_an_absent_name() {
+        assert_eq!(optional_name(None), None);
+    }
+
+    #[test]
+    fn optional_name_is_none_for_an_empty_name() {
+        assert_eq!(optional_name(Some("")), None);
+    }
+
+    #[test]
+    fn optional_name_is_none_for_a_whitespace_only_name() {
+        assert_eq!(optional_name(Some("   ")), None);
+    }
 
     #[test]
     fn parse_name_trims_surrounding_whitespace() {

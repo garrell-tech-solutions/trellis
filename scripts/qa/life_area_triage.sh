@@ -169,45 +169,26 @@ else
 fi
 qa_stop_server
 
-# --- Procedure: a life area is optional ---
-# T-life-area-required-at-triage was superseded by
-# D-context-tags-are-the-taxonomy (#82): all three kinds now succeed with no
-# life area, over the JSON transport.
-name="life-area-optional"
+# --- Procedure: a life area is required ---
+name="life-area-required"
 if qa_start_server "$BIN" "$TMP_DIR/$name.sqlite" "$TMP_DIR/$name.log"; then
-  cid_pool="$(qa_submit_capture "buy milk")"
-  qa_triage "$cid_pool" '{"kind":"pool"}'
-  if [[ "$STATUS" != "201" ]]; then
-    echo "FAIL: [$name-pool] expected a pool triage with no life area to succeed, got status $STATUS (body: $BODY)" >&2
-    FAILURES=1
-  fi
+  CAPTURE_ID="$(qa_submit_capture "buy milk")"
+  qa_triage "$CAPTURE_ID" '{"kind":"pool"}'
+  qa_assert_rejected_naming "$name-pool" missing_field life_area
 
-  cid_committed="$(qa_submit_capture "call the dentist")"
-  qa_triage "$cid_committed" '{"kind":"committed","deadline":"2026-08-20T17:00:00Z","deadline_type":"hard","priority":"P1","estimated_minutes":180}'
-  if [[ "$STATUS" != "201" ]]; then
-    echo "FAIL: [$name-committed] expected a committed triage with no life area to succeed, got status $STATUS (body: $BODY)" >&2
-    FAILURES=1
-  fi
+  CAPTURE_ID="$(qa_submit_capture "call the dentist")"
+  qa_triage "$CAPTURE_ID" '{"kind":"committed","deadline":"2026-08-20T17:00:00Z","deadline_type":"hard","priority":"P1","estimated_minutes":180}'
+  qa_assert_rejected_naming "$name-committed" missing_field life_area
 
-  cid_quota="$(qa_submit_capture "go to the gym")"
-  qa_triage "$cid_quota" '{"kind":"quota","target_count":3,"target_minutes_each":45,"period":"week"}'
-  if [[ "$STATUS" != "201" ]]; then
-    echo "FAIL: [$name-quota] expected a quota triage with no life area to succeed, got status $STATUS (body: $BODY)" >&2
-    FAILURES=1
-  fi
+  CAPTURE_ID="$(qa_submit_capture "go to the gym")"
+  qa_triage "$CAPTURE_ID" '{"kind":"quota","target_count":3,"target_minutes_each":45,"period":"week"}'
+  qa_assert_rejected_naming "$name-quota" missing_field life_area
 
   task_count="$(qa_task_count)"
-  if [[ "$task_count" != "3" ]]; then
-    echo "FAIL: [$name] expected three tasks after three life-area-less triages, found $task_count" >&2
+  if [[ "$task_count" != "0" ]]; then
+    echo "FAIL: [$name] expected no tasks after three life-area-less rejections, found $task_count" >&2
     FAILURES=1
   fi
-  for cid in "$cid_pool" "$cid_committed" "$cid_quota"; do
-    life_area_id="$(sqlite3 "$DB_PATH" "SELECT IFNULL(life_area_id,'NULL') FROM tasks WHERE capture_id = $cid;")"
-    if [[ "$life_area_id" != "NULL" ]]; then
-      echo "FAIL: [$name] expected capture $cid's task to have no life area (not a defaulted one), got life_area_id=$life_area_id" >&2
-      FAILURES=1
-    fi
-  done
 else
   FAILURES=1
 fi
@@ -356,51 +337,61 @@ else
 fi
 qa_stop_server
 
-# --- Procedure: submitting the page with the placeholder still selected succeeds ---
-# features/life_area_triage.feature's own life-area-triage-page-optional-09
-# inverted this scenario under #82, the same way life-area-optional above
-# did for the JSON transport: `life_area` present-but-empty (the placeholder,
-# never touched) is T-empty-equals-absent's case, and an absent life area is
-# no longer rejected either way.
-name="page-with-empty-life-area-succeeds"
+# --- Procedure: submitting without choosing is refused on that row ---
+name="page-requires-a-choice"
 if qa_start_server "$BIN" "$TMP_DIR/$name.sqlite" "$TMP_DIR/$name.log"; then
   pool_id="$(qa_submit_capture "buy milk")"
   pool_endpoint="$(qa_shape_field "$(qa_extract_life_area_shapes "$(qa_get_inbox)" "$pool_id")" pool endpoint)"
   qa_triage_form "$pool_endpoint" "kind=pool&life_area="
-  if [[ "$STATUS" != "201" ]]; then
-    echo "FAIL: [$name-pool] expected 201, got $STATUS (body: $BODY)" >&2
+  if [[ "$STATUS" != "422" ]]; then
+    echo "FAIL: [$name-pool] expected 422, got $STATUS" >&2
+    FAILURES=1
+  fi
+  if [[ "$BODY" != *'id="lists"'* ]]; then
+    echo "FAIL: [$name-pool] expected the re-rendered #lists fragment, got:
+$BODY" >&2
+    FAILURES=1
+  fi
+  if [[ "$BODY" != *"life_area is required"* ]]; then
+    echo "FAIL: [$name-pool] expected the rejection to name life_area on the row, got:
+$BODY" >&2
     FAILURES=1
   fi
 
   committed_id="$(qa_submit_capture "call the dentist")"
   committed_endpoint="$(qa_shape_field "$(qa_extract_life_area_shapes "$(qa_get_inbox)" "$committed_id")" committed endpoint)"
   qa_triage_form "$committed_endpoint" "kind=committed&deadline=2026-08-20T17%3A00%3A00Z&deadline_type=hard&priority=P1&estimated_minutes=180&life_area="
-  if [[ "$STATUS" != "201" ]]; then
-    echo "FAIL: [$name-committed] expected 201, got $STATUS (body: $BODY)" >&2
+  if [[ "$STATUS" != "422" ]]; then
+    echo "FAIL: [$name-committed] expected 422, got $STATUS" >&2
+    FAILURES=1
+  fi
+  if [[ "$BODY" != *"life_area is required"* ]]; then
+    echo "FAIL: [$name-committed] expected the rejection to name life_area on the row, got:
+$BODY" >&2
     FAILURES=1
   fi
 
   quota_id="$(qa_submit_capture "go to the gym")"
   quota_endpoint="$(qa_shape_field "$(qa_extract_life_area_shapes "$(qa_get_inbox)" "$quota_id")" quota endpoint)"
   qa_triage_form "$quota_endpoint" "kind=quota&target_count=3&target_minutes_each=45&period=week&life_area="
-  if [[ "$STATUS" != "201" ]]; then
-    echo "FAIL: [$name-quota] expected 201, got $STATUS (body: $BODY)" >&2
+  if [[ "$STATUS" != "422" ]]; then
+    echo "FAIL: [$name-quota] expected 422, got $STATUS" >&2
+    FAILURES=1
+  fi
+  if [[ "$BODY" != *"life_area is required"* ]]; then
+    echo "FAIL: [$name-quota] expected the rejection to name life_area on the row, got:
+$BODY" >&2
     FAILURES=1
   fi
 
   task_count="$(qa_task_count)"
-  if [[ "$task_count" != "3" ]]; then
-    echo "FAIL: [$name] expected three tasks after three empty-life-area page submissions, found $task_count" >&2
+  if [[ "$task_count" != "0" ]]; then
+    echo "FAIL: [$name] expected no tasks after three no-life-area rejections, found $task_count" >&2
     FAILURES=1
   fi
   for cid in "$pool_id" "$committed_id" "$quota_id"; do
-    if qa_capture_untriaged "$cid"; then
-      echo "FAIL: [$name] expected capture $cid to have left the inbox" >&2
-      FAILURES=1
-    fi
-    life_area_id="$(sqlite3 "$DB_PATH" "SELECT IFNULL(life_area_id,'NULL') FROM tasks WHERE capture_id = $cid;")"
-    if [[ "$life_area_id" != "NULL" ]]; then
-      echo "FAIL: [$name] expected capture $cid's task to have no life area, got life_area_id=$life_area_id" >&2
+    if ! qa_capture_untriaged "$cid"; then
+      echo "FAIL: [$name] expected capture $cid to still be untriaged" >&2
       FAILURES=1
     fi
   done

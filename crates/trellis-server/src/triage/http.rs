@@ -19,7 +19,7 @@ use axum::extract::{FromRequest, Path, Request, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::{Form, Json};
-use scheduler_core::task::{TaskKind, TriageFields, TriageRejection, WellFormedTriage};
+use scheduler_core::task::{TaskKind, TriageFields, TriageRejection};
 use serde::Deserialize;
 use serde_json::{json, Value};
 use sqlx::SqlitePool;
@@ -44,8 +44,6 @@ fn triage_fields(payload: &Value) -> TriageFields {
         target_count: payload.get("target_count").and_then(Value::as_i64),
         target_minutes_each: payload.get("target_minutes_each").and_then(Value::as_i64),
         period: string_field(payload, "period"),
-        life_area: string_field(payload, "life_area"),
-        context_tag: string_field(payload, "context_tag"),
     }
 }
 
@@ -63,8 +61,6 @@ pub struct TriageFormRequest {
     target_count: Option<i64>,
     target_minutes_each: Option<i64>,
     period: Option<String>,
-    life_area: Option<String>,
-    context_tag: Option<String>,
 }
 
 impl From<TriageFormRequest> for TriageFields {
@@ -78,8 +74,6 @@ impl From<TriageFormRequest> for TriageFields {
             target_count: form.target_count,
             target_minutes_each: form.target_minutes_each,
             period: form.period,
-            life_area: form.life_area,
-            context_tag: form.context_tag,
         }
     }
 }
@@ -113,14 +107,9 @@ impl<S: Send + Sync> FromRequest<S> for TriageInput {
 }
 
 /// Every way triage can be refused. `Core` wraps `scheduler_core`'s own
-/// rejection — well-formedness, decidable without a database. `UnknownLifeArea`
-/// is the one reason that needs the database to detect: it asks whether a
-/// submitted name currently resolves to a real, active row, which is an
-/// adapter question, not `scheduler_core`'s to answer
-/// (`T-capability-owns-its-queries`).
+/// rejection — well-formedness, decidable without a database.
 enum Rejection {
     Core(TriageRejection),
-    UnknownLifeArea(String),
     /// The capture named by the URL has already left the inbox -- by triage
     /// or by dismissal, either of which needs the database to know
     /// (`dismiss-capture-no-triage-after-dismissal-05`). Which of the two it
@@ -147,7 +136,6 @@ fn rejected(rejection: &Rejection, kind_submitted: &Value) -> (StatusCode, Json<
             json!({ "invalid_field": field.name() })
         }
         Rejection::Core(TriageRejection::UnknownKind) => json!({ "unknown_kind": kind_submitted }),
-        Rejection::UnknownLifeArea(name) => json!({ "unknown_life_area": name }),
         Rejection::CaptureNotOpen => {
             json!({ "capture_not_open": CAPTURE_NOT_OPEN_MESSAGE })
         }
@@ -169,7 +157,6 @@ fn rejection_message(rejection: &Rejection, kind_submitted: &Value) -> String {
         Rejection::Core(TriageRejection::UnknownKind) => {
             format!("unrecognised kind: {kind_submitted}")
         }
-        Rejection::UnknownLifeArea(name) => format!("{name} is not a life area"),
         Rejection::CaptureNotOpen => CAPTURE_NOT_OPEN_MESSAGE.to_string(),
     }
 }
@@ -178,29 +165,21 @@ fn rejection_message(rejection: &Rejection, kind_submitted: &Value) -> String {
 /// handler's business, and a triage stamps the task and the capture it
 /// consumed with the same one.
 ///
-/// Three writes, two of them not triage's own: the task itself, then the
-/// inbox is asked to close the capture it consumed
-/// (`T-one-front-door-per-capability` — triage does not know that leaving
-/// the inbox is a `left_inbox_at` stamp), then — only when a tag was
-/// submitted — capture is asked to set or change it
-/// (`context-tags-taggable-at-triage-07`), through
-/// the same [`crate::capture::retag`] a fresh capture's own tag goes
-/// through, so the two paths cannot canonicalize case identity differently.
+/// Two writes, one of them the inbox's: triage creates the task, then asks
+/// the inbox to close the capture it consumed. Triage does not know that
+/// leaving the inbox is a `left_inbox_at` stamp, which is what lets
+/// dismissal reach the same state without a second copy of the write
+/// (`T-one-front-door-per-capability`).
 async fn write_task(
     pool: &SqlitePool,
     capture_id: i64,
     kind: &TaskKind,
-    life_area_id: Option<i64>,
-    context_tag: Option<&str>,
     created_at_ms: i64,
 ) -> Result<(), StatusCode> {
-    store::insert_task(pool, capture_id, kind, life_area_id, created_at_ms)
+    store::insert_task(pool, capture_id, kind, created_at_ms)
         .await
         .map_err(write_failed)?;
     inbox::close_capture(pool, capture_id, created_at_ms)
-        .await
-        .map_err(write_failed)?;
-    crate::capture::retag(pool, capture_id, context_tag)
         .await
         .map_err(write_failed)?;
     Ok(())
@@ -208,31 +187,20 @@ async fn write_task(
 
 /// What a validated submission is ready to write, or why it is not.
 enum TriageOutcome {
-    Accepted {
-        kind: TaskKind,
-        life_area_id: Option<i64>,
-        context_tag: Option<String>,
-    },
+    Accepted { kind: TaskKind },
     Rejected(Rejection),
 }
 
 /// Only once the core calls a submission well-formed does the database enter
-/// it: first, whether the capture named by the URL is still open
-/// (`dismiss-capture-no-second-triage-07`, `-no-triage-after-dismissal-05`) —
-/// cheaper than resolving a life area, and logically prior, since a
-/// submission naming a life area that is fine in the abstract still cannot
-/// land on a capture that has already left. Then, only when a life area was
-/// actually named (`T-life-area-required-at-triage` superseded by
-/// `D-context-tags-are-the-taxonomy`), whether it resolves to a real, active
-/// row — a submission naming none skips this lookup outright and is accepted
-/// with no life area.
+/// it: whether the capture named by the URL is still open
+/// (`dismiss-capture-no-second-triage-07`, `-no-triage-after-dismissal-05`).
 async fn decide_triage(
     pool: &SqlitePool,
     capture_id: i64,
     fields: &TriageFields,
 ) -> Result<TriageOutcome, StatusCode> {
-    let submission = match WellFormedTriage::from_fields(fields) {
-        Ok(submission) => submission,
+    let kind = match TaskKind::from_fields(fields) {
+        Ok(kind) => kind,
         Err(rejection) => return Ok(TriageOutcome::Rejected(Rejection::Core(rejection))),
     };
     if !inbox::capture_is_open(pool, capture_id)
@@ -241,39 +209,7 @@ async fn decide_triage(
     {
         return Ok(TriageOutcome::Rejected(Rejection::CaptureNotOpen));
     }
-    let Some(name) = submission.life_area_name.clone() else {
-        return Ok(TriageOutcome::Accepted {
-            kind: submission.kind,
-            life_area_id: None,
-            context_tag: submission.context_tag,
-        });
-    };
-    let life_area_id = crate::life_areas::active_id_for_name(pool, &name)
-        .await
-        .map_err(write_failed)?;
-    Ok(outcome_for_resolved_life_area(
-        submission,
-        name,
-        life_area_id,
-    ))
-}
-
-/// Once a named life area has been looked up, whether it resolved decides
-/// the rest of the outcome: an id accepts the submission, its absence
-/// rejects it by the name that failed to resolve.
-fn outcome_for_resolved_life_area(
-    submission: WellFormedTriage,
-    name: String,
-    life_area_id: Option<i64>,
-) -> TriageOutcome {
-    match life_area_id {
-        Some(life_area_id) => TriageOutcome::Accepted {
-            kind: submission.kind,
-            life_area_id: Some(life_area_id),
-            context_tag: submission.context_tag,
-        },
-        None => TriageOutcome::Rejected(Rejection::UnknownLifeArea(name)),
-    }
+    Ok(TriageOutcome::Accepted { kind })
 }
 
 /// The page-originated response: whatever happened, re-render `#lists` from
@@ -293,21 +229,8 @@ async fn page_response(
             Some((capture_id, rejection_message(rejection, kind_submitted))),
         ),
     };
-    if let TriageOutcome::Accepted {
-        kind,
-        life_area_id,
-        context_tag,
-    } = outcome
-    {
-        write_task(
-            pool,
-            capture_id,
-            kind,
-            *life_area_id,
-            context_tag.as_deref(),
-            created_at_ms,
-        )
-        .await?;
+    if let TriageOutcome::Accepted { kind } = outcome {
+        write_task(pool, capture_id, kind, created_at_ms).await?;
     }
     inbox::render_lists(pool, status, error).await
 }
@@ -345,20 +268,8 @@ pub async fn create_triage(
     }
 
     match outcome {
-        TriageOutcome::Accepted {
-            kind,
-            life_area_id,
-            context_tag,
-        } => {
-            write_task(
-                &pool,
-                capture_id,
-                &kind,
-                life_area_id,
-                context_tag.as_deref(),
-                created_at_ms,
-            )
-            .await?;
+        TriageOutcome::Accepted { kind } => {
+            write_task(&pool, capture_id, &kind, created_at_ms).await?;
             Ok((StatusCode::CREATED, Json(json!({}))).into_response())
         }
         TriageOutcome::Rejected(rejection) => {
@@ -484,128 +395,6 @@ mod tests {
         assert_eq!(row.2, None, "pool task must have no quota target");
         assert_eq!(row.3, None, "pool task must have no quota target");
         assert_eq!(row.4, None, "pool task must have no quota target");
-    }
-
-    /// `T-life-area-required-at-triage` is superseded by
-    /// `D-context-tags-are-the-taxonomy` (#82): all three kinds succeed with
-    /// no life area, over the JSON transport.
-    #[tokio::test]
-    async fn triaging_with_no_life_area_succeeds_for_every_kind() {
-        for body in [
-            json!({ "kind": "pool" }),
-            json!({
-                "kind": "committed",
-                "deadline": "2026-08-20T17:00:00Z",
-                "deadline_type": "hard",
-                "priority": "P1",
-                "estimated_minutes": 180,
-            }),
-            json!({
-                "kind": "quota",
-                "target_count": 3,
-                "target_minutes_each": 45,
-                "period": "week",
-            }),
-        ] {
-            let (_dir, pool) = test_pool().await;
-            let capture_id = insert_untriaged_capture(&pool, "buy milk").await;
-
-            let response = triage_response(&pool, capture_id, body.clone()).await;
-
-            assert_eq!(
-                response.status(),
-                StatusCode::CREATED,
-                "expected {body} to succeed with no life area"
-            );
-            let life_area_id: Option<i64> =
-                sqlx::query_scalar("SELECT life_area_id FROM tasks WHERE capture_id = ?")
-                    .bind(capture_id)
-                    .fetch_one(&pool)
-                    .await
-                    .unwrap();
-            assert_eq!(life_area_id, None, "expected no life area for {body}");
-        }
-    }
-
-    /// An empty or whitespace-only `life_area` is the same as omitting it
-    /// (`T-empty-equals-absent`), not a rejection.
-    #[tokio::test]
-    async fn triaging_with_a_blank_life_area_succeeds_with_no_life_area() {
-        let (_dir, pool) = test_pool().await;
-        let capture_id = insert_untriaged_capture(&pool, "buy milk").await;
-
-        let response = triage_response(
-            &pool,
-            capture_id,
-            json!({ "kind": "pool", "life_area": "   " }),
-        )
-        .await;
-
-        assert_eq!(response.status(), StatusCode::CREATED);
-        let life_area_id: Option<i64> =
-            sqlx::query_scalar("SELECT life_area_id FROM tasks WHERE capture_id = ?")
-                .bind(capture_id)
-                .fetch_one(&pool)
-                .await
-                .unwrap();
-        assert_eq!(life_area_id, None);
-    }
-
-    /// Supplying a life area still works -- only the requirement dropped.
-    #[tokio::test]
-    async fn triaging_with_no_life_area_through_the_page_succeeds() {
-        let (_dir, pool) = test_pool().await;
-        let capture_id = insert_untriaged_capture(&pool, "buy milk").await;
-
-        let response = page_triage_response(&pool, capture_id, &[("kind", "pool")]).await;
-
-        assert_eq!(response.status(), StatusCode::CREATED);
-    }
-
-    /// Triage's own tag field is a second chance to tag, alongside the
-    /// capture (`context-tags-taggable-at-triage-07`) -- both write the
-    /// same field.
-    #[tokio::test]
-    async fn triaging_with_a_context_tag_stores_it_on_the_capture() {
-        let (_dir, pool) = test_pool().await;
-        let capture_id = insert_untriaged_capture(&pool, "buy screws").await;
-
-        let response = triage_response(
-            &pool,
-            capture_id,
-            json!({ "kind": "pool", "context_tag": "@homedepot" }),
-        )
-        .await;
-
-        assert_eq!(response.status(), StatusCode::CREATED);
-        let tag: Option<String> =
-            sqlx::query_scalar("SELECT context_tag FROM captures WHERE id = ?")
-                .bind(capture_id)
-                .fetch_one(&pool)
-                .await
-                .unwrap();
-        assert_eq!(tag.as_deref(), Some("@homedepot"));
-    }
-
-    /// A triage submitting no tag must not erase one the capture already
-    /// carries -- triage's own field is optional, not a reset.
-    #[tokio::test]
-    async fn triaging_with_no_context_tag_leaves_an_existing_one_untouched() {
-        let (_dir, pool) = test_pool().await;
-        let capture_id = insert_untriaged_capture(&pool, "buy screws").await;
-        crate::capture::retag(&pool, capture_id, Some("@homedepot"))
-            .await
-            .unwrap();
-
-        triage_response(&pool, capture_id, json!({ "kind": "pool" })).await;
-
-        let tag: Option<String> =
-            sqlx::query_scalar("SELECT context_tag FROM captures WHERE id = ?")
-                .bind(capture_id)
-                .fetch_one(&pool)
-                .await
-                .unwrap();
-        assert_eq!(tag.as_deref(), Some("@homedepot"));
     }
 
     #[tokio::test]
@@ -1128,8 +917,7 @@ mod tests {
             "estimated_minutes": 180,
             "target_count": 3,
             "target_minutes_each": 45,
-            "period": "week",
-            "life_area": "Work"
+            "period": "week"
         });
 
         assert_eq!(
@@ -1143,8 +931,6 @@ mod tests {
                 target_count: Some(3),
                 target_minutes_each: Some(45),
                 period: Some("week".to_string()),
-                life_area: Some("Work".to_string()),
-                context_tag: None,
             }
         );
     }
@@ -1191,25 +977,6 @@ mod tests {
     }
 
     #[test]
-    fn an_unknown_life_area_rejection_echoes_the_submitted_name() {
-        let (status, Json(body)) = rejected(
-            &Rejection::UnknownLifeArea("Gardening".to_string()),
-            &Value::Null,
-        );
-        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
-        assert_eq!(body, json!({ "unknown_life_area": "Gardening" }));
-    }
-
-    #[test]
-    fn an_unknown_life_area_rejection_message_names_it() {
-        let message = rejection_message(
-            &Rejection::UnknownLifeArea("Gardening".to_string()),
-            &Value::Null,
-        );
-        assert_eq!(message, "Gardening is not a life area");
-    }
-
-    #[test]
     fn an_invalid_field_rejection_message_names_the_field() {
         let message = rejection_message(
             &Rejection::Core(TriageRejection::InvalidField(Field::Deadline)),
@@ -1225,22 +992,6 @@ mod tests {
             &json!({ "not": "a string" }),
         );
         assert_eq!(message, r#"unrecognised kind: {"not":"a string"}"#);
-    }
-
-    #[test]
-    fn outcome_for_resolved_life_area_rejects_a_name_that_did_not_resolve() {
-        let submission = WellFormedTriage {
-            kind: TaskKind::Pool,
-            life_area_name: Some("Gardening".to_string()),
-            context_tag: None,
-        };
-        let outcome = outcome_for_resolved_life_area(submission, "Gardening".to_string(), None);
-        match outcome {
-            TriageOutcome::Rejected(Rejection::UnknownLifeArea(name)) => {
-                assert_eq!(name, "Gardening")
-            }
-            _ => panic!("expected an UnknownLifeArea rejection"),
-        }
     }
 
     /// A submission expressed as JSON and as a form, field for field.
@@ -1268,8 +1019,6 @@ mod tests {
             fields.target_minutes_each.map(Value::from),
         );
         put("period", fields.period.clone().map(Value::from));
-        put("life_area", fields.life_area.clone().map(Value::from));
-        put("context_tag", fields.context_tag.clone().map(Value::from));
         Value::Object(body)
     }
 
@@ -1283,8 +1032,6 @@ mod tests {
             target_count: fields.target_count,
             target_minutes_each: fields.target_minutes_each,
             period: fields.period.clone(),
-            life_area: fields.life_area.clone(),
-            context_tag: fields.context_tag.clone(),
         }
     }
 
@@ -1309,8 +1056,6 @@ mod tests {
             target_count in proptest::option::of(any::<i64>()),
             target_minutes_each in proptest::option::of(any::<i64>()),
             period in proptest::option::of(".{0,10}"),
-            life_area in proptest::option::of(".{0,20}"),
-            context_tag in proptest::option::of(".{0,20}"),
         ) {
             let submission = TriageFields {
                 kind,
@@ -1321,8 +1066,6 @@ mod tests {
                 target_count,
                 target_minutes_each,
                 period,
-                life_area,
-                context_tag,
             };
 
             let from_json = triage_fields(&json_body(&submission));

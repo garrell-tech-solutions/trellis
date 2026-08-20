@@ -1,5 +1,4 @@
-//! What an accepted triage writes and reads: the new `tasks` row, and the
-//! life-area name it must resolve before writing one.
+//! What an accepted triage writes and reads: the new `tasks` row.
 //!
 //! Consuming the capture is deliberately *not* here. Triage does not stamp
 //! the capture itself; it asks `inbox::close_capture` to take it
@@ -14,17 +13,15 @@
 use scheduler_core::task::TaskKind;
 use sqlx::SqlitePool;
 
-/// `life_area_id` is nullable at storage for schema reasons (the same
-/// `T-quota-targets-required` pattern the quota target columns already use)
-/// even though the triage boundary requires one for every kind; callers that
-/// have already resolved a submission's life area pass `Some`, and only a
-/// fixture inserting a row directly (bypassing the boundary) would pass
-/// `None`.
+/// `tasks.life_area_id` stays in the schema (#88, `T-migrations-append-only`:
+/// dropping the column means rebuilding the table for nothing) but nothing
+/// upstream of this function can produce a value for it any more, so this
+/// always writes `NULL` rather than carrying a parameter every real caller
+/// would pass `None` to.
 pub async fn insert_task(
     pool: &SqlitePool,
     capture_id: i64,
     kind: &TaskKind,
-    life_area_id: Option<i64>,
     created_at_ms: i64,
 ) -> Result<(), sqlx::Error> {
     let attributes = kind.attributes();
@@ -32,7 +29,7 @@ pub async fn insert_task(
         "INSERT INTO tasks (capture_id, kind, deadline, deadline_type, priority, \
          estimated_minutes, target_count, target_minutes_each, period, life_area_id, \
          created_at_ms) \
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?)",
     )
     .bind(capture_id)
     .bind(attributes.kind)
@@ -43,7 +40,6 @@ pub async fn insert_task(
     .bind(attributes.target_count)
     .bind(attributes.target_minutes_each)
     .bind(attributes.period)
-    .bind(life_area_id)
     .bind(created_at_ms)
     .execute(pool)
     .await?;
@@ -60,7 +56,7 @@ mod tests {
     /// writer rather than retyping its `INSERT` here: a fixture that spells
     /// out another module's SQL is a second copy of that schema.
     async fn given_a_capture(pool: &SqlitePool, raw_text: &str) -> i64 {
-        crate::capture::store::insert(pool, raw_text, "web", None, 0)
+        crate::capture::store::insert(pool, raw_text, "web", 0)
             .await
             .unwrap()
     }
@@ -108,7 +104,7 @@ mod tests {
         let (_dir, pool) = test_pool().await;
         let capture_id = given_a_capture(&pool, "buy milk").await;
 
-        insert_task(&pool, capture_id, &TaskKind::Pool, None, 7)
+        insert_task(&pool, capture_id, &TaskKind::Pool, 7)
             .await
             .unwrap();
 
@@ -123,7 +119,7 @@ mod tests {
         let (_dir, pool) = test_pool().await;
         let capture_id = given_a_capture(&pool, "buy milk").await;
 
-        insert_task(&pool, capture_id, &committed(), None, 7)
+        insert_task(&pool, capture_id, &committed(), 7)
             .await
             .unwrap();
 
@@ -147,9 +143,7 @@ mod tests {
         let (_dir, pool) = test_pool().await;
         let capture_id = given_a_capture(&pool, "buy milk").await;
 
-        insert_task(&pool, capture_id, &quota(), None, 7)
-            .await
-            .unwrap();
+        insert_task(&pool, capture_id, &quota(), 7).await.unwrap();
 
         assert_eq!(
             stored_task(&pool).await,
@@ -171,7 +165,7 @@ mod tests {
         let (_dir, pool) = test_pool().await;
         let capture_id = given_a_capture(&pool, "buy milk").await;
 
-        insert_task(&pool, capture_id, &TaskKind::Pool, None, 4242)
+        insert_task(&pool, capture_id, &TaskKind::Pool, 4242)
             .await
             .unwrap();
 
@@ -189,24 +183,6 @@ mod tests {
             .await
             .unwrap();
 
-        assert!(insert_task(&pool, 1, &TaskKind::Pool, None, 0)
-            .await
-            .is_err());
-    }
-
-    #[tokio::test]
-    async fn a_task_stores_the_resolved_life_area_id() {
-        let (_dir, pool) = test_pool().await;
-        let capture_id = given_a_capture(&pool, "buy milk").await;
-
-        insert_task(&pool, capture_id, &TaskKind::Pool, Some(3), 7)
-            .await
-            .unwrap();
-
-        let life_area_id: Option<i64> = sqlx::query_scalar("SELECT life_area_id FROM tasks")
-            .fetch_one(&pool)
-            .await
-            .unwrap();
-        assert_eq!(life_area_id, Some(3));
+        assert!(insert_task(&pool, 1, &TaskKind::Pool, 0).await.is_err());
     }
 }

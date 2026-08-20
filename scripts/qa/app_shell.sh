@@ -152,13 +152,10 @@ if qa_start_server "$BIN" "$TMP_DIR/$name.sqlite" "$TMP_DIR/$name.log"; then
     fi
   done
 
-  # life_area stopped being a required field under #82
-  # (D-context-tags-are-the-taxonomy), so a still-required field triggers
-  # this check instead: committed's own deadline.
   cid="$(qa_submit_capture "buy milk")"
-  qa_triage "$cid" '{"kind":"committed","deadline_type":"hard","priority":"P1","estimated_minutes":180}'
+  qa_triage "$cid" '{"kind":"pool"}'
   if [[ "$STATUS" != "422" ]]; then
-    echo "FAIL: [$name] a committed triage missing deadline should still be rejected with 422, got $STATUS" >&2
+    echo "FAIL: [$name] a triage missing life_area should still be rejected with 422, got $STATUS" >&2
     FAILURES=1
   fi
 

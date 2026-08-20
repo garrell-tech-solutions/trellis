@@ -1,11 +1,13 @@
 {% extends "base.html" %}
 {% block content %}
 <h1>Trellis</h1>
-<form hx-post="/captures" hx-target="#captures" hx-swap="afterbegin" hx-on::after-request="this.reset()">
-<input type="text" name="raw_text" placeholder="Quick add a capture" required>
-<input type="text" name="context_tag" list="context-tag-suggestions" placeholder="@homedepot">
+<form class="quick-add" hx-post="/captures" hx-target="#captures" hx-swap="afterbegin" hx-on::after-request="this.reset()">
+<div class="quick-add-box">
+<input type="text" name="raw_text" placeholder="What just came to mind" enterkeyhint="done" autofocus required>
+<button type="submit" aria-label="Save capture">&#9166;</button>
+</div>
 <input type="hidden" name="source" value="web">
-<button type="submit">Add</button>
+<p class="hint">Enter saves it. Sorting can wait.</p>
 </form>
 {% include "lists.html" %}
 {% endblock %}

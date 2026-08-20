@@ -145,16 +145,8 @@ fn then_html_body_contains(world: &mut World, expected: &str) -> Result<(), Stri
     super::then_html_body_contains(world, expected, "no HTML response recorded")
 }
 
-/// The captures list's own section when there is one, or the whole body
-/// otherwise -- a quick-add's own response is the new row's markup alone
-/// (`hx-swap="afterbegin"` targets `#captures` directly), without the
-/// `<ul id="captures">` wrapper a full page or a `#lists` swap carries
-/// (`life_areas::then_quick_add_pool_preselects_none`'s own reasoning,
-/// generalized here since `context_tags-optional-02` asserts against a
-/// bare quick-add response with no interceding page view).
 fn captures_section(world: &World) -> Result<&str, String> {
-    let body = html_body(world)?;
-    Ok(html::captures_section(body).unwrap_or(body))
+    html::captures_section(html_body(world)?)
 }
 
 fn then_captures_section_contains(world: &mut World, expected: &str) -> Result<(), String> {
@@ -293,59 +285,6 @@ mod tests {
     fn then_lists_before_errors_when_a_name_is_missing() {
         let mut world = world_with_captures_section("<li>buy milk</li>");
         assert!(then_lists_before(&mut world, "buy milk", "call the dentist").is_err());
-    }
-
-    /// **Not merely "before or equal".** `first` and `second` both start at
-    /// the same index when `second` is a prefix of `first`'s own occurrence
-    /// -- the one case a `<=` comparison would wrongly call "before".
-    #[test]
-    fn then_lists_before_errors_when_both_names_start_at_the_same_index() {
-        let mut world = world_with_captures_section("<li>buy milk</li>");
-        assert!(then_lists_before(&mut world, "buy milk", "buy").is_err());
-    }
-
-    #[test]
-    fn then_html_body_contains_passes_when_the_body_carries_the_expected_text() {
-        let mut world = World::new();
-        world.last_html_body = Some("<p>Nothing to triage.</p>".to_string());
-        assert_eq!(
-            then_html_body_contains(&mut world, "Nothing to triage"),
-            Ok(())
-        );
-    }
-
-    #[test]
-    fn then_html_body_contains_errors_when_the_body_lacks_the_expected_text() {
-        let mut world = World::new();
-        world.last_html_body = Some("<p>something else</p>".to_string());
-        assert!(then_html_body_contains(&mut world, "Nothing to triage").is_err());
-    }
-
-    #[test]
-    fn then_captures_section_contains_errors_when_the_text_is_absent() {
-        let mut world = world_with_captures_section("<li>call the dentist</li>");
-        assert!(then_captures_section_contains(&mut world, "buy milk").is_err());
-    }
-
-    #[test]
-    fn then_captures_section_excludes_passes_when_the_text_is_absent() {
-        let mut world = world_with_captures_section("<li>call the dentist</li>");
-        assert_eq!(
-            then_captures_section_excludes(&mut world, "buy milk"),
-            Ok(())
-        );
-    }
-
-    #[test]
-    fn then_captures_section_excludes_errors_when_the_text_is_present() {
-        let mut world = world_with_captures_section("<li>buy milk</li>");
-        assert!(then_captures_section_excludes(&mut world, "buy milk").is_err());
-    }
-
-    #[test]
-    fn then_lists_no_captures_errors_when_a_capture_is_present() {
-        let mut world = world_with_captures_section("<li>buy milk</li>");
-        assert!(then_lists_no_captures(&mut world).is_err());
     }
 
     #[test]

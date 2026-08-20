@@ -11,9 +11,6 @@
 
 mod fields;
 
-use crate::context_tag;
-use crate::life_area;
-
 pub use fields::{DeadlineType, Field, Period, Priority};
 
 /// The stored discriminant for each kind. These three strings are the durable
@@ -43,20 +40,6 @@ pub struct TriageFields {
     /// (`D-no-pool-on-calendar`) and quota already carries
     /// `target_minutes_each`, so neither needs this field.
     pub estimated_minutes: Option<i64>,
-    /// The life area submitted by name -- optional for every kind since
-    /// `T-life-area-required-at-triage` was superseded by
-    /// `D-context-tags-are-the-taxonomy` (#82). Whether a *given* name
-    /// currently resolves to a real, active life area is still not
-    /// decidable here -- that needs the `life_areas` table, so it stays the
-    /// adapter's job (`T-capability-owns-its-queries`) whenever one was
-    /// submitted at all.
-    pub life_area: Option<String>,
-    /// A context tag submitted at triage -- the fast path is tagging at
-    /// capture, but the tag is often only obvious later, so triage is
-    /// allowed to set or change it too (`context-tags-taggable-at-triage-07`).
-    /// Optional and free text, the same reading [`context_tag::normalize`]
-    /// gives a tag anywhere else it is submitted.
-    pub context_tag: Option<String>,
 }
 
 /// Why a set of triage fields does not describe a task.
@@ -149,41 +132,6 @@ fn require_positive(field: Field, value: i64) -> Result<i64, TriageRejection> {
         Ok(value)
     } else {
         Err(TriageRejection::InvalidField(field))
-    }
-}
-
-/// A triage submission with everything decided that can be decided here:
-/// which kind of task it describes, the life area it names (if any), and
-/// the context tag it names (if any).
-///
-/// Both names are carried as text on purpose, and both are optional
-/// (`T-life-area-required-at-triage` and its life-area requirement are
-/// superseded by `D-context-tags-are-the-taxonomy`). Whether a *given* life
-/// area currently resolves to a real, active row needs the `life_areas`
-/// table, so that half stays the adapter's (`T-capability-owns-its-queries`)
-/// -- this type is the line between the two, and holding the name rather
-/// than an id is what keeps the core from needing to know ids exist. A
-/// context tag has no such resolution step: it is free text, stored
-/// verbatim once normalized (case identity is the adapter's own lookup,
-/// `T-capability-owns-its-queries` again).
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct WellFormedTriage {
-    pub kind: TaskKind,
-    pub life_area_name: Option<String>,
-    pub context_tag: Option<String>,
-}
-
-impl WellFormedTriage {
-    /// The kind is still the one thing that can reject a submission here --
-    /// neither the life area nor the context tag can any more, so there is
-    /// no ordering left to compose beyond deciding the kind first.
-    pub fn from_fields(fields: &TriageFields) -> Result<Self, TriageRejection> {
-        let kind = TaskKind::from_fields(fields)?;
-        Ok(WellFormedTriage {
-            kind,
-            life_area_name: life_area::optional_name(fields.life_area.as_deref()),
-            context_tag: context_tag::normalize(fields.context_tag.as_deref()),
-        })
     }
 }
 
@@ -304,133 +252,6 @@ impl TaskKind {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    // --- WellFormedTriage ---------------------------------------------------
-
-    #[test]
-    fn a_well_formed_submission_reports_its_kind_and_the_life_area_it_names() {
-        let fields = TriageFields {
-            kind: Some(POOL.to_string()),
-            life_area: Some("Work".to_string()),
-            ..TriageFields::default()
-        };
-
-        assert_eq!(
-            WellFormedTriage::from_fields(&fields),
-            Ok(WellFormedTriage {
-                kind: TaskKind::Pool,
-                life_area_name: Some("Work".to_string()),
-                context_tag: None,
-            })
-        );
-    }
-
-    /// `T-life-area-required-at-triage` is superseded: a kind on its own is
-    /// a well-formed submission now, and the life area it did not name
-    /// simply reports `None` rather than a rejection.
-    #[test]
-    fn a_submission_naming_a_kind_but_no_life_area_is_accepted_with_no_life_area() {
-        let fields = TriageFields {
-            kind: Some(POOL.to_string()),
-            ..TriageFields::default()
-        };
-
-        assert_eq!(
-            WellFormedTriage::from_fields(&fields),
-            Ok(WellFormedTriage {
-                kind: TaskKind::Pool,
-                life_area_name: None,
-                context_tag: None,
-            })
-        );
-    }
-
-    /// A life area submitted as only whitespace is the same as none at all
-    /// (`T-empty-equals-absent`) -- the same reading a context tag gets.
-    #[test]
-    fn a_whitespace_only_life_area_is_the_same_as_none() {
-        let fields = TriageFields {
-            kind: Some(POOL.to_string()),
-            life_area: Some("   ".to_string()),
-            ..TriageFields::default()
-        };
-
-        assert_eq!(
-            WellFormedTriage::from_fields(&fields)
-                .unwrap()
-                .life_area_name,
-            None
-        );
-    }
-
-    /// The kind is still the only thing that can reject a submission, so a
-    /// submission naming neither a kind nor a life area still reports the
-    /// kind -- there is no longer a competing life-area complaint to order
-    /// it against.
-    #[test]
-    fn a_submission_missing_both_reports_the_unknown_kind() {
-        assert_eq!(
-            WellFormedTriage::from_fields(&TriageFields::default()),
-            Err(TriageRejection::UnknownKind)
-        );
-    }
-
-    #[test]
-    fn a_submission_with_a_life_area_but_an_unrecognised_kind_reports_the_kind() {
-        let fields = TriageFields {
-            kind: Some("banana".to_string()),
-            life_area: Some("Work".to_string()),
-            ..TriageFields::default()
-        };
-
-        assert_eq!(
-            WellFormedTriage::from_fields(&fields),
-            Err(TriageRejection::UnknownKind)
-        );
-    }
-
-    /// A kind's own required fields are unaffected by the life area
-    /// requirement's removal: a committed task still needs its own fields
-    /// regardless of whether a life area was given.
-    #[test]
-    fn a_kinds_own_missing_field_still_rejects_with_no_life_area_given() {
-        let fields = TriageFields {
-            kind: Some(COMMITTED.to_string()),
-            ..TriageFields::default()
-        };
-
-        assert_eq!(
-            WellFormedTriage::from_fields(&fields),
-            Err(TriageRejection::MissingField(Field::Deadline))
-        );
-    }
-
-    #[test]
-    fn a_well_formed_submission_reports_its_normalized_context_tag() {
-        let fields = TriageFields {
-            kind: Some(POOL.to_string()),
-            context_tag: Some("  @homedepot  ".to_string()),
-            ..TriageFields::default()
-        };
-
-        assert_eq!(
-            WellFormedTriage::from_fields(&fields).unwrap().context_tag,
-            Some("@homedepot".to_string())
-        );
-    }
-
-    #[test]
-    fn a_submission_with_no_context_tag_reports_none() {
-        let fields = TriageFields {
-            kind: Some(POOL.to_string()),
-            ..TriageFields::default()
-        };
-
-        assert_eq!(
-            WellFormedTriage::from_fields(&fields).unwrap().context_tag,
-            None
-        );
-    }
 
     // --- TaskKind::from_fields — pool --------------------------------------
 

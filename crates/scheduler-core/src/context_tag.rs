@@ -16,10 +16,7 @@
 /// omitting one, submitting an empty string, and submitting only
 /// whitespace all mean the same thing.
 pub fn normalize(raw: Option<&str>) -> Option<String> {
-    raw.and_then(|value| {
-        let trimmed = value.trim();
-        (!trimmed.is_empty()).then(|| trimmed.to_string())
-    })
+    crate::trim_or_absent(raw)
 }
 
 #[cfg(test)]

@@ -1209,6 +1209,40 @@ mod tests {
         assert_eq!(message, "Gardening is not a life area");
     }
 
+    #[test]
+    fn an_invalid_field_rejection_message_names_the_field() {
+        let message = rejection_message(
+            &Rejection::Core(TriageRejection::InvalidField(Field::Deadline)),
+            &Value::Null,
+        );
+        assert_eq!(message, "deadline is invalid");
+    }
+
+    #[test]
+    fn an_unknown_kind_rejection_message_echoes_the_value_it_is_given() {
+        let message = rejection_message(
+            &Rejection::Core(TriageRejection::UnknownKind),
+            &json!({ "not": "a string" }),
+        );
+        assert_eq!(message, r#"unrecognised kind: {"not":"a string"}"#);
+    }
+
+    #[test]
+    fn outcome_for_resolved_life_area_rejects_a_name_that_did_not_resolve() {
+        let submission = WellFormedTriage {
+            kind: TaskKind::Pool,
+            life_area_name: Some("Gardening".to_string()),
+            context_tag: None,
+        };
+        let outcome = outcome_for_resolved_life_area(submission, "Gardening".to_string(), None);
+        match outcome {
+            TriageOutcome::Rejected(Rejection::UnknownLifeArea(name)) => {
+                assert_eq!(name, "Gardening")
+            }
+            _ => panic!("expected an UnknownLifeArea rejection"),
+        }
+    }
+
     /// A submission expressed as JSON and as a form, field for field.
     fn json_body(fields: &TriageFields) -> Value {
         let mut body = serde_json::Map::new();

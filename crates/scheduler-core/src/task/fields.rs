@@ -6,9 +6,6 @@
 //! of their own, only parsing and the name each reports back.
 
 /// A field a triage submission must supply, or supply a valid value for.
-/// Life area is not one of these any more: `T-life-area-required-at-triage`
-/// is superseded by `D-context-tags-are-the-taxonomy`, and there is nothing
-/// left that can reject a submission for its life area alone.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Field {
     Deadline,
@@ -21,7 +18,7 @@ pub enum Field {
 }
 
 /// Every field paired with the name reported back to whoever submitted the
-/// triage -- a table, not a match, for the reason `guardrail::WEEKDAYS`
+/// triage -- a table, not a match, for the reason a fixed lookup table
 /// already is one (`T-complexity-8`: seven arms of no logic beyond the
 /// lookup should not cost against the threshold).
 const FIELD_NAMES: [(Field, &str); 7] = [

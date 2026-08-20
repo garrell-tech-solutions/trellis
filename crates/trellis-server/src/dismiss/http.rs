@@ -153,7 +153,6 @@ mod tests {
             &pool,
             capture_id,
             &scheduler_core::task::TaskKind::Pool,
-            None,
             0,
         )
         .await

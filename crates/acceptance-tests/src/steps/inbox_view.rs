@@ -145,16 +145,8 @@ fn then_html_body_contains(world: &mut World, expected: &str) -> Result<(), Stri
     super::then_html_body_contains(world, expected, "no HTML response recorded")
 }
 
-/// The captures list's own section when there is one, or the whole body
-/// otherwise -- a quick-add's own response is the new row's markup alone
-/// (`hx-swap="afterbegin"` targets `#captures` directly), without the
-/// `<ul id="captures">` wrapper a full page or a `#lists` swap carries
-/// (`life_areas::then_quick_add_pool_preselects_none`'s own reasoning,
-/// generalized here since `context_tags-optional-02` asserts against a
-/// bare quick-add response with no interceding page view).
 fn captures_section(world: &World) -> Result<&str, String> {
-    let body = html_body(world)?;
-    Ok(html::captures_section(body).unwrap_or(body))
+    html::captures_section(html_body(world)?)
 }
 
 fn then_captures_section_contains(world: &mut World, expected: &str) -> Result<(), String> {

@@ -3,8 +3,6 @@
 
 use super::lists::build_lists;
 use crate::inbox::view::{CaptureRow, TaskRow};
-use crate::life_areas::view::LifeAreaOption;
-use crate::platform::nav::{self, NavLink, Page};
 use crate::platform::response::{render_template, write_failed};
 use askama::Template;
 use axum::extract::State;
@@ -17,16 +15,17 @@ use sqlx::SqlitePool;
 struct InboxTemplate {
     captures: Vec<CaptureRow>,
     tasks: Vec<TaskRow>,
-    life_areas: Vec<LifeAreaOption>,
-    context_tag_suggestions: Vec<String>,
-    nav: Vec<NavLink>,
 }
 
 /// The full page is the only thing that is not the `#lists` fragment, so it
-/// is the only caller that takes `build_lists`' three lists apart instead
+/// is the only caller that takes `build_lists`' two lists apart instead
 /// of going through `lists::respond`. `inbox.html` `{% include %}`s
 /// `lists.html`, and an Askama include renders in its parent's context, so
-/// the page template has to carry the same three fields by the same names.
+/// the page template has to carry the same two fields by the same names.
+///
+/// No header, no nav (#88, `one-screen-no-header-02`): with `/` the only
+/// route, there is nothing to navigate between until #85 brings a second
+/// screen back.
 pub async fn show_inbox(State(pool): State<SqlitePool>) -> Result<Response, StatusCode> {
     let lists = build_lists(&pool, None).await.map_err(write_failed)?;
     Ok(render_template(
@@ -34,9 +33,6 @@ pub async fn show_inbox(State(pool): State<SqlitePool>) -> Result<Response, Stat
         &InboxTemplate {
             captures: lists.captures,
             tasks: lists.tasks,
-            life_areas: lists.life_areas,
-            context_tag_suggestions: lists.context_tag_suggestions,
-            nav: nav::links(Page::Inbox),
         },
     ))
 }

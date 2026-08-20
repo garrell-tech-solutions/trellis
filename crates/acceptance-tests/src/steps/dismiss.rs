@@ -3,19 +3,27 @@
 //!
 //! The Background and "a capture ... is waiting" steps this feature uses are
 //! already matched generically by [`super::triage::dispatch`], tried before
-//! this module. "The capture is triaged as a pool task in life area ..." is
-//! [`super::life_areas`]'s own step (`life_area_triage.feature`'s), reused
-//! here rather than duplicated -- dismissal's "cannot then be triaged" and
-//! "cannot be triaged again" scenarios are triage assertions in every way but
-//! which feature file wrote them down.
+//! this module. "The capture is triaged as a pool task in life area ..." used
+//! to be `life_areas.rs`'s own step (`life_area_triage.feature`'s), reused
+//! here rather than duplicated; #88 deleted `life_areas.feature` and its step
+//! module along with the whole life-areas capability, and this is now the
+//! only surviving feature that wrote the phrase down, so the step -- and the
+//! `capture_id_by_text` helper `life_areas.rs` also owned -- moved here
+//! rather than dying with it. The life area name in the phrase is
+//! historical: the server no longer has a `life_area` concept to reject or
+//! resolve it against, so the triage it drives succeeds as pool regardless
+//! of what is named, the same as if the field were omitted.
 
 use super::html;
 use super::inbox_view::html_response;
-use super::life_areas::capture_id_by_text;
 use super::*;
 use axum::body::Body;
 use axum::http::Request;
+use serde_json::json;
 
+static WHEN_TRIAGED_IN_LIFE_AREA: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r#"^the capture is triaged as a pool task in life area "([^"]+)"$"#).unwrap()
+});
 static WHEN_DISMISSED: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^the capture is dismissed from the inbox$").unwrap());
 static WHEN_NAMED_DISMISSED: LazyLock<Regex> =
@@ -46,6 +54,9 @@ pub async fn dispatch(
     text: &str,
     example: &BTreeMap<String, String>,
 ) -> Option<Result<(), String>> {
+    if let Some(caps) = WHEN_TRIAGED_IN_LIFE_AREA.captures(text) {
+        return Some(triage_pool_in_life_area(world, &caps[1]).await);
+    }
     if WHEN_DISMISSED.is_match(text) {
         return Some(when_dismissed(world).await);
     }
@@ -77,6 +88,35 @@ pub async fn dispatch(
         return Some(then_html_body_contains(world, &caps[1]));
     }
     None
+}
+
+async fn capture_id_by_text(world: &World, raw_text: &str) -> Result<i64, String> {
+    let pool = world.pool()?;
+    sqlx::query_scalar("SELECT id FROM captures WHERE raw_text = ? ORDER BY id DESC LIMIT 1")
+        .bind(raw_text)
+        .fetch_optional(pool)
+        .await
+        .map_err(|e| format!("query capture by text: {e}"))?
+        .ok_or_else(|| format!("no capture found with raw text {raw_text:?}"))
+}
+
+/// The life area named in the Gherkin phrase is vestigial (see the module
+/// doc) -- it rides along in the JSON body but the server has nothing left
+/// to do with it, so any value triages as pool the same way.
+async fn triage_pool_in_life_area(world: &mut World, life_area: &str) -> Result<(), String> {
+    let capture_id = world
+        .last_capture_id
+        .ok_or_else(|| "no capture set up for this scenario".to_string())?;
+    let uri = format!("/captures/{capture_id}/triage");
+    let response = super::app_client::post_json(
+        world,
+        &uri,
+        &json!({ "kind": "pool", "life_area": life_area }),
+    )
+    .await?;
+    world.last_status = Some(response.status);
+    world.last_response_body = response.body;
+    Ok(())
 }
 
 fn capture_id(world: &World) -> Result<i64, String> {
@@ -246,6 +286,34 @@ mod tests {
         html_response(world, request).await.unwrap();
         let body = html_body(&*world).unwrap();
         html::captures_section(body).unwrap().to_string()
+    }
+
+    #[tokio::test]
+    async fn capture_id_by_text_finds_the_matching_capture() {
+        let mut world = migrated_world().await;
+        given_capture_waiting(&mut world, "buy milk").await.unwrap();
+
+        let id = capture_id_by_text(&world, "buy milk").await.unwrap();
+
+        assert_eq!(Some(id), world.last_capture_id);
+    }
+
+    #[tokio::test]
+    async fn capture_id_by_text_errors_when_no_capture_matches() {
+        let world = migrated_world().await;
+        assert!(capture_id_by_text(&world, "nothing here").await.is_err());
+    }
+
+    #[tokio::test]
+    async fn triage_pool_in_life_area_creates_a_pool_task_regardless_of_the_name() {
+        let mut world = migrated_world().await;
+        given_capture_waiting(&mut world, "buy milk").await.unwrap();
+
+        triage_pool_in_life_area(&mut world, "Nonexistent")
+            .await
+            .unwrap();
+
+        assert_eq!(world.last_status, Some(201));
     }
 
     #[tokio::test]

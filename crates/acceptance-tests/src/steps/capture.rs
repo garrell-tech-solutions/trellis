@@ -12,8 +12,6 @@ static WHEN_CAPTURE_SENT: LazyLock<Regex> = LazyLock::new(|| {
 });
 static THEN_STATUS_IS: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^the response status is (\d+)$").unwrap());
-static THEN_WITHIN_BUDGET: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"^the response is received within (\d+) milliseconds$").unwrap());
 static THEN_ROW_EXISTS: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(
             r#"^a row exists in the captures table with raw text "<([A-Za-z0-9_]+)>" and source "<([A-Za-z0-9_]+)>"$"#,
@@ -43,13 +41,6 @@ pub async fn dispatch(
         };
         return Some(then_response_status_is(world, expected));
     }
-    if let Some(caps) = THEN_WITHIN_BUDGET.captures(text) {
-        let budget_ms: u128 = match caps[1].parse() {
-            Ok(v) => v,
-            Err(e) => return Some(Err(format!("bad millisecond budget: {e}"))),
-        };
-        return Some(then_response_within_budget(world, budget_ms));
-    }
     if let Some(caps) = THEN_ROW_EXISTS.captures(text) {
         let (raw_text, source) = match example_pair(example, &caps) {
             Ok(pair) => pair,
@@ -72,7 +63,6 @@ pub async fn when_capture_request_sent(
     let body = serde_json::json!({ "raw_text": raw_text, "source": source });
     let response = app_client::post_json(world, "/captures", &body).await?;
 
-    world.last_elapsed = Some(response.elapsed);
     world.last_status = Some(response.status);
     Ok(())
 }
@@ -82,17 +72,6 @@ pub fn then_response_status_is(world: &mut World, expected: u16) -> Result<(), S
         Some(actual) if actual == expected => Ok(()),
         Some(actual) => Err(format!("expected status {expected}, got {actual}")),
         None => Err("no response recorded".to_string()),
-    }
-}
-
-pub fn then_response_within_budget(world: &mut World, budget_ms: u128) -> Result<(), String> {
-    match world.last_elapsed {
-        Some(elapsed) if elapsed.as_millis() < budget_ms => Ok(()),
-        Some(elapsed) => Err(format!(
-            "expected response within {budget_ms}ms, took {}ms",
-            elapsed.as_millis()
-        )),
-        None => Err("no response timing recorded".to_string()),
     }
 }
 
@@ -140,30 +119,6 @@ mod tests {
     fn then_response_status_is_errors_when_no_response_was_recorded() {
         let mut world = World::new();
         assert!(then_response_status_is(&mut world, 201).is_err());
-    }
-
-    #[test]
-    fn then_response_within_budget_accepts_a_faster_response() {
-        let mut world = World::new();
-        world.last_elapsed = Some(std::time::Duration::from_millis(10));
-        assert_eq!(then_response_within_budget(&mut world, 50), Ok(()));
-    }
-
-    #[test]
-    fn then_response_within_budget_rejects_a_response_at_exactly_the_budget() {
-        let mut world = World::new();
-        world.last_elapsed = Some(std::time::Duration::from_millis(50));
-        assert!(
-            then_response_within_budget(&mut world, 50).is_err(),
-            "the budget is an exclusive upper bound"
-        );
-    }
-
-    #[test]
-    fn then_response_within_budget_rejects_a_slower_response() {
-        let mut world = World::new();
-        world.last_elapsed = Some(std::time::Duration::from_millis(100));
-        assert!(then_response_within_budget(&mut world, 50).is_err());
     }
 
     #[tokio::test]

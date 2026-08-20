@@ -30,52 +30,16 @@
   "threshold": 8,
   "accepted": [
     {
-      "file": "crates/acceptance-tests/src/steps/app_shell.rs",
-      "function": "dispatch",
-      "cyclomatic_complexity": 12,
-      "why": "Gherkin step dispatcher; regex chain, one-line delegation per arm. New module for features/app_shell.feature (app-shell brief, #58)."
-    },
-    {
-      "file": "crates/acceptance-tests/src/steps/capacity.rs",
-      "function": "dispatch",
-      "cyclomatic_complexity": 11,
-      "why": "Gherkin step dispatcher; regex chain, one-line delegation per arm. New module for features/capacity.feature (capacity brief, #62). Every helper it delegates to was itself kept under threshold (dispatch_committed_task and dispatch_quota_task's own resolve-then-parse was extracted into resolved_i64)."
-    },
-    {
       "file": "crates/acceptance-tests/src/steps/capture.rs",
       "function": "dispatch",
-      "cyclomatic_complexity": 14,
-      "why": "Gherkin step dispatcher; regex chain, one-line delegation per arm."
-    },
-    {
-      "file": "crates/acceptance-tests/src/steps/context_tags.rs",
-      "function": "dispatch",
-      "cyclomatic_complexity": 9,
-      "why": "Gherkin step dispatcher; regex chain, one-line delegation per arm. New module for features/context_tags.feature (context-tags brief, #82)."
+      "cyclomatic_complexity": 11,
+      "why": "Gherkin step dispatcher; regex chain, one-line delegation per arm. 14 -> 11 (#88): the response-time-budget arm was deleted along with then_response_within_budget -- T-latency-is-a-qa-assertion moved that assertion to qa/capture_endpoint.md and qa/one_screen.md, and this dispatcher lost the step that drove it, not logic."
     },
     {
       "file": "crates/acceptance-tests/src/steps/dismiss.rs",
       "function": "dispatch",
-      "cyclomatic_complexity": 11,
-      "why": "Gherkin step dispatcher; regex chain, one-line delegation per arm. New module for features/dismiss_capture.feature (dismiss-capture brief, #48)."
-    },
-    {
-      "file": "crates/acceptance-tests/src/steps/exceptions.rs",
-      "function": "dispatch",
-      "cyclomatic_complexity": 11,
-      "why": "Gherkin step dispatcher; regex chain, one-line delegation per arm. New module for features/exceptions.feature (exceptions brief, #61)."
-    },
-    {
-      "file": "crates/acceptance-tests/src/steps/free_time.rs",
-      "function": "dispatch",
-      "cyclomatic_complexity": 9,
-      "why": "Gherkin step dispatcher; regex chain, one-line delegation per arm. New module for features/free_time.feature (free-time brief, #60)."
-    },
-    {
-      "file": "crates/acceptance-tests/src/steps/guardrails.rs",
-      "function": "dispatch",
-      "cyclomatic_complexity": 22,
-      "why": "Gherkin step dispatcher; regex chain, one-line delegation per arm. New module for features/guardrails.feature and features/timezone_setting.feature (guardrails brief, #59) -- one module for both since the timezone setting only exists to make guardrails meaningful. Every helper it delegates to was itself kept under threshold (day_field_name's lookup uses a table rather than a match, and dispatch_every_shows delegates its own loop body to row_shows, for the same reason life_areas.rs's dispatch_archive_life_area does)."
+      "cyclomatic_complexity": 12,
+      "why": "Gherkin step dispatcher; regex chain, one-line delegation per arm. New module for features/dismiss_capture.feature (dismiss-capture brief, #48). 11 -> 12 (#88): dismiss_capture.feature's own \"the capture is triaged as a pool task in life area ...\" step, and the capture_id_by_text/triage_pool_in_life_area helpers behind it, moved here from the deleted life_areas.rs -- the demolition took that module, not this feature's steps."
     },
     {
       "file": "crates/acceptance-tests/src/steps/inbox_view.rs",
@@ -84,28 +48,16 @@
       "why": "Gherkin step dispatcher; regex chain, one-line delegation per arm."
     },
     {
-      "file": "crates/acceptance-tests/src/steps/life_areas.rs",
-      "function": "dispatch",
-      "cyclomatic_complexity": 24,
-      "why": "Gherkin step dispatcher; regex chain, one-line delegation per arm. 18 -> 22: four new one-line arms for features/life_area_triage.feature's no-preselection, quick-add-picker and page-required scenarios (dismiss-capture brief, #48) -- new steps, not new logic. Every helper it delegates to was itself kept under threshold (dispatch_archive_life_area's own request-building was extracted into life_area_id_by_name and inbox_view::html_response rather than inlined here). 22 -> 24 for two new arms, 'the triage succeeds' and 'the task list shows ... with no life area' (context-tags brief, #82): T-life-area-required-at-triage's two now-inverted scenarios needed new assertions, not new logic."
-    },
-    {
       "file": "crates/acceptance-tests/src/steps/mod.rs",
       "function": "dispatch",
-      "cyclomatic_complexity": 21,
-      "why": "Top-level step dispatcher; delegates to one step module per arm. 19 -> 20 for the new schedule module's arm (schedule brief, #75): a new step, not new logic. 20 -> 21 for the new context_tags module's arm (context-tags brief, #82): same reason."
+      "cyclomatic_complexity": 13,
+      "why": "Top-level step dispatcher; delegates to one step module per arm. 20 -> 13 (#88): seven arms deleted along with the seven step modules the demolition removed (app_shell, capacity, exceptions, free_time, guardrails, life_areas, schedule, stats_ratio -- eight names, one module covered two features), and one arm added for the new one_screen module that replaces app_shell."
     },
     {
-      "file": "crates/acceptance-tests/src/steps/schedule.rs",
-      "function": "dispatch",
-      "cyclomatic_complexity": 15,
-      "why": "Gherkin step dispatcher; regex chain, one-line delegation per arm. New module for features/schedule.feature (schedule brief, #75)."
-    },
-    {
-      "file": "crates/acceptance-tests/src/steps/stats_ratio.rs",
+      "file": "crates/acceptance-tests/src/steps/one_screen.rs",
       "function": "dispatch",
       "cyclomatic_complexity": 11,
-      "why": "Gherkin step dispatcher; regex chain, one-line delegation per arm. Recorded at 11, not the 17 it first measured: three arms inlined an example_value unwrap before delegating, and that logic was extracted into handlers (issue #55)."
+      "why": "Gherkin step dispatcher; regex chain, one-line delegation per arm. New module for features/one_screen.feature, which replaces app_shell.feature (#88)."
     },
     {
       "file": "crates/acceptance-tests/src/steps/triage.rs",

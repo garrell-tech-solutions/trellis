@@ -2,26 +2,21 @@
 //! capability Trellis provides, each holding the code that delivers, renders
 //! and persists that capability (`T-package-by-business-domain`).
 //!
-//! - [`capacity`] — what each life area needs against what it has, over the
-//!   free-time horizon.
 //! - [`capture`] — raw text in, fast enough to use mid-thought.
 //! - [`triage`] — a capture becomes a typed task.
 //! - [`dismiss`] — the inbox's other exit: a capture leaves with no task.
-//! - [`exceptions`] — how the owner narrows a guardrail for specific dates,
-//!   for one life area or all of them.
-//! - [`free_time`] — when each life area's guardrail is actually free, over
-//!   the next fourteen days.
 //! - [`inbox`] — what is still waiting, and what has already become a task.
-//! - [`life_areas`] — user-managed rows a task is tagged with at triage,
-//!   each carrying its own weekly guardrail.
 //! - [`settings`] — the owner's timezone, one value for the whole product.
-//! - [`stats`] — the rolling committed:pool ratio, R2's instrumentation.
-//! - [`schedule`] — places committed tasks into free time, least slack
-//!   first, and says why the rest did not fit. Forward pass only.
+//!   Its only reader (`free_time`) is gone (#88); kept because #85 needs it.
 //! - [`platform`] — deliberately *not* a capability: the route table, the
 //!   database, the clock, the vendored static assets. It is named so that a
 //!   reader can tell at a glance which directories are the product and which
 //!   one is the machinery.
+//!
+//! `scheduler_core::schedule` and `::interval` survive with no caller here:
+//! M3 (the scheduler) is paused, not cancelled, by #88's demolition, and
+//! rebuilding 775 subtle lines with 1000-case properties is not cheap the
+//! way the five deleted server capabilities were.
 //!
 //! `T-module-boundary`'s dependency rule is unchanged by the packaging; only
 //! its directory shape is. Dependencies still point inward:
@@ -48,15 +43,9 @@
 //! persistence module may write production SQL, and the walk fails loudly if
 //! it ever stops covering anything.
 
-pub mod capacity;
 pub mod capture;
 pub mod dismiss;
-pub mod exceptions;
-pub mod free_time;
 pub mod inbox;
-pub mod life_areas;
 pub mod platform;
-pub mod schedule;
 pub mod settings;
-pub mod stats;
 pub mod triage;

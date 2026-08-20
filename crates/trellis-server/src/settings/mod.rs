@@ -1,34 +1,13 @@
 //! **Settings** -- the owner's timezone, one value for the whole product
-//! (`D-single-user`: one zone, not one per guardrail, #59). Not a life
-//! area's concern and not `platform` machinery: it is data the owner
-//! changes, the same way a life area's name is.
+//! (`D-single-user`: one zone, not one per guardrail, #59).
 //!
-//! [`store`] holds the one row. [`http`] serves `POST /timezone`; there is
-//! no `GET` of its own and no page of its own -- the value renders on the
-//! life areas page (`T-nav-is-the-site-map` would put a whole route in the
-//! header for one field), which reaches in here through this front door
-//! (`T-one-front-door-per-capability`).
+//! [`store`] holds the one row. [`http`] serves `POST /timezone`. Kept
+//! deliberately by #88 even though its former reader (`free_time`) and its
+//! former page (life areas) are both gone: `D-menu-is-a-worklist` gives #85
+//! inline controls that read the timezone through this module, and the
+//! value itself is the owner's data, not scaffolding for a page that no
+//! longer exists. Until #85 lands there is no way to change it from the
+//! running app -- a stated one-way door, not an oversight.
 
 pub mod http;
 pub mod store;
-
-use sqlx::SqlitePool;
-
-/// What every other capability asks this one for: the owner's current
-/// timezone.
-pub(crate) async fn current_timezone(pool: &SqlitePool) -> Result<String, sqlx::Error> {
-    store::get_timezone(pool).await
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::platform::test_support::test_pool;
-
-    #[tokio::test]
-    async fn a_fresh_database_reports_utc() {
-        let (_dir, pool) = test_pool().await;
-
-        assert_eq!(current_timezone(&pool).await.unwrap(), "UTC");
-    }
-}

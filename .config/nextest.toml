@@ -1,0 +1,19 @@
+# nextest profiles. The default profile is deliberately untouched: normal
+# verification runs must behave exactly as they always have.
+
+# Used only by scripts/analyzers/mutation.sh. A mutant that hangs is almost
+# always an infinite loop -- a replaced loop condition or a recursion guard
+# -- and waiting out a whole-suite timeout to learn that is the single
+# slowest thing a mutation run can do. cargo-mutants derives its suite
+# timeout from the baseline (5x, floored at 20s); this terminates the one
+# hanging *test* long before that, so a hang costs seconds rather than the
+# whole budget.
+#
+# terminate-after is deliberately generous relative to the ~3s baseline:
+# mutation runs several mutants concurrently (-j), so every test runs under
+# CPU contention it does not see when the suite is run alone. The cost of
+# being wrong is a mutant reported as a timeout, which this project treats
+# as "not killed" and therefore as work to look at -- loud, not silent.
+[profile.mutants]
+slow-timeout = { period = "4s", terminate-after = 3 }
+fail-fast = true

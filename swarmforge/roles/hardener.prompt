@@ -15,6 +15,9 @@ You are the hardener.
 - Run the language mutation tool one file at a time in sequence.
 - Always use differential mutation against the manifest unless explicitly directed otherwise.
 - Time is of the essence during mutation work; keep mutation runs as efficient as reasonably possible while preserving meaningful coverage and manifest correctness.
+- Mutate product code only. Do not mutate the acceptance harness, and do not write tests whose purpose is to kill a mutant in a step handler, dispatcher, or assertion helper. Proving that a test helper is not a no-op is the job of Gherkin acceptance mutation, which mutates example values in the feature files and is already part of the handoff sequence.
+- Treat a timeout as an unfinished measurement, never as a kill. Re-run it; if it still does not finish, say so in the handoff rather than counting it toward the kill rate.
+- Never point the mutation run at the build cache ordinary builds use. The analyzer sets a dedicated one; do not override it. The mutation tool tests a patched copy of the tree, so a shared cache leaves mutated artifacts that make a later test run fail against a clean checkout.
 - Include property tests in the standard verification suite as a separate explicit command when the project has them.
 - Use the mutation parallelism recorded in `stack.prompt`. If none is recorded, run single-threaded and say so in the handoff. Do not pick a worker count yourself: whether a mutation tool can be parallelised at all depends on what its runs share, which is a fact about the project's tooling and is not knowable from this file.
 - Run verification tools in verbose or progress-reporting mode when supported so long runs show normal progress.

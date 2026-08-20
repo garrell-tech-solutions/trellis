@@ -16,17 +16,51 @@ Every row is marked with what it is:
 |---|---|
 | **built** | exists in `crates/`, verifiable today |
 | **specified** | fixed by a decision or an epic's acceptance criteria; not built |
+| **removed** | was built and is deleted. The reasoning is kept; the code is gone. |
 | **GAP** | referred to by name elsewhere and defined nowhere. Needs a decision. |
 
 ---
+
+## What #88 removed, and how to read this file now
+
+**2026-08-20, `remove-unused`.** Nine capabilities were deleted outright:
+life areas, guardrails, free time, exceptions, capacity, stats, the nav, the
+app shell's header, and the server-side schedule. `D-dogfood-first` decided
+it: the product had six pages, four of them read-only instruments feeding a
+solver that did not exist, and none of it on the path to daily use.
+
+**Sections below marked *removed* describe code that is gone.** They are kept
+rather than deleted because the demolition was a decision about *what the
+owner uses*, not a judgement that the reasoning was wrong — M3 is paused, not
+cancelled, and `docs/decisions.md` still holds every `T-` and `D-` row those
+sections cite. A revival reads them; a reader asking "what does Trellis do
+today" must skip them.
+
+**What is left is one path**: capture a thought, see it in the inbox, triage
+it into a task, or dismiss it. That is the whole product.
+
+> **This file is the thing most likely to be wrong after a demolition**, and
+> it was: #88 deleted nine capabilities and changed not one line here, so the
+> reference described a product that no longer existed. Marked up rather than
+> rewritten, so the gap between "what we decided" and "what exists" stays
+> visible instead of being quietly closed.
 
 ## Crates — built
 
 ```
 crates/scheduler-core     pure rules. no tokio, no sqlx, no async (T-core-no-tokio)
+                          interval · schedule · task · timezone
 crates/trellis-server     axum + sqlx + askama. binary name `trellis`
 crates/acceptance-tests   APS runtime + step handlers; entrypoints generated from features/
 ```
+
+**`scheduler_core::schedule` and `::interval` have no caller** since #88
+deleted `trellis-server/src/schedule/`. Kept deliberately, and said out loud
+in `trellis-server/src/lib.rs` so it is not mistaken for an oversight: M3 is
+paused rather than cancelled, and 775 subtle lines carrying 1000-case
+property tests are expensive to rebuild. `::ratio` went with `stats` on the
+opposite reasoning — 223 lines whose settled numbers live in
+`docs/decisions.md`, so deleting the code destroyed nothing.
 
 The brief specified six crates. Three exist. `scheduler-db` collapsed into
 `trellis-server` — settled as a module boundary rather than a crate split, and
@@ -61,21 +95,30 @@ dependency rule itself is unchanged.
 
 ```
 crates/trellis-server/src/
-  capacity/   mod.rs  http.rs  store.rs  view.rs
-  capture/    http.rs  store.rs
-  triage/     http.rs  store.rs
+  capture/    mod.rs  http.rs  store.rs
   dismiss/    mod.rs  http.rs
-  exceptions/ mod.rs  http.rs  store.rs  view.rs
-  free_time/  mod.rs  http.rs
   inbox/      mod.rs  http.rs  lists.rs  store.rs  view.rs
-  life_areas/ mod.rs  http/mod.rs  http/guardrail.rs  store.rs  view.rs
   settings/   mod.rs  http.rs  store.rs
-  stats/      http.rs  store.rs
-  platform/   app.rs  assets.rs  boundary.rs  clock.rs  db.rs  nav.rs
-              request.rs  response.rs  test_support.rs
+  triage/     mod.rs  http.rs  store.rs
+  platform/   app.rs  assets.rs  boundary.rs  clock.rs  db.rs
+              mod.rs  request.rs  response.rs  test_support.rs
 ```
 
-Ten capabilities and one bucket named so a reader can tell it is not one.
+**Five capabilities and one bucket** since #88. It was ten: `capacity`,
+`exceptions`, `free_time`, `life_areas` and `stats` are gone, and
+`platform/nav.rs` with them.
+
+> **`settings` is now reachable from nowhere.** Its only reader was
+> `free_time`, so `POST /timezone` has no UI path to it. Stated in the
+> demolition rather than left to be discovered — a one-way door held open
+> until `#85`, not an oversight.
+
+> **The `capabilities.len() >= 5` floor in `platform/boundary.rs` is now
+> exactly met.** That check asserts a minimum so a walk that stops covering
+> the tree fails loudly instead of passing vacuously; with ten capabilities
+> it had slack, and with five it has none. The next legitimate deletion trips
+> it and forces someone to lower it consciously, which is the forcing
+> function working — but it is no longer also a smoke alarm.
 `scheduler-core` holds the rules and names neither adapter; a domain's `http`
 turns requests into core inputs and core types into view models; its `store`
 turns core types into rows and is the only production SQL; its `view` is what
@@ -147,7 +190,12 @@ implementation of `T-forms-swap-one-fragment`'s response contract — a 422
 whose body is not the re-rendered fragment breaks the whole page, since the
 422 swap is configured globally.
 
-## The app shell — built (`#58`)
+## The app shell — removed (#88; was `#58`)
+
+> `platform/nav.rs` and `base.html`'s `<header>` are deleted. With the Menu
+> unbuilt there is one screen, so there is nothing to navigate between and
+> the header should not render at all until `#85`. `T-nav-is-the-site-map`
+> needed no superseding: removing the routes collapsed the header on its own.
 
 Every page carries the same header, from one definition. Settled by the
 `app-shell` slice, 2026-08-17; recorded here because the shell is the frame
@@ -250,7 +298,7 @@ were discussing different subjects.
 
 Bare "domain" is always the life area. If you mean packaging, write both words.
 
-## And "overlap" means guardrails, never blocks
+## And "overlap" means guardrails, never blocks — vocabulary for removed code
 
 The fourth word, pinned after conflating three things cost a round trip on
 2026-08-19.
@@ -261,7 +309,7 @@ The fourth word, pinned after conflating three things cost a round trip on
 | ~~overlapping blocks~~ | **Cannot happen.** Invariant 1. Two blocks never share an instant, and never share one with a fact or a pin. |
 | **adjacency** | Two guardrails **meeting at a seam** — Work ending at 17:00 where Learning begins. Not overlap. This is what U4 was about, and a block never crosses one (`T-blocks-do-not-cross-guardrail-seams`). |
 
-## And "window" is not used at all
+## And "window" is not used at all — vocabulary for removed code
 
 The fourth overloaded word, caught before M2 wrote it into code rather than
 after. It was already ambiguous inside M2's own acceptance criteria — a mask in
@@ -328,6 +376,20 @@ tasks(id, capture_id, kind, deadline, deadline_type, priority,
       target_count, target_minutes_each, period, life_area_id,
       archived_at, created_at_ms)
 ```
+
+> **#88 deleted code, not tables.** `life_areas`, `guardrail_bands`,
+> `exceptions`, `block` and `schedule_unplaceable` all still exist, created
+> by migrations `0004`, `0006`, `0007` and `0009`, and nothing reads or
+> writes any of them. **Settled deliberately, not overlooked**
+> (`T-migrations-append-only`): `tasks.life_area_id` carries a foreign key
+> into `life_areas`, so dropping that table means rebuilding `tasks` — the
+> only construction the demolition would have contained, buying nothing,
+> since unused tables cost SQLite nothing idle and leaving them keeps the
+> owner's data as a second safety net beside git. A revival unpauses against
+> real rows rather than an empty schema.
+>
+> The one migration that *is* gone is `0010_context_tags.sql`, because
+> `454580d` parked `#82` wholesale before the demolition ran.
 
 `kind`, `deadline_type`, `priority` and `period` carry `CHECK` constraints.
 `deadline` does **not** — SQLite's INTEGER affinity does not reject text, so a
@@ -398,7 +460,13 @@ maximum** — if six contiguous hours exist, use them. Approach is
 greedy-with-repair, not a solver (`T-greedy-with-repair`) — the interface stays
 clean so an optimiser can be swapped in behind it.
 
-### Infeasibility report — closed enum (M3, #11) — built at S1
+### Infeasibility report — closed enum (M3, #11) — half removed at #88
+
+> The enum and its four reasons survive in `scheduler_core::schedule`. What
+> is gone is everything that stored or rendered them: `trellis-server/src/
+> schedule/`, its `block` and `schedule_unplaceable` writes, and the page.
+> The `CHECK` naming the four words is still in migration `0009`, so the
+> schema and the enum still agree — with nothing left to hold them to it.
 
 ```
 no_window · capacity_exceeded · deadline_unreachable · chunk_policy_unsatisfiable
@@ -463,7 +531,7 @@ whether pinning suppresses splitting entirely. The reason enum above has no code
 for "a stale pin is in the way". *(Pin lifetime is answered for recurring pins —
 they die at the period boundary unless renewed — but not for one-off pins.)*
 
-### Guardrails and free time — built (M2 slices 1–2, `#59`, `#60`)
+### Guardrails and free time — removed (#88; was built at M2 slices 1–2, `#59`, `#60`)
 
 ```
 free_intervals(guardrail, range) -> disjoint, sorted intervals
@@ -580,7 +648,7 @@ makes it one value for the whole product rather than one per guardrail, and
 reason a life area's name is. It defaults to `UTC`, which is the only default
 that cannot silently mean the wrong hour.
 
-### Capacity — built (M2 slice 4, `#62`)
+### Capacity — removed (#88; was built at M2 slice 4, `#62`)
 
 `scheduler_core::capacity` compares demand against supply, both in minutes:
 committed work is the sum of its tasks' `estimated_minutes`, quota work is
@@ -742,7 +810,11 @@ those two contiguous free hours.
 
 ---
 
-## Life areas — built (`T-life-areas-are-data`, #47)
+## Life areas — removed (#88; was built at `#47`)
+
+> `T-life-areas-are-data` and `T-life-area-required-at-triage` are both
+> superseded. `tasks.life_area_id` stays in the schema and every row keeps
+> whatever it held; nothing reads it.
 
 Settled 2026-08-14, resolving #36. **Life areas are user-managed rows, editable
 from the running app** — not a Rust enum, not a config file. There is no
@@ -876,15 +948,20 @@ a schema element with no observable behaviour has nothing to specify against.
 
 ## Gaps index
 
-Everything above marked **GAP**, in the order it blocks work:
+Everything above marked **GAP**, in the order it blocks work.
+
+**A gap in deleted code is struck through and marked moot, not removed.** It
+stops blocking anything the moment the code goes, but it was a real
+disagreement between a schema, a form and a rule — and two of the three
+schemas are still there. A revival inherits the gap along with the tables.
 
 | Gap | Blocks | Tracked |
 |---|---|---|
-| `end_minutes` bounds disagree: schema allows 1440, form caps at 1439, core panics on 1440 | nothing today; a second writer | #62 |
-| Walled and pool-only are not exclusive; pool-only cannot be un-marked | ~~#60~~ — the free-time reader now applies the rule; the state stays representable | #59 |
+| ~~`end_minutes` bounds disagree: schema allows 1440, form caps at 1439, core panics on 1440~~ | ~~nothing today; a second writer~~ | **moot** — #88 deleted all three. `guardrail_bands` keeps its `CHECK`; no code reads it |
+| ~~Walled and pool-only are not exclusive; pool-only cannot be un-marked~~ | ~~#60~~ | **moot** — #88 deleted life areas. The impossible state is still representable in the surviving table, and unreachable |
 | ~~Invariants 1, 3, 4 undefined~~ | ~~M3 cannot be specified~~ | **closed** — `T-invariants-one-to-five`, 2026-08-18 |
 | ~~Which five domains, and one concept or two~~ | ~~M1 S4, M9~~ | **closed** — `T-life-areas-are-data`, #47 |
 | ~~Per-life-area capacity vs `allowed_windows`~~ | ~~M2~~ | **closed** — `T-capacity-two-axes` + `D-life-area-owns-its-time`, #6 |
-| `Block::missed` unreachable under silence-means-done | M6 | #4 |
+| `Block::missed` unreachable under silence-means-done | M6 | #4 — the `block` table survives #88; nothing writes it |
 | U3 — backward-pass input | M3 | #7 · ~~U2~~ `T-hard-refuses-soft-slips` · ~~U4~~ `T-blocks-do-not-cross-guardrail-seams` |
 | ~~Crate layout ratification~~ | ~~nothing; cost grows~~ | **closed** — `T-package-by-business-domain`, #44 |

@@ -155,34 +155,36 @@ is only the life area that is under test.
   triage filed into Work — a default the user never chose, in a product whose
   entire value is that the user trusts what it shows.
 
-## Procedure — submitting without choosing is refused on that row
+## Procedure — submitting without choosing succeeds, from the page too
 
 1. Submit a capture with raw text `buy milk`.
 2. Submit the **pool** triage form exactly as the page would send it with the
    placeholder still selected — that is, `life_area` present and empty.
 3. Observe the status and the response body.
-4. Repeat for committed (with valid deadline, deadline type and priority) and
-   for quota (with valid targets and period).
+4. Repeat for committed (with valid deadline, deadline type, priority and
+   estimate) and for quota (with valid targets and period).
 5. Query the tasks table and re-read the untriaged queue.
 
 ### Expected Observable Outcomes
-- All three are rejected with **`422`**, and the body is the re-rendered
-  `#lists` fragment — not a JSON error, not a redirect
-  (`T-forms-swap-one-fragment`).
-- The rejection message lands **on that capture's own row** in the returned
-  fragment, naming the life area field. An error rendered above the list, or
-  on a different row, is a failure: the point of the shared fragment is that
-  the error stays attached to the row that caused it.
-- The message is the **existing** missing-field rejection. `#47` already made
-  `life_area` required for all three kinds, and `T-empty-equals-absent` makes
-  an empty string and an absent key report identically — so this submission
-  was always going to be refused, and the placeholder is only what finally
-  makes it reachable from the page. **A new rejection variant here is a
-  defect**, not a feature.
-- Nothing is created and the capture is still untriaged.
-- The by-hand half of this is step 2 of the handoff brief's demo: click
-  **Pool** without choosing a life area and watch the message appear on the
-  row. Do it once in a real browser.
+- **All three succeed**, and the response is the re-rendered `#lists`
+  fragment showing each capture moved to the task list with **no life area**
+  (`T-forms-swap-one-fragment` still governs the shape of the response; only
+  the outcome changed).
+- `T-life-area-required-at-triage` was superseded by
+  `D-context-tags-are-the-taxonomy` in #82. `T-empty-equals-absent` still
+  holds and now cuts the other way: an empty `life_area` and an absent one
+  are both **accepted**, identically.
+- No task is given a defaulted life area. A silent default is the failure
+  `D-manual-triage-until-llm` refused for the picker.
+- **This procedure is the page half of the pair, and it is the half that was
+  briefly left stale.** The API-transport procedure above was updated when the
+  requirement was dropped and this one was not — it still demanded a `422`
+  while the feature and the tests said the submission passes. That is
+  `T-required-fields-are-specified-per-transport`'s failure exactly, arriving
+  in documentation rather than code, and QA caught it. **Both transports, every
+  time, including the prose.**
+- The by-hand half: click **Pool** without choosing a life area and watch the
+  capture move to the task list untagged. Do it once in a real browser.
 
 ## Procedure — triage otherwise behaves identically
 

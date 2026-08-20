@@ -1,6 +1,7 @@
-<li id="capture-row-{{ capture.id }}">
-{{ capture.text }}
-<form style="display:inline" hx-post="/captures/{{ capture.id }}/triage" hx-target="#lists" hx-swap="outerHTML">
+<li id="capture-row-{{ capture.id }}" class="row">
+<div class="row-text">{{ capture.text }}</div>
+<div class="kinds">
+<form class="kind kind-wide" hx-post="/captures/{{ capture.id }}/triage" hx-target="#lists" hx-swap="outerHTML">
 <input type="hidden" name="kind" value="pool">
 <label>Life area
 <select name="life_area">
@@ -12,9 +13,9 @@
 </label>
 <button type="submit">Pool</button>
 </form>
-<details style="display:inline-block">
+<details class="kind">
 <summary>Committed</summary>
-<form hx-post="/captures/{{ capture.id }}/triage" hx-target="#lists" hx-swap="outerHTML">
+<form class="fields" hx-post="/captures/{{ capture.id }}/triage" hx-target="#lists" hx-swap="outerHTML">
 <input type="hidden" name="kind" value="committed">
 <label>Deadline <input type="text" name="deadline" placeholder="2026-08-20T17:00:00Z"></label>
 <label>Type
@@ -40,12 +41,12 @@
 {% endfor %}
 </select>
 </label>
-<button type="submit">Add</button>
+<div class="actions"><button type="submit">Add</button></div>
 </form>
 </details>
-<details style="display:inline-block">
+<details class="kind">
 <summary>Quota</summary>
-<form hx-post="/captures/{{ capture.id }}/triage" hx-target="#lists" hx-swap="outerHTML">
+<form class="fields" hx-post="/captures/{{ capture.id }}/triage" hx-target="#lists" hx-swap="outerHTML">
 <input type="hidden" name="kind" value="quota">
 <label>Sessions <input type="number" name="target_count" placeholder="3"></label>
 <label>Minutes each <input type="number" name="target_minutes_each" placeholder="45"></label>
@@ -63,10 +64,11 @@
 {% endfor %}
 </select>
 </label>
-<button type="submit">Add</button>
+<div class="actions"><button type="submit">Add</button></div>
 </form>
 </details>
-<form style="display:inline" hx-post="/captures/{{ capture.id }}/dismiss" hx-target="#lists" hx-swap="outerHTML">
+</div>
+<form class="dismiss" hx-post="/captures/{{ capture.id }}/dismiss" hx-target="#lists" hx-swap="outerHTML">
 <button type="submit">Dismiss</button>
 </form>
 {% if let Some(message) = capture.error %}

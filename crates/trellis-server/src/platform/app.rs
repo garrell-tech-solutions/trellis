@@ -25,7 +25,7 @@ use crate::inbox::http::show_inbox;
 use crate::life_areas::http::{
     archive_life_area, create_life_area, remove_guardrail_band, save_guardrail, show_life_areas,
 };
-use crate::platform::assets::htmx_js;
+use crate::platform::assets::{htmx_js, space_grotesk_woff2, trellis_css};
 use crate::platform::clock::Clock;
 use crate::schedule::http::{generate_schedule, show_schedule};
 use crate::settings::http::set_timezone;
@@ -57,6 +57,11 @@ pub fn build_app(pool: SqlitePool, clock: Clock) -> Router {
     Router::new()
         .route("/", get(show_inbox))
         .route("/static/htmx.min.js", get(htmx_js))
+        .route("/static/trellis.css", get(trellis_css))
+        .route(
+            "/static/fonts/space-grotesk-variable.woff2",
+            get(space_grotesk_woff2),
+        )
         .route("/captures", post(create_capture))
         .route("/captures/{id}/triage", post(create_triage))
         .route("/captures/{id}/dismiss", post(dismiss_capture))

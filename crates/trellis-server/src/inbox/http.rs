@@ -18,7 +18,6 @@ struct InboxTemplate {
     captures: Vec<CaptureRow>,
     tasks: Vec<TaskRow>,
     life_areas: Vec<LifeAreaOption>,
-    context_tag_suggestions: Vec<String>,
     nav: Vec<NavLink>,
 }
 
@@ -35,7 +34,6 @@ pub async fn show_inbox(State(pool): State<SqlitePool>) -> Result<Response, Stat
             captures: lists.captures,
             tasks: lists.tasks,
             life_areas: lists.life_areas,
-            context_tag_suggestions: lists.context_tag_suggestions,
             nav: nav::links(Page::Inbox),
         },
     ))

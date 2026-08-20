@@ -47,7 +47,6 @@ fn any_fields() -> impl Strategy<Value = TriageFields> {
                     target_minutes_each,
                     period,
                     life_area: None,
-                    context_tag: None,
                 }
             },
         )
@@ -487,36 +486,61 @@ proptest! {
         prop_assert_eq!(deadline_of(first.0), deadline_of(second.0));
     }
 
-    // --- WellFormedTriage: the kind is the only remaining gate ---------------
+    // --- WellFormedTriage: the two checks, and the order between them -------
 
-    /// Acceptance is exactly whether a kind was described -- neither the
-    /// life area nor the context tag can reject a submission any more
-    /// (`T-life-area-required-at-triage` superseded by
-    /// `D-context-tags-are-the-taxonomy`, #82).
+    /// Acceptance is exactly the conjunction: a submission is well-formed iff
+    /// it describes a kind *and* names a life area. Neither check can be
+    /// satisfied by the other being satisfied.
     #[test]
     #[ignore]
-    fn a_submission_is_well_formed_exactly_when_it_describes_a_kind(
+    fn a_submission_is_well_formed_exactly_when_it_has_both_a_kind_and_a_life_area(
         fields in any_fields(),
         kind in prop::sample::select(vec![POOL, COMMITTED, QUOTA, "banana", ""]),
         life_area in proptest::option::of(".{0,20}"),
-        context_tag in proptest::option::of(".{0,20}"),
     ) {
         let fields = TriageFields {
-            life_area,
-            context_tag,
+            life_area: life_area.clone(),
             ..with_kind(fields, kind)
         };
 
+        let names_a_life_area = life_area.is_some_and(|name| !name.is_empty());
+        let describes_a_kind = TaskKind::from_fields(&fields).is_ok();
+
         prop_assert_eq!(
             WellFormedTriage::from_fields(&fields).is_ok(),
-            TaskKind::from_fields(&fields).is_ok()
+            describes_a_kind && names_a_life_area
         );
     }
 
-    /// Naming a life area never changes what a badly-formed kind is told --
-    /// adding one to a broken submission cannot turn one rejection into a
-    /// different one, since a life area cannot be the thing rejected any
-    /// more.
+    /// The order, stated as what it forbids: a life-area complaint is only
+    /// ever reached once the kind and everything that kind requires already
+    /// checked out. A submission that is wrong in both ways is never told
+    /// about the life area first.
+    #[test]
+    #[ignore]
+    fn a_life_area_complaint_never_masks_a_kind_complaint(
+        fields in any_fields(),
+        kind in prop::sample::select(vec![POOL, COMMITTED, QUOTA, "banana", ""]),
+        life_area in proptest::option::of(".{0,20}"),
+    ) {
+        let fields = TriageFields {
+            life_area,
+            ..with_kind(fields, kind)
+        };
+
+        if WellFormedTriage::from_fields(&fields)
+            == Err(TriageRejection::MissingField(Field::LifeArea))
+        {
+            prop_assert!(
+                TaskKind::from_fields(&fields).is_ok(),
+                "the life area was blamed while the kind was also wrong"
+            );
+        }
+    }
+
+    /// The same order from the other side: submitting a life area never
+    /// changes what a badly-formed kind is told. Adding a valid life area to
+    /// a broken submission cannot turn one rejection into a different one.
     #[test]
     #[ignore]
     fn naming_a_life_area_never_changes_a_kind_rejection(
@@ -543,14 +567,14 @@ proptest! {
 
     /// What an accepted submission reports is what was submitted: the kind
     /// the core would have decided on its own, and the life-area name
-    /// trimmed but otherwise verbatim -- unresolved, because resolving it
-    /// needs a database this crate does not have.
+    /// verbatim -- unresolved, because resolving it needs a database this
+    /// crate does not have.
     #[test]
     #[ignore]
     fn an_accepted_submission_reports_the_decided_kind_and_the_submitted_name(
         fields in any_fields(),
         kind in prop::sample::select(vec![POOL, COMMITTED, QUOTA]),
-        life_area in "\\S{1,20}",
+        life_area in "[^ ]{1,20}",
     ) {
         let fields = TriageFields {
             life_area: Some(life_area.clone()),
@@ -559,48 +583,7 @@ proptest! {
 
         if let Ok(submission) = WellFormedTriage::from_fields(&fields) {
             prop_assert_eq!(Ok(submission.kind), TaskKind::from_fields(&fields));
-            prop_assert_eq!(submission.life_area_name, Some(life_area));
+            prop_assert_eq!(submission.life_area_name, life_area);
         }
-    }
-
-    /// A life area submitted as absent, empty or whitespace-only always
-    /// reports `None` -- `T-empty-equals-absent` applied to the field that
-    /// used to be required.
-    #[test]
-    #[ignore]
-    fn a_blank_or_absent_life_area_always_reports_none(
-        fields in any_fields(),
-        kind in prop::sample::select(vec![POOL, COMMITTED, QUOTA]),
-        blank_life_area in proptest::option::of(prop::sample::select(vec!["", "  ", "\t"])),
-    ) {
-        let fields = TriageFields {
-            life_area: blank_life_area.map(str::to_string),
-            ..with_kind(fields, kind)
-        };
-
-        if let Ok(submission) = WellFormedTriage::from_fields(&fields) {
-            prop_assert_eq!(submission.life_area_name, None);
-        }
-    }
-
-    /// A context tag never changes what a kind decides or is rejected for --
-    /// it rides along untouched by the kind's own validation.
-    #[test]
-    #[ignore]
-    fn a_context_tag_never_changes_the_kind_outcome(
-        fields in any_fields(),
-        kind in prop::sample::select(vec![POOL, COMMITTED, QUOTA, "banana", ""]),
-        context_tag in proptest::option::of(".{0,20}"),
-    ) {
-        let without = with_kind(fields, kind);
-        let with = TriageFields {
-            context_tag,
-            ..without.clone()
-        };
-
-        prop_assert_eq!(
-            TaskKind::from_fields(&without),
-            TaskKind::from_fields(&with)
-        );
     }
 }

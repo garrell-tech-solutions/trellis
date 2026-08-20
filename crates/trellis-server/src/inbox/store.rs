@@ -13,17 +13,13 @@ use sqlx::SqlitePool;
 pub struct UntriagedCapture {
     pub id: i64,
     pub raw_text: String,
-    pub context_tag: Option<String>,
 }
 
 /// Untriaged captures, newest first — the inbox's contents.
 pub async fn list_untriaged(pool: &SqlitePool) -> Result<Vec<UntriagedCapture>, sqlx::Error> {
-    sqlx::query_as(
-        "SELECT id, raw_text, context_tag FROM captures \
-         WHERE left_inbox_at IS NULL ORDER BY id DESC",
-    )
-    .fetch_all(pool)
-    .await
+    sqlx::query_as("SELECT id, raw_text FROM captures WHERE left_inbox_at IS NULL ORDER BY id DESC")
+        .fetch_all(pool)
+        .await
 }
 
 /// [`list_untriaged`]'s `WHERE` clause asked about one row: is this capture
@@ -79,16 +75,12 @@ pub struct TaskWithCaptureText {
     pub kind: String,
     pub raw_text: String,
     pub life_area_name: Option<String>,
-    pub context_tag: Option<String>,
 }
 
-/// Every task, newest first. `context_tag` is read through the capture the
-/// task came from -- the tag lives there, not on the task
-/// (`features/context_tags.feature`'s own "one fact, one row").
+/// Every task, newest first.
 pub async fn list_tasks(pool: &SqlitePool) -> Result<Vec<TaskWithCaptureText>, sqlx::Error> {
     sqlx::query_as(
-        "SELECT tasks.kind, captures.raw_text, life_areas.name AS life_area_name, \
-         captures.context_tag AS context_tag FROM tasks \
+        "SELECT tasks.kind, captures.raw_text, life_areas.name AS life_area_name FROM tasks \
          JOIN captures ON captures.id = tasks.capture_id \
          LEFT JOIN life_areas ON life_areas.id = tasks.life_area_id \
          ORDER BY tasks.id DESC",
@@ -123,29 +115,6 @@ mod tests {
 
         assert_eq!(captures.len(), 1);
         assert_eq!(captures[0].id, id);
-    }
-
-    #[tokio::test]
-    async fn list_untriaged_reports_a_captures_own_context_tag() {
-        let (_dir, pool) = test_pool().await;
-        let id = given_a_capture(&pool, "buy screws").await;
-        crate::capture::store::set_context_tag(&pool, id, "@homedepot")
-            .await
-            .unwrap();
-
-        let captures = list_untriaged(&pool).await.unwrap();
-
-        assert_eq!(captures[0].context_tag.as_deref(), Some("@homedepot"));
-    }
-
-    #[tokio::test]
-    async fn list_untriaged_reports_none_for_an_untagged_capture() {
-        let (_dir, pool) = test_pool().await;
-        given_a_capture(&pool, "buy milk").await;
-
-        let captures = list_untriaged(&pool).await.unwrap();
-
-        assert_eq!(captures[0].context_tag, None);
     }
 
     #[tokio::test]
@@ -274,22 +243,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn list_tasks_reports_the_tag_of_the_capture_a_task_came_from() {
-        let (_dir, pool) = test_pool().await;
-        let capture_id = given_a_capture(&pool, "buy screws").await;
-        crate::capture::store::set_context_tag(&pool, capture_id, "@homedepot")
-            .await
-            .unwrap();
-        insert_task(&pool, capture_id, &TaskKind::Pool, None, 0)
-            .await
-            .unwrap();
-
-        let tasks = list_tasks(&pool).await.unwrap();
-
-        assert_eq!(tasks[0].context_tag.as_deref(), Some("@homedepot"));
-    }
-
-    #[tokio::test]
     async fn list_tasks_reports_each_tasks_kind_and_the_text_of_the_capture_it_came_from() {
         let (_dir, pool) = test_pool().await;
         let capture_id = given_a_capture(&pool, "buy milk").await;
@@ -304,7 +257,6 @@ mod tests {
                 kind: "pool".to_string(),
                 raw_text: "buy milk".to_string(),
                 life_area_name: None,
-                context_tag: None,
             }]
         );
     }

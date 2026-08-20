@@ -1,7 +1,0 @@
-# Seeds for failure cases proptest has generated in the past. It is
-# automatically read and these particular cases re-run before any
-# novel cases are generated.
-#
-# It is recommended to check this file in to source control so that
-# everyone who runs the test benefits from these saved cases.
-cc da0459f3529585e36a602983b8c8cf90d9c2b834e03038224974f0b5756454ec # shrinks to fields = TriageFields { kind: None, deadline: None, deadline_type: None, priority: None, target_count: None, target_minutes_each: None, period: None, estimated_minutes: None, life_area: None, context_tag: None }, kind = "pool", life_area = "\t"

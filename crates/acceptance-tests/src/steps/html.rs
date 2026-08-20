@@ -41,29 +41,6 @@ pub fn header_section(body: &str) -> Result<&str, String> {
     between(body, "<header>", "</header>")
 }
 
-/// The `<li>...</li>` markup for the row naming `needle`, found by content
-/// rather than position. Shared by every step module that needs to check
-/// what one specific row of a list says without the check bleeding into a
-/// neighbouring row — `life_areas`' and `context_tags`' own "the task list
-/// shows ... tagged ..." steps, and `schedule`'s placed/won't-fit rows.
-///
-/// Matches `<li` rather than the literal `<li>`: a capture row carries its
-/// own id (`<li id="capture-row-{{ id }}">`, `capture_row.html`), while a
-/// task row and `schedule`'s own rows do not -- both are still "the nearest
-/// preceding row-opening tag", which `<li` alone names.
-pub fn row_containing<'a>(section: &'a str, needle: &str) -> Result<&'a str, String> {
-    let at = section
-        .find(needle)
-        .ok_or_else(|| format!("expected {needle:?} in:\n{section}"))?;
-    let start = section[..at]
-        .rfind("<li")
-        .ok_or_else(|| format!("malformed row markup near {needle:?}"))?;
-    let end = section[start..]
-        .find("</li>")
-        .ok_or_else(|| format!("unterminated row near {needle:?}"))?;
-    Ok(&section[start..start + end + "</li>".len()])
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -105,29 +82,5 @@ mod tests {
         let section = header_section(body).unwrap();
         assert!(section.contains("Inbox"));
         assert!(!section.contains("buy milk"));
-    }
-
-    #[test]
-    fn row_containing_finds_the_row_naming_the_needle() {
-        let section = "<li>buy milk (Home)</li><li>call the dentist (Work)</li>";
-        let row = row_containing(section, "buy milk").unwrap();
-        assert!(row.starts_with("<li>buy milk"));
-        assert!(row.ends_with("</li>"));
-        assert!(!row.contains("call the dentist"));
-    }
-
-    #[test]
-    fn row_containing_errors_when_the_needle_is_absent() {
-        let section = "<li>something else</li>";
-        assert!(row_containing(section, "missing").is_err());
-    }
-
-    #[test]
-    fn row_containing_finds_a_row_that_carries_its_own_id() {
-        let section =
-            r#"<li id="capture-row-1">buy milk</li><li id="capture-row-2">call the dentist</li>"#;
-        let row = row_containing(section, "buy milk").unwrap();
-        assert!(row.starts_with(r#"<li id="capture-row-1">"#));
-        assert!(!row.contains("call the dentist"));
     }
 }

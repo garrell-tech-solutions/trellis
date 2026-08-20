@@ -81,10 +81,6 @@ static WHEN_TRIAGED_THROUGH_PAGE_NO_LIFE_AREA: LazyLock<Regex> = LazyLock::new(|
 });
 static THEN_TASK_LIST_SHOWS_TAGGED: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r#"^the task list shows "([^"]+)" tagged "([^"]+)"$"#).unwrap());
-static THEN_TRIAGE_SUCCEEDS: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"^the triage succeeds$").unwrap());
-static THEN_TASK_LIST_SHOWS_NO_LIFE_AREA: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r#"^the task list shows "([^"]+)" with no life area$"#).unwrap());
 
 pub async fn dispatch(
     world: &mut World,
@@ -145,13 +141,7 @@ pub async fn dispatch(
         return Some(dispatch_triaged_omitting_life_area(world, example, &caps).await);
     }
     if let Some(caps) = THEN_TASK_LIST_SHOWS_TAGGED.captures(text) {
-        return Some(dispatch_task_list_shows_tagged(world, example, &caps));
-    }
-    if THEN_TRIAGE_SUCCEEDS.is_match(text) {
-        return Some(then_status_is(world, 201));
-    }
-    if let Some(caps) = THEN_TASK_LIST_SHOWS_NO_LIFE_AREA.captures(text) {
-        return Some(then_task_list_shows_no_life_area(world, &caps[1]));
+        return Some(then_task_list_shows_tagged(world, &caps[1], &caps[2]));
     }
     if let Some(caps) = THEN_KIND_FORM_PRESELECTS_NONE.captures(text) {
         return Some(dispatch_kind_form_preselects_none(world, example, &caps));
@@ -553,51 +543,20 @@ async fn dispatch_triaged_through_page_no_life_area(
     when_triaged_through_page(world, &fields).await
 }
 
-/// "The task list shows TEXT tagged VALUE" is one step text shared by two
-/// features that mean two different things by it -- `life_area_triage.
-/// feature`'s life area (rendered `" (Name)"`) and `context_tags.feature`'s
-/// context tag (rendered bare, `"@tag"`). Both dispatch here, since
-/// `life_areas::dispatch` is tried first in the chain; a value-anywhere-in-
-/// the-row check is correct for either rendering without needing to know
-/// which one it is, and row-scoping (`html::row_containing`) is what keeps
-/// it from matching a neighbouring row's own value instead.
-fn dispatch_task_list_shows_tagged(
+fn then_task_list_shows_tagged(
     world: &mut World,
-    example: &BTreeMap<String, String>,
-    caps: &regex::Captures<'_>,
+    text: &str,
+    life_area: &str,
 ) -> Result<(), String> {
-    let text = resolve(example, &caps[1])?;
-    let value = resolve(example, &caps[2])?;
-    then_task_list_shows_tagged(world, &text, &value)
-}
-
-fn then_task_list_shows_tagged(world: &mut World, text: &str, value: &str) -> Result<(), String> {
     let body = html_body(world)?;
     let section = html::tasks_section(body)?;
-    let row = html::row_containing(section, text)?;
-    if row.contains(value) {
+    let needle = format!("{text} ({life_area})");
+    if section.contains(&needle) {
         Ok(())
     } else {
         Err(format!(
-            "expected {value:?} in the row for {text:?}, got:\n{row}"
+            "expected {needle:?} in the task list, got:\n{section}"
         ))
-    }
-}
-
-/// The task list shows `text`'s own row with no life area rendered at all --
-/// `life-area-triage-optional-03`/`-page-optional-09`'s own assertion, now
-/// that a life area is not required: a task triaged with none must show
-/// none, not a silent default (`D-manual-triage-until-llm`).
-fn then_task_list_shows_no_life_area(world: &mut World, text: &str) -> Result<(), String> {
-    let body = html_body(world)?;
-    let section = html::tasks_section(body)?;
-    let row = html::row_containing(section, text)?;
-    if row.contains(" (") {
-        Err(format!(
-            "expected no life area in the row for {text:?}, got:\n{row}"
-        ))
-    } else {
-        Ok(())
     }
 }
 
@@ -710,26 +669,6 @@ mod tests {
         assert!(
             then_task_list_shows_tagged(&mut world, "sketch the landing page", "Learning").is_err()
         );
-    }
-
-    #[test]
-    fn then_task_list_shows_no_life_area_passes_when_the_row_carries_none() {
-        let mut world = World::new();
-        world.last_html_body =
-            Some(r#"<ul id="tasks"><li>[pool] sketch the landing page</li></ul>"#.to_string());
-        assert_eq!(
-            then_task_list_shows_no_life_area(&mut world, "sketch the landing page"),
-            Ok(())
-        );
-    }
-
-    #[test]
-    fn then_task_list_shows_no_life_area_errors_when_the_row_carries_one() {
-        let mut world = World::new();
-        world.last_html_body = Some(
-            r#"<ul id="tasks"><li>[pool] sketch the landing page (Learning)</li></ul>"#.to_string(),
-        );
-        assert!(then_task_list_shows_no_life_area(&mut world, "sketch the landing page").is_err());
     }
 
     #[test]
@@ -877,7 +816,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn triaging_through_the_page_with_no_life_area_chosen_succeeds() {
+    async fn triaging_through_the_page_with_no_life_area_chosen_is_rejected_naming_it() {
         let mut world = migrated_world().await;
         super::super::triage::given_capture_waiting(&mut world, "buy milk")
             .await
@@ -893,6 +832,7 @@ mod tests {
         .await
         .unwrap();
 
-        assert_eq!(world.last_status, Some(201));
+        assert_eq!(world.last_status, Some(422));
+        then_rejection_names(&mut world, "life_area").unwrap();
     }
 }

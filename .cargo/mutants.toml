@@ -7,6 +7,27 @@
 # an environmental boundary, not undertested logic (T-module-boundary's
 # testable/environmentally-unsuitable split, applied to a single function
 # rather than a whole module).
+# The acceptance harness is excluded wholesale. Its mutants are things like
+# `replace then_html_body_contains -> Result<(), String> with Ok(())` and
+# `replace dispatch_band_removed -> ... with Ok(())` -- assertion helpers and
+# Gherkin step dispatchers. Killing one means writing a unit test that proves
+# our *assertion helper* fails when it should: a test of a test of the
+# product, second-order work.
+#
+# It was half of all mutants (650 of 1296) and, because `cargo test -p
+# acceptance-tests` runs 23 generated entrypoints per mutant, about 90% of the
+# total cost. The property it was buying -- "do these steps actually assert
+# anything?" -- is what `gherkin-mutator --level soft` answers directly, by
+# mutating example values in the .feature files, first-order and far cheaper.
+# The hardener already runs it every slice.
+#
+# What this gives up: a genuine bug in step-handler logic (a parser, a
+# comparison) is now caught by the acceptance suite and Gherkin mutation
+# rather than by per-line mutation. That is the trade, made deliberately.
+exclude_globs = [
+    "crates/acceptance-tests/**",
+]
+
 exclude_re = [
     '^crates/trellis-server/src/main\.rs:\d+:\d+: replace main -> ExitCode',
 ]

@@ -45,8 +45,14 @@ stops at the first failure — which, for a *caught* mutant, is immediately.
 **3. Hang detection was derived from the baseline, so it inherited the
 slowness.** cargo-mutants sets the per-mutant timeout to 5× the baseline
 test run, floored at 20s. With a 53s `cargo test` baseline that is **268
-seconds** before a hung mutant is noticed. A ~3s nextest baseline puts it at
-the 20s floor — 13× faster, with no policy change.
+seconds** before a hung mutant is noticed.
+
+> **Corrected after first use.** The nextest figures above are measured in
+> the *real* tree. cargo-mutants tests a freshly **copied** tree, which is
+> slower: the same `trellis-server` suite runs in 2.6s here, 7.8s warm in the
+> copy, and **42.9s cold** on the first run after a merge. So the derived
+> timeout lands near 39s, not the 20s floor. Still a ~7× improvement on 268s,
+> but not the number first claimed.
 
 **4. Timeouts were counted as kills.** `killed = caught + timeout` meant a
 mutant that merely made a slow suite run long inflated the score. A timeout
@@ -81,6 +87,34 @@ The analyzer now sets `target-mutants/` itself. It is deliberately
 parallel build directory is cold, which is what makes `-j > 1` unusable for
 `trellis-server` (every mutant timed out).
 
+## Two things the first real run found
+
+**A wall-clock assertion was silently disabling mutation for a whole crate.**
+`platform::app::tests::capture_request_persists_a_row_and_responds_within_50ms`
+asserts `elapsed.as_millis() < 50`. In a mutation run — a copied tree, a cold
+cache, many concurrent processes — that request took **1.885s**, the
+unmutated baseline failed, and cargo-mutants refused to test a single mutant
+of `trellis-server`. One timing assertion, zero coverage, no error anyone
+would connect to it.
+
+It is excluded from the `mutants` nextest profile only, so the budget is
+still asserted in ordinary verification where the reading means something.
+**Whether a latency budget belongs in a unit test at all is a real question
+and deliberately not answered here** — it is the specifier's call, and
+`capture`'s module header cites the 50ms budget as a design constraint.
+
+**The analyzer reported a perfect score for a run that tested nothing.** With
+zero mutants, `valid == 0` made the kill rate vacuously 100%; only the exit
+code carried the bad news. That is the same failure as counting timeouts as
+kills, one level up — a number reporting the tool's health as if it were the
+code's. It now reports `not_run` and points at the baseline log.
+
+**And the per-test timeout was tuned by getting it wrong.** A 12s limit
+looked comfortable against a 3s baseline and turned the cold first run into
+two spurious timeouts. Because this project now *fails* on a timeout rather
+than counting it as a kill, a false one is a hard stop — so the limit has to
+clear the cold case, and it is 60s.
+
 ## What was left alone, and why
 
 **The parallelism in `stack.prompt` — `scheduler-core: 8`, everything else
@@ -100,9 +134,14 @@ is 3–12 s against test runs that were 47–252 s. Worth revisiting if
 
 Measured on `scheduler-core/src/interval.rs`, 28 mutants, full
 (non-differential) run through the new analyzer: **97.7 s, 100% kill rate.**
-Differential re-run of the same file: **0.26 s**. Extrapolating the
-per-mutant cost across the remaining 646 mutants puts a full workspace pass
-in the tens of minutes rather than the tens of hours.
+Differential re-run of the same file: **0.26 s**. On
+`trellis-server/src/capture/mod.rs`, 16 mutants, full run: **16 caught,
+100%**, with the whole invocation under a minute once warm. Extrapolating
+across the remaining 646 mutants puts a full workspace pass in the tens of
+minutes rather than the tens of hours.
+
+**Budget the first run after a merge separately.** It pays a cold copy and
+runs several times slower than every run after it.
 
 ## What this gives up
 

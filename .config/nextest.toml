@@ -9,11 +9,35 @@
 # hanging *test* long before that, so a hang costs seconds rather than the
 # whole budget.
 #
-# terminate-after is deliberately generous relative to the ~3s baseline:
-# mutation runs several mutants concurrently (-j), so every test runs under
-# CPU contention it does not see when the suite is run alone. The cost of
-# being wrong is a mutant reported as a timeout, which this project treats
-# as "not killed" and therefore as work to look at -- loud, not silent.
+# 60s per test, which is generous on purpose and was tuned by getting it
+# wrong. cargo-mutants tests a freshly copied tree, so the FIRST run after a
+# merge or a clean pays a cold page cache: measured here, the same
+# trellis-server suite took 42.9s cold and 7.8s warm, and a 12s per-test
+# limit turned that cold run into two spurious timeouts and a failed
+# baseline. Since this project treats a timeout as a failure rather than a
+# kill, a false one is a hard stop, so the limit has to clear the cold case.
+#
+# It still earns its keep: a genuine infinite loop dies in 60s instead of
+# waiting out cargo-mutants' own suite timeout, which is 5x the baseline and
+# therefore rises with exactly the slowness that makes hangs likely.
 [profile.mutants]
-slow-timeout = { period = "4s", terminate-after = 3 }
+slow-timeout = { period = "20s", terminate-after = 3 }
 fail-fast = true
+
+# One test is excluded, and it is the only one.
+#
+# `capture_request_persists_a_row_and_responds_within_50ms` asserts
+# `elapsed.as_millis() < 50` -- a wall-clock reading, which measures the
+# machine rather than the code. A mutation run is the most contended
+# environment this project ever creates: many mutants building and testing at
+# once, against a freshly copied tree with a cold page cache. Measured there,
+# that request took 1.885s, and the *baseline* failed -- so cargo-mutants
+# refused to test a single mutant of trellis-server. One timing assertion was
+# silently disabling mutation coverage for the whole crate.
+#
+# Excluding it here is deliberately the narrow fix: the assertion still runs
+# in ordinary verification, so the 50ms budget `capture`'s own module header
+# claims is still defended where the reading means something. Whether a
+# latency budget should be asserted in a unit test at all is a real question
+# and not this file's to answer.
+default-filter = 'not test(=platform::app::tests::capture_request_persists_a_row_and_responds_within_50ms)'

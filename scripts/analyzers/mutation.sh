@@ -86,6 +86,26 @@ except FileNotFoundError:
     sys.exit(1)
 
 total = outcomes["total_mutants"]
+
+# A run that tested nothing is not a run that killed everything.
+#
+# `valid == 0` makes the kill rate vacuously 100%, and the exit code alone
+# carried the bad news -- so a failed baseline printed a perfect score. That
+# is the same failure as counting timeouts as kills, one level up: a number
+# that reports the tool's health as if it were the code's.
+if total == 0 and mutants_exit != 0:
+    print(json.dumps({
+        "tool": "cargo-mutants", "metric": "mutation", "threshold": threshold,
+        "violations": [{
+            "outcome": "not_run",
+            "note": "cargo-mutants tested no mutants. Usually the unmutated "
+                    "baseline failed -- check mutants.out/log/baseline.log. "
+                    "No kill rate is reported because none was measured.",
+        }],
+        "summary": {"note": "no mutants tested", "cargo_mutants_exit": mutants_exit},
+    }, indent=2))
+    sys.exit(1)
+
 unviable = outcomes["unviable"]
 caught = outcomes["caught"]
 timeout = outcomes["timeout"]

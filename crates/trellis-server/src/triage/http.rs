@@ -976,6 +976,24 @@ mod tests {
         assert_eq!(body, json!({ "unknown_kind": { "not": "a string" } }));
     }
 
+    #[test]
+    fn an_invalid_field_rejection_message_names_the_field() {
+        let message = rejection_message(
+            &Rejection::Core(TriageRejection::InvalidField(Field::Deadline)),
+            &Value::Null,
+        );
+        assert_eq!(message, "deadline is invalid");
+    }
+
+    #[test]
+    fn an_unknown_kind_rejection_message_echoes_the_value_it_is_given() {
+        let message = rejection_message(
+            &Rejection::Core(TriageRejection::UnknownKind),
+            &json!({ "not": "a string" }),
+        );
+        assert_eq!(message, r#"unrecognised kind: {"not":"a string"}"#);
+    }
+
     /// A submission expressed as JSON and as a form, field for field.
     fn json_body(fields: &TriageFields) -> Value {
         let mut body = serde_json::Map::new();

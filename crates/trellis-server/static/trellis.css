@@ -1,0 +1,636 @@
+/* Trellis, as designed.
+ *
+ * Every token below is lifted verbatim from the GTS design system bundle the
+ * owner's design canvas is built on, and every component rule is one of that
+ * canvas's inline styles given a name. Nothing here is invented: if a value
+ * has no counterpart in `Trellis.dc.html`, it is a browser default being
+ * neutralised, not a new decision.
+ *
+ * The canvas draws a 390x844 phone frame with rounded corners. That frame is
+ * the mockup's way of saying "this is a phone", not a component -- so the app
+ * surface here fills the viewport and only caps its width on a desktop
+ * screen, which is the same picture without pretending to be a device.
+ */
+
+@font-face {
+  font-family: 'Space Grotesk';
+  font-style: normal;
+  font-weight: 300 700;
+  font-display: swap;
+  src: url('/static/fonts/space-grotesk-variable.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA,
+    U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193,
+    U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+:root {
+  --color-gray-50: oklch(0.985 0.002 247.839);
+  --color-gray-100: oklch(0.967 0.003 264.542);
+  --color-gray-200: oklch(0.928 0.006 264.531);
+  --color-gray-300: oklch(0.872 0.01 258.338);
+  --color-gray-400: oklch(0.707 0.022 261.325);
+  --color-gray-500: oklch(0.551 0.027 264.364);
+  --color-gray-600: oklch(0.446 0.03 256.802);
+  --color-gray-700: oklch(0.373 0.034 259.733);
+  --color-gray-800: oklch(0.278 0.033 256.848);
+  --color-gray-900: oklch(0.21 0.034 264.665);
+  --color-gray-950: oklch(0.13 0.028 261.692);
+
+  --color-primary-50: oklch(0.975 0.015 142.9);
+  --color-primary-100: oklch(0.95 0.035 142.9);
+  --color-primary-200: oklch(0.895 0.06 142.9);
+  --color-primary-300: oklch(0.815 0.085 142.9);
+  --color-primary-400: oklch(0.72 0.105 142.9);
+  --color-primary-500: oklch(0.61 0.12 142.9);
+  --color-primary-600: oklch(0.52 0.122 142.9);
+  --color-primary-700: oklch(0.43 0.118 142.9);
+  --color-primary-800: oklch(0.3714 0.1122 142.9);
+  --color-primary-900: oklch(0.28 0.09 142.9);
+  --color-primary-950: oklch(0.19 0.065 142.9);
+
+  --color-gold: oklch(0.7461 0.1447 90.89);
+  --color-mint: oklch(0.9656 0.0226 183.19);
+
+  --font-sans: 'Space Grotesk', ui-sans-serif, system-ui, sans-serif,
+    'Apple Color Emoji', 'Segoe UI Emoji';
+
+  /* The canvas pads every screen's content to 18px and its rows to 44px --
+     the two numbers repeated most often across the file. */
+  --gutter: 18px;
+  --tap: 44px;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  background: var(--color-gray-100);
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  font-family: var(--font-sans);
+  background: #fff;
+  color: var(--color-gray-900);
+  -webkit-text-size-adjust: 100%;
+}
+
+@media (min-width: 480px) {
+  body {
+    width: 430px;
+    margin: 0 auto;
+    border-left: 1px solid var(--color-gray-300);
+    border-right: 1px solid var(--color-gray-300);
+  }
+}
+
+a {
+  color: var(--color-primary-500);
+  text-decoration: none;
+}
+
+a:hover {
+  color: var(--color-primary-800);
+}
+
+input,
+select,
+button,
+textarea {
+  font-family: inherit;
+}
+
+/* --- The app shell -------------------------------------------------------
+ *
+ * `header` is the tab bar. It stays a `<header>` element and stays first in
+ * the source -- the shared shell's contract, asserted by app_shell.feature --
+ * and `order` moves it to the foot of the column where the canvas draws it.
+ */
+
+main {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 16px 0 28px;
+}
+
+header {
+  order: 2;
+  flex: none;
+  position: sticky;
+  bottom: 0;
+  border-top: 1px solid var(--color-gray-200);
+  background: #fff;
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+header nav ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+}
+
+header nav li {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+header nav a {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 58px;
+  padding: 0 2px;
+  text-align: center;
+  font-size: 9.5px;
+  line-height: 1.2;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--color-gray-400);
+}
+
+header nav a[aria-current='page'] {
+  color: var(--color-primary-800);
+  font-weight: 600;
+  box-shadow: inset 0 2px 0 0 var(--color-primary-800);
+}
+
+/* --- Type ---------------------------------------------------------------
+ *
+ * `h1` is the canvas's screen title: the wordmark on Capture, the screen's
+ * own name everywhere else. `h2` is the SectionHeading component -- small
+ * caps over a short gold rule.
+ */
+
+h1 {
+  margin: 0;
+  padding: 2px var(--gutter) 14px;
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--color-primary-800);
+}
+
+h2 {
+  margin: 0 0 20px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--color-primary-800);
+}
+
+h2::after {
+  content: '';
+  display: block;
+  width: 48px;
+  height: 1px;
+  margin-top: 8px;
+  background: var(--color-gold);
+}
+
+h3 {
+  margin: 0 0 8px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--color-gray-500);
+}
+
+p {
+  margin: 0 0 10px;
+  font-size: 13.5px;
+  line-height: 1.6;
+  color: var(--color-gray-600);
+  text-wrap: pretty;
+}
+
+/* Everything that is not a full-bleed list sits in the 18px gutter. */
+main > h1,
+main > h2,
+main > p,
+main > form,
+main > ul,
+main > ol,
+main > div,
+main > section,
+main > details,
+main > table {
+  padding-left: var(--gutter);
+  padding-right: var(--gutter);
+}
+
+main > h1 {
+  padding-left: var(--gutter);
+  padding-right: var(--gutter);
+}
+
+/* --- Quick add ----------------------------------------------------------
+ *
+ * The canvas's one hero control: a flush input with a gold enter key, sitting
+ * on a hairline box whose bottom edge is the primary rule.
+ */
+
+.quick-add-box {
+  display: flex;
+  align-items: stretch;
+  margin: 0 0 8px;
+  border: 1px solid var(--color-gray-300);
+  border-bottom: 2px solid var(--color-primary-800);
+  background: var(--color-gray-50);
+}
+
+.quick-add-box input[type='text'] {
+  flex: 1;
+  min-width: 0;
+  height: 54px;
+  padding: 0 12px;
+  border: none;
+  outline: none;
+  background: transparent;
+  font-size: 16.5px;
+  color: var(--color-gray-900);
+}
+
+.quick-add-box input[type='text']::placeholder {
+  color: var(--color-gray-400);
+}
+
+.quick-add-box button {
+  width: 56px;
+  flex: none;
+  border: none;
+  background: var(--color-gold);
+  color: var(--color-primary-900);
+  font-size: 17px;
+  font-weight: 600;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.hint {
+  margin: 0 0 16px;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--color-gray-500);
+}
+
+/* --- Capture rows -------------------------------------------------------
+ *
+ * Full-bleed, because the canvas runs the row's hairline the whole width and
+ * marks an untriaged row with a primary rule in the left margin.
+ *
+ * Selected by id rather than by class: `<ul id="captures">` and
+ * `<ul id="tasks">` are matched literally by the acceptance suite's section
+ * scoping, so those two opening tags are not ours to decorate.
+ */
+
+#lists {
+  padding: 0;
+}
+
+#lists > h2,
+#lists > p {
+  padding-left: var(--gutter);
+  padding-right: var(--gutter);
+}
+
+#captures,
+#tasks {
+  margin: 0 0 24px;
+  padding: 0;
+  list-style: none;
+}
+
+.row {
+  padding: 12px var(--gutter) 13px 16px;
+  border-bottom: 1px solid var(--color-gray-200);
+  border-left: 2px solid var(--color-primary-800);
+  background: #fff;
+}
+
+.row-text {
+  font-size: 15.5px;
+  line-height: 1.35;
+  color: var(--color-gray-900);
+  text-wrap: pretty;
+}
+
+.row-meta {
+  margin-top: 3px;
+  font-size: 10.5px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--color-gray-400);
+}
+
+/* A task: already sorted, so it recedes -- the canvas's triaged row. */
+#tasks > li {
+  padding: 11px var(--gutter);
+  border-bottom: 1px solid var(--color-gray-200);
+  border-left: 2px solid transparent;
+  background: var(--color-gray-50);
+  font-size: 13.5px;
+  line-height: 1.35;
+  color: var(--color-gray-500);
+  text-wrap: pretty;
+}
+
+/* --- Triage -------------------------------------------------------------
+ *
+ * Three equal chips across the row. Pool is a bare form and the other two are
+ * `<details>`, so the chips are a `<button>` and two `<summary>` elements
+ * dressed alike; `.kinds` is the flex row they share.
+ *
+ * The canvas orders them Commit, Pool, Quota. Here Pool leads, because
+ * `D-pool-is-default` keeps the pool form outside any expanding control and
+ * therefore ahead of the first `<details>` in the source.
+ */
+
+.kinds {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.kind {
+  flex: 1 1 0;
+  min-width: 0;
+  margin: 0;
+}
+
+
+.kind > summary,
+.kind > button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: var(--tap);
+  padding: 0 4px;
+  border: 1px solid var(--color-gray-300);
+  background: #fff;
+  color: var(--color-gray-700);
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  list-style: none;
+  cursor: pointer;
+}
+
+.kind > summary::-webkit-details-marker {
+  display: none;
+}
+
+.kind[open] > summary {
+  border-color: var(--color-primary-800);
+  background: var(--color-primary-800);
+  color: #fff;
+}
+
+/* An opened kind's fields drop out of the chip row and span it. */
+.kind[open] {
+  flex: 1 0 100%;
+}
+
+.kind[open] > summary {
+  width: auto;
+}
+
+/* Pool takes the whole line: it is the default path, and until the
+   life-area requirement goes (#82) it has one field to carry with it.
+   These outrank the chip rules above, which is why they sit below them. */
+.kinds .kind-wide {
+  flex: 1 0 100%;
+  display: flex;
+  align-items: flex-end;
+  gap: 6px;
+}
+
+.kinds .kind-wide > label {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--color-gray-500);
+}
+
+.kinds .kind-wide > label select {
+  display: block;
+  width: 100%;
+  height: var(--tap);
+  margin-top: 4px;
+  padding: 0 8px;
+  border: 1px solid var(--color-gray-300);
+  background: #fff;
+  outline: none;
+  font-size: 13px;
+  letter-spacing: normal;
+  text-transform: none;
+  color: var(--color-gray-800);
+}
+
+.kinds .kind-wide > button {
+  width: 96px;
+  flex: none;
+}
+
+.fields {
+  margin-top: 8px;
+  padding: 10px;
+  border: 1px solid var(--color-gray-200);
+  background: var(--color-gray-50);
+}
+
+.fields label {
+  display: block;
+  margin-bottom: 8px;
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--color-gray-500);
+}
+
+.fields input,
+.fields select,
+.field-row input,
+.field-row select {
+  display: block;
+  width: 100%;
+  height: var(--tap);
+  margin-top: 4px;
+  padding: 0 10px;
+  border: 1px solid var(--color-gray-300);
+  background: #fff;
+  outline: none;
+  font-size: 13.5px;
+  letter-spacing: normal;
+  text-transform: none;
+  color: var(--color-gray-900);
+}
+
+.actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 2px;
+}
+
+.actions button {
+  height: var(--tap);
+  padding: 0 12px;
+  border: none;
+  background: none;
+  font-size: 12.5px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--color-primary-500);
+  cursor: pointer;
+}
+
+.dismiss {
+  margin-top: 8px;
+}
+
+.dismiss button {
+  height: 34px;
+  padding: 0;
+  border: none;
+  background: none;
+  font-size: 11.5px;
+  letter-spacing: 0.06em;
+  color: var(--color-gray-400);
+  cursor: pointer;
+}
+
+.dismiss button:hover {
+  color: var(--color-gray-600);
+}
+
+.triage-error {
+  margin: 9px 0 0;
+  padding: 9px 10px;
+  background: var(--color-mint);
+  border-top: 3px solid var(--color-gold);
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--color-gray-700);
+}
+
+/* --- Shared page furniture ----------------------------------------------
+ *
+ * The pages the canvas has not drawn yet -- life areas, capacity, free time,
+ * schedule, stats, exceptions -- get the same tokens through plain element
+ * rules, so the product reads as one thing while their own layouts wait for
+ * their slices.
+ */
+
+.panel {
+  margin: 0 0 16px;
+  padding: 20px;
+  border-top: 4px solid var(--color-gold);
+  border-radius: 8px;
+  background: var(--color-mint);
+}
+
+main > form:not(.quick-add) label,
+main > div label,
+main > section label {
+  display: block;
+  margin-bottom: 10px;
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--color-gray-500);
+}
+
+main > form:not(.quick-add) input,
+main > form:not(.quick-add) select,
+main > div input,
+main > div select,
+main > section input,
+main > section select {
+  display: block;
+  width: 100%;
+  height: var(--tap);
+  margin-top: 4px;
+  padding: 0 10px;
+  border: 1px solid var(--color-gray-300);
+  background: #fff;
+  outline: none;
+  font-size: 13.5px;
+  letter-spacing: normal;
+  text-transform: none;
+  color: var(--color-gray-900);
+}
+
+main > form:not(.quick-add) button,
+main > div button,
+main > section button {
+  height: var(--tap);
+  padding: 0 14px;
+  border: 1px solid var(--color-primary-800);
+  background: #fff;
+  color: var(--color-primary-800);
+  font-size: 12.5px;
+  letter-spacing: 0.06em;
+  cursor: pointer;
+}
+
+main ul:not(#captures):not(#tasks) {
+  margin: 0 0 16px;
+  padding: 0;
+  list-style: none;
+}
+
+main ul:not(#captures):not(#tasks) > li {
+  padding: 11px 0;
+  border-bottom: 1px solid var(--color-gray-200);
+  font-size: 14.5px;
+  line-height: 1.3;
+  color: var(--color-gray-700);
+  text-wrap: pretty;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+}
+
+th {
+  padding: 8px 0;
+  border-bottom: 1px solid var(--color-gray-300);
+  text-align: left;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--color-gray-500);
+}
+
+td {
+  padding: 10px 0;
+  border-bottom: 1px solid var(--color-gray-200);
+  font-size: 13.5px;
+  color: var(--color-gray-700);
+}
+
+.standing {
+  font-size: 12px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--color-primary-800);
+}

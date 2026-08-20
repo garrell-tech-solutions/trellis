@@ -2,7 +2,10 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light">
 <title>{% block title %}Trellis{% endblock %}</title>
+<link rel="stylesheet" href="/static/trellis.css">
 <script src="/static/htmx.min.js"></script>
 <script type="text/javascript">
 /* htmx swaps the target only on 2xx by default; a validation rejection is a
@@ -22,6 +25,8 @@ htmx.config.responseHandling.unshift({code: "422", swap: true});
 </ul>
 </nav>
 </header>
+<main>
 {% block content %}{% endblock %}
+</main>
 </body>
 </html>

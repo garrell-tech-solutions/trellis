@@ -40,14 +40,6 @@ pub struct TriageFields {
     /// (`D-no-pool-on-calendar`) and quota already carries
     /// `target_minutes_each`, so neither needs this field.
     pub estimated_minutes: Option<i64>,
-    /// The life area submitted by name, required for every kind
-    /// (`T-quota-targets-required`'s reasoning: a field the downstream
-    /// cannot function without belongs required at the boundary). Whether
-    /// this name currently resolves to a real, active life area is not
-    /// decidable here -- that needs the `life_areas` table, so it is the
-    /// adapter's job (`T-capability-owns-its-queries`) once
-    /// [`require_life_area`] has confirmed something was submitted at all.
-    pub life_area: Option<String>,
 }
 
 /// Why a set of triage fields does not describe a task.
@@ -140,47 +132,6 @@ fn require_positive(field: Field, value: i64) -> Result<i64, TriageRejection> {
         Ok(value)
     } else {
         Err(TriageRejection::InvalidField(field))
-    }
-}
-
-/// Requires that a life area was submitted at all -- every kind needs one
-/// (T-quota-targets-required's reasoning applies equally here). Whether the
-/// submitted name currently resolves to a real, active life area is a
-/// database question and is not decided here; see [`TriageFields::life_area`].
-fn require_life_area(fields: &TriageFields) -> Result<String, TriageRejection> {
-    require(Field::LifeArea, &fields.life_area)
-}
-
-/// A triage submission with everything decided that can be decided here:
-/// which kind of task it describes, and the life area it names.
-///
-/// The name is carried as text on purpose. Whether it currently resolves to
-/// a real, active row needs the `life_areas` table, so that half stays the
-/// adapter's (`T-capability-owns-its-queries`) -- this type is the line
-/// between the two, and holding the name rather than an id is what keeps the
-/// core from needing to know ids exist.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct WellFormedTriage {
-    pub kind: TaskKind,
-    pub life_area_name: String,
-}
-
-impl WellFormedTriage {
-    /// Kind first, then the life area -- a fixed order, so a submission
-    /// naming no kind reports `unknown_kind` rather than a life-area
-    /// complaint, however the life area was submitted.
-    ///
-    /// Composed here rather than left to each adapter to call the two checks
-    /// in the right sequence. Which order the rejections come in is a rule,
-    /// and a rule every delivery mechanism has to remember for itself is one
-    /// the second delivery mechanism gets wrong.
-    pub fn from_fields(fields: &TriageFields) -> Result<Self, TriageRejection> {
-        let kind = TaskKind::from_fields(fields)?;
-        let life_area_name = require_life_area(fields)?;
-        Ok(WellFormedTriage {
-            kind,
-            life_area_name,
-        })
     }
 }
 
@@ -301,109 +252,6 @@ impl TaskKind {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    // --- require_life_area --------------------------------------------------
-
-    #[test]
-    fn require_life_area_accepts_a_present_non_empty_name() {
-        let fields = TriageFields {
-            life_area: Some("Work".to_string()),
-            ..TriageFields::default()
-        };
-        assert_eq!(require_life_area(&fields), Ok("Work".to_string()));
-    }
-
-    #[test]
-    fn require_life_area_rejects_an_absent_life_area() {
-        assert_eq!(
-            require_life_area(&TriageFields::default()),
-            Err(TriageRejection::MissingField(Field::LifeArea))
-        );
-    }
-
-    #[test]
-    fn require_life_area_rejects_an_empty_life_area_the_same_as_absent() {
-        let fields = TriageFields {
-            life_area: Some(String::new()),
-            ..TriageFields::default()
-        };
-        assert_eq!(
-            require_life_area(&fields),
-            Err(TriageRejection::MissingField(Field::LifeArea))
-        );
-    }
-
-    // --- WellFormedTriage ---------------------------------------------------
-
-    #[test]
-    fn a_well_formed_submission_reports_its_kind_and_the_life_area_it_names() {
-        let fields = TriageFields {
-            kind: Some(POOL.to_string()),
-            life_area: Some("Work".to_string()),
-            ..TriageFields::default()
-        };
-
-        assert_eq!(
-            WellFormedTriage::from_fields(&fields),
-            Ok(WellFormedTriage {
-                kind: TaskKind::Pool,
-                life_area_name: "Work".to_string(),
-            })
-        );
-    }
-
-    #[test]
-    fn a_submission_naming_a_kind_but_no_life_area_is_rejected_for_the_life_area() {
-        let fields = TriageFields {
-            kind: Some(POOL.to_string()),
-            ..TriageFields::default()
-        };
-
-        assert_eq!(
-            WellFormedTriage::from_fields(&fields),
-            Err(TriageRejection::MissingField(Field::LifeArea))
-        );
-    }
-
-    /// The order is the rule: no kind outranks no life area, so a submission
-    /// missing both reports the kind. Every delivery mechanism gets this for
-    /// free rather than having to sequence the two checks itself.
-    #[test]
-    fn a_submission_missing_both_reports_the_unknown_kind_not_the_life_area() {
-        assert_eq!(
-            WellFormedTriage::from_fields(&TriageFields::default()),
-            Err(TriageRejection::UnknownKind)
-        );
-    }
-
-    #[test]
-    fn a_submission_with_a_life_area_but_an_unrecognised_kind_reports_the_kind() {
-        let fields = TriageFields {
-            kind: Some("banana".to_string()),
-            life_area: Some("Work".to_string()),
-            ..TriageFields::default()
-        };
-
-        assert_eq!(
-            WellFormedTriage::from_fields(&fields),
-            Err(TriageRejection::UnknownKind)
-        );
-    }
-
-    /// A kind's own required fields still outrank the life area: a committed
-    /// task with no deadline reports the deadline, not the missing life area.
-    #[test]
-    fn a_kinds_own_missing_field_outranks_a_missing_life_area() {
-        let fields = TriageFields {
-            kind: Some(COMMITTED.to_string()),
-            ..TriageFields::default()
-        };
-
-        assert_eq!(
-            WellFormedTriage::from_fields(&fields),
-            Err(TriageRejection::MissingField(Field::Deadline))
-        );
-    }
 
     // --- TaskKind::from_fields — pool --------------------------------------
 

@@ -15,14 +15,13 @@ pub enum Field {
     TargetCount,
     TargetMinutesEach,
     Period,
-    LifeArea,
 }
 
 /// Every field paired with the name reported back to whoever submitted the
-/// triage -- a table, not a match, for the reason `guardrail::WEEKDAYS`
-/// already is one (`T-complexity-8`: eight arms of no logic beyond the
+/// triage -- a table, not a match, for the reason a fixed lookup table
+/// already is one (`T-complexity-8`: seven arms of no logic beyond the
 /// lookup should not cost against the threshold).
-const FIELD_NAMES: [(Field, &str); 8] = [
+const FIELD_NAMES: [(Field, &str); 7] = [
     (Field::Deadline, "deadline"),
     (Field::DeadlineType, "deadline_type"),
     (Field::Priority, "priority"),
@@ -30,7 +29,6 @@ const FIELD_NAMES: [(Field, &str); 8] = [
     (Field::TargetCount, "target_count"),
     (Field::TargetMinutesEach, "target_minutes_each"),
     (Field::Period, "period"),
-    (Field::LifeArea, "life_area"),
 ];
 
 impl Field {
@@ -238,6 +236,5 @@ mod tests {
         assert_eq!(Field::TargetCount.name(), "target_count");
         assert_eq!(Field::TargetMinutesEach.name(), "target_minutes_each");
         assert_eq!(Field::Period.name(), "period");
-        assert_eq!(Field::LifeArea.name(), "life_area");
     }
 }

@@ -10,7 +10,6 @@
 
 use crate::inbox::store;
 use crate::inbox::view::{CaptureRow, TaskRow};
-use crate::life_areas::view::LifeAreaOption;
 use crate::platform::response::{render_template, write_failed};
 use askama::Template;
 use axum::http::StatusCode;
@@ -22,25 +21,11 @@ use sqlx::SqlitePool;
 /// making that template the response) because such a response is not a page:
 /// it has no `<head>`, no quick-add form, nothing but the two lists htmx is
 /// replacing.
-///
-/// `life_areas` rides along beside `captures` and `tasks` because the
-/// triage forms inside `capture_row.html` are part of this same fragment —
-/// the picker they offer must reflect the current, active set on every
-/// render, the same "no restart" requirement the management page itself
-/// has.
-///
-/// **`pub(super)`, which is the point of [`respond`].** Two other
-/// capabilities used to name these three fields to build one of these
-/// themselves; what the fragment is made of is the inbox's business, and a
-/// fourth list joining it should not be a four-file change. It stays visible
-/// inside `inbox` because [`super::http`] wraps the same three lists in the
-/// full page.
 #[derive(Template)]
 #[template(path = "lists.html")]
 pub(super) struct ListsTemplate {
     pub(super) captures: Vec<CaptureRow>,
     pub(super) tasks: Vec<TaskRow>,
-    pub(super) life_areas: Vec<LifeAreaOption>,
 }
 
 /// `T-forms-swap-one-fragment`'s response contract, implemented once:
@@ -78,7 +63,6 @@ pub(super) async fn build_lists(
     Ok(ListsTemplate {
         captures: build_capture_rows(pool, error).await?,
         tasks: build_task_rows(pool).await?,
-        life_areas: crate::life_areas::active_options(pool).await?,
     })
 }
 
@@ -107,7 +91,6 @@ async fn build_task_rows(pool: &SqlitePool) -> Result<Vec<TaskRow>, sqlx::Error>
         .map(|task| TaskRow {
             kind: task.kind,
             text: task.raw_text,
-            life_area: task.life_area_name,
         })
         .collect())
 }
@@ -141,7 +124,7 @@ mod tests {
     async fn the_task_list_carries_each_triaged_tasks_kind_and_capture_text() {
         let (_dir, pool) = test_pool().await;
         let capture_id = insert_capture(&pool, "buy milk", "web", 0).await.unwrap();
-        crate::triage::store::insert_task(&pool, capture_id, &TaskKind::Pool, None, 0)
+        crate::triage::store::insert_task(&pool, capture_id, &TaskKind::Pool, 0)
             .await
             .unwrap();
 
@@ -150,36 +133,5 @@ mod tests {
         assert_eq!(tasks.len(), 1);
         assert_eq!(tasks[0].kind, "pool");
         assert_eq!(tasks[0].text, "buy milk");
-    }
-
-    #[tokio::test]
-    async fn the_life_area_options_are_the_active_seed() {
-        let (_dir, pool) = test_pool().await;
-
-        let life_areas = build_lists(&pool, None).await.unwrap().life_areas;
-
-        assert_eq!(
-            life_areas
-                .iter()
-                .map(|a| a.name.as_str())
-                .collect::<Vec<_>>(),
-            vec!["Work", "Fitness", "Learning", "Family", "Home"]
-        );
-    }
-
-    #[tokio::test]
-    async fn an_archived_life_area_is_excluded_from_the_picker_options() {
-        let (_dir, pool) = test_pool().await;
-        let learning = crate::life_areas::store::find_by_name(&pool, "Learning")
-            .await
-            .unwrap()
-            .unwrap();
-        crate::life_areas::store::archive(&pool, learning.id, 1_000)
-            .await
-            .unwrap();
-
-        let life_areas = build_lists(&pool, None).await.unwrap().life_areas;
-
-        assert!(!life_areas.iter().any(|a| a.name == "Learning"));
     }
 }

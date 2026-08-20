@@ -4,16 +4,12 @@
 //! and then asserting over what came back, and each step module had grown its
 //! own copy of "build the router from the world's pool, send the request,
 //! record the outcome". Two copies of that meant no single place knew how a
-//! scenario reaches the application — and they had already drifted: one timed
-//! the round trip and dropped the body, the other kept the body and dropped
-//! the timing, so a step could only assert whatever its own module happened
-//! to have recorded.
+//! scenario reaches the application.
 
 use crate::world::World;
 use axum::body::Body;
 use axum::http::Request;
 use serde_json::Value;
-use std::time::Duration;
 use tower::ServiceExt;
 
 /// What the application sent back. Everything a `Then` step might want to
@@ -22,7 +18,6 @@ pub struct Response {
     pub status: u16,
     /// `None` when the body was not JSON — an empty body included.
     pub body: Option<Value>,
-    pub elapsed: Duration,
 }
 
 fn build_json_post(uri: &str, body: &Value) -> Result<Request<Body>, String> {
@@ -34,26 +29,15 @@ fn build_json_post(uri: &str, body: &Value) -> Result<Request<Body>, String> {
         .map_err(|e| format!("build request: {e}"))
 }
 
-/// Sends `request` through `app`, timing the round trip -- the half of
-/// [`post_json`] that reads the body separately, once it has one.
-async fn send_timed(
-    app: axum::Router,
-    request: Request<Body>,
-) -> Result<(axum::response::Response, Duration), String> {
-    let start = std::time::Instant::now();
-    let response = app
-        .oneshot(request)
-        .await
-        .map_err(|e| format!("send request: {e}"))?;
-    Ok((response, start.elapsed()))
-}
-
 /// POSTs `body` as JSON to `uri` against a router built on the scenario's
 /// database pool.
 pub async fn post_json(world: &World, uri: &str, body: &Value) -> Result<Response, String> {
     let app = trellis_server::platform::app::build_app(world.pool()?.clone(), world.clock());
     let request = build_json_post(uri, body)?;
-    let (response, elapsed) = send_timed(app, request).await?;
+    let response = app
+        .oneshot(request)
+        .await
+        .map_err(|e| format!("send request: {e}"))?;
 
     let status = response.status().as_u16();
     let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
@@ -63,7 +47,6 @@ pub async fn post_json(world: &World, uri: &str, body: &Value) -> Result<Respons
     Ok(Response {
         status,
         body: serde_json::from_slice(&bytes).ok(),
-        elapsed,
     })
 }
 

@@ -52,7 +52,7 @@ is only the life area that is under test.
   quarter; a stored name string would orphan every task the first time one is
   renamed.
 
-## Procedure — a life area is required
+## Procedure — a life area is optional
 
 1. Submit a capture with raw text `buy milk`.
 2. Submit the triage control as **pool** with the life area omitted entirely.
@@ -63,14 +63,16 @@ is only the life area that is under test.
 6. Re-read the untriaged queue.
 
 ### Expected Observable Outcomes
-- All three are rejected, and each rejection names the life area field —
-  the same shape `committed_triage_validation` already establishes for a
-  missing required field.
-- Committed and quota are rejected **even though every one of their own
-  required fields was valid**, which is what proves the life area is required
-  in its own right rather than incidentally.
-- The tasks table is still empty and the capture is still untriaged. A
-  rejected triage creates nothing.
+- **All three succeed.** `T-life-area-required-at-triage` was superseded by
+  `D-context-tags-are-the-taxonomy` in #82: context tags are the product's
+  only taxonomy, and a life area is no longer demanded at triage.
+- Each task is created with **no life area**, not with a defaulted one — a
+  silent default is the failure `D-manual-triage-until-llm` refused for the
+  picker.
+- **Check both transports.** The requirement was removed at the boundary and
+  in the form, and `T-required-fields-are-specified-per-transport` exists
+  because #73 changed one and not the other while every feature stayed green.
+- Supplying a life area still works, and the picker is unchanged.
 
 ## Procedure — a life area that does not exist is refused
 

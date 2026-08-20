@@ -5,18 +5,28 @@
 
 # life-area-triage-offers-01: triage offers every life area, including one added since the server started
 # life-area-triage-tags-02: triage tags the task with the chosen life area, and the task list shows it
-# life-area-triage-required-03: triage without a life area is rejected, whatever the kind
+# life-area-triage-optional-03: triage without a life area succeeds, whatever the kind
 # life-area-triage-unknown-04: triage naming a life area that does not exist is rejected
 # life-area-triage-archived-05: triage into an archived life area is rejected at the boundary, not only hidden from the picker
 # life-area-triage-escapes-hostile-text-06: a hostile life area name stays escaped where the task row renders it
 # life-area-triage-no-preselection-07: the life area picker preselects nothing, whatever the kind
 # life-area-triage-quick-add-picker-08: a row rendered by the quick-add box carries the same unselected picker
-# life-area-triage-page-required-09: triage submitted from the page with no life area chosen is refused on that row
+# life-area-triage-page-optional-09: triage submitted from the page with no life area chosen succeeds
 #
 # The picker's unselected placeholder is not a life area, so "the triage life
 # area choices are exactly ..." above keeps naming only real life areas.
 # D-manual-triage-until-llm: nothing chooses for the user, and a default that
 # is merely first-by-id is that same silent wrong default one layer down.
+#
+# 03 AND 09 WERE INVERTED BY #82, not deleted. They asserted that triage
+# without a life area is refused; T-life-area-required-at-triage is superseded
+# by D-context-tags-are-the-taxonomy, which makes context tags the product's
+# only taxonomy and drops the requirement. Inverting keeps the same two
+# transports under test and pins the new behaviour: deleting them would have
+# left "triage succeeds with no life area" asserted nowhere, on exactly the
+# path T-required-fields-are-specified-per-transport was written about. The
+# picker itself is unchanged -- it still offers every active life area and
+# still preselects nothing.
 Feature: Triage tags a task with a life area
 
   Background:
@@ -37,7 +47,7 @@ Feature: Triage tags a task with a life area
     Then the task list shows "sketch the landing page" tagged "Learning"
     And the task list shows "buy milk" tagged "Home"
 
-  # life-area-triage-required-03: triage without a life area is rejected, whatever the kind
+  # life-area-triage-optional-03: triage without a life area succeeds, whatever the kind
   Scenario: Triage without a life area is rejected, whatever the kind
     When the capture is triaged as a <kind> task with "life_area" omitted
     Then the triage is rejected
@@ -91,7 +101,7 @@ Feature: Triage tags a task with a life area
     When the quick-add box submits a capture with raw text "buy milk"
     Then the quick-add response's pool triage form preselects no life area
 
-  # life-area-triage-page-required-09: triage submitted from the page with no life area chosen is refused on that row
+  # life-area-triage-page-optional-09: triage submitted from the page with no life area chosen succeeds
   Scenario: Triage submitted from the page with no life area chosen is refused on that row
     When the capture is triaged as a <kind> task through the page with no life area chosen
     Then the triage is rejected

@@ -141,7 +141,7 @@ mod tests {
         deadline_ms: i64,
         deadline_type: DeadlineType,
     ) {
-        let capture_id = crate::capture::store::insert(pool, raw_text, "web", 0)
+        let capture_id = crate::capture::store::insert(pool, raw_text, "web", None, 0)
             .await
             .unwrap();
         crate::triage::store::insert_task(
@@ -245,7 +245,7 @@ mod tests {
     async fn generate_never_places_a_pool_or_quota_task() {
         let (_dir, pool) = test_pool().await;
         let work = work_with_a_weekday_guardrail(&pool).await;
-        let capture_id = crate::capture::store::insert(&pool, "read the spec", "web", 0)
+        let capture_id = crate::capture::store::insert(&pool, "read the spec", "web", None, 0)
             .await
             .unwrap();
         crate::triage::store::insert_task(&pool, capture_id, &TaskKind::Pool, Some(work), 0)

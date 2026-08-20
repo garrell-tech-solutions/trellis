@@ -62,7 +62,7 @@ dependency rule itself is unchanged.
 ```
 crates/trellis-server/src/
   capacity/   mod.rs  http.rs  store.rs  view.rs
-  capture/    http.rs  store.rs
+  capture/    mod.rs  http.rs  store.rs
   triage/     http.rs  store.rs
   dismiss/    mod.rs  http.rs
   exceptions/ mod.rs  http.rs  store.rs  view.rs
@@ -320,10 +320,74 @@ deadline" is a fact about the type rather than a claim about one payload.
 `TaskAttributes` is the nullable row-shaped projection; at most one attribute
 group is ever populated.
 
+## Context tags — built (`D-context-tags-are-the-taxonomy`, #82)
+
+**The product's only taxonomy.** Free text, optional, numerous, cheap,
+disposable — the opposite call from a life area's, and deliberately so: a
+typo costs one badly-grouped item rather than an unschedulable one.
+
+```
+scheduler_core::context_tag::normalize(Option<&str>) -> Option<String>
+trellis_server::capture::resolve_tag(pool, raw)  -> Option<String>   the front door
+trellis_server::capture::create(pool, text, source, raw_tag, at_ms)
+trellis_server::capture::retag(pool, capture_id, raw_tag)
+trellis_server::capture::distinct_tags(pool)     -> Vec<String>      suggestions
+```
+
+**The rule splits across the boundary, and the split is the point.** What one
+submitted string means on its own is decidable without a database, so
+`normalize` is in the core: trim, and collapse blank-or-absent to `None`
+(`T-empty-equals-absent`). Whether it is the *same tag* as one seen before
+needs every tag stored so far, so canonicalization is the adapter's
+(`T-capability-owns-its-queries`).
+
+**A tag lives on the capture, not the task** — one fact, one row. A task
+reads it through the capture it came from. A dismissed capture keeps a tag
+nothing reads, which costs nothing, since `D-kill-means-archive` keeps that
+row regardless.
+
+**`@HomeDepot` and `@homedepot` are one tag, stored as first typed.**
+`captures.context_tag` is `COLLATE NOCASE` — the same call
+`life_areas.name` made, applied to something *typed* rather than picked,
+where the slip is likelier. Unlike a life area's name it carries no
+`UNIQUE`: many captures share one tag by design, so the collation settles
+only how two spellings *compare*, never which is stored. Choosing the
+stored spelling is `resolve_tag`'s job, and it picks the earliest.
+
+> **NOCASE folds ASCII only.** `@CAFÉ` and `@café` are two tags. Same
+> limitation `life_areas.name` already carries, and the same escape hatch:
+> if the rule outgrows a collation the fold moves into the core and the
+> constraint becomes the backstop.
+
+**`capture` is the third capability to earn a front door**
+(`T-one-front-door-per-capability`). Two write paths reach the tag — a fresh
+capture and a triage-time retag — and if they canonicalized differently the
+same typed word would land as two tags. `store::set_context_tag` is
+`pub(super)`, so the door is enforced by the compiler and not only by
+`platform::boundary`'s substring lint — the same thing
+`T-inbox-owns-membership` did for `close_capture`.
+
+**The tag is written by the `INSERT` that creates the capture**, not by a
+follow-up `UPDATE`. It arrived as insert-then-update, which cost the
+quick-add box a third round trip on a path budgeted at 50ms and left a
+window in which the capture was on disk without the tag its caller had
+already been handed. Resolve first, then one statement; the resolution
+looks for a tag already *stored*, and the row being written carries none
+either way, so the order changes nothing but honesty.
+
+**What ties `normalize` to the column** is a property, not a comment.
+Migration `0010`'s `CHECK` says a tag is `NULL` or non-empty-and-trimmed;
+`normalize`'s postcondition says the same thing in Rust. `context_tag_
+properties.rs` states the postcondition over generated whitespace —
+including the non-ASCII kinds `str::trim` strips and SQLite's `TRIM` does
+not — and `capture`'s own `a_tag_is_stored_as_the_spelling_it_was_first_
+given` asserts the schema accepts every resolved tag, which is the half a
+pure crate has no database to check.
+
 ### Schema — built
 
 ```sql
-captures(id, raw_text, source, created_at_ms, left_inbox_at)
+captures(id, raw_text, source, created_at_ms, left_inbox_at, context_tag)
 tasks(id, capture_id, kind, deadline, deadline_type, priority,
       target_count, target_minutes_each, period, life_area_id,
       archived_at, created_at_ms)
@@ -751,8 +815,19 @@ canonical list to ratify; there is a seed, and then it is the user's.
 ```sql
 life_areas(id, name, archived_at)        -- name is UNIQUE COLLATE NOCASE
 seed        Work · Fitness · Learning · Family · Home
-tasks.life_area_id                       -- nullable column, required at triage
+tasks.life_area_id                       -- nullable column, and no longer
+                                         -- required at triage (#82)
 ```
+
+> **Superseded as the taxonomy, 2026-08-20 (`D-context-tags-are-the-taxonomy`,
+> #82).** `T-life-areas-are-data` and `T-life-area-required-at-triage` both
+> go; the **modules stay**, deliberately, until dogfooding says whether
+> guardrails were worth having. What changed is only that triage no longer
+> demands a life area, for any kind — so `Field` has no `LifeArea` variant
+> any more and nothing can reject a submission for its life area alone. A
+> *named* life area is still resolved against the active set and still
+> rejected when it names no active row; naming none is simply not a
+> rejection. Everything below still describes what is built.
 
 **Two names are the same name when they match once trimmed and case-folded**,
 and the column's `UNIQUE COLLATE NOCASE` is where that is enforced — not a
@@ -766,9 +841,11 @@ folding — it moves into the core and the constraint becomes the backstop.
 
 `tasks.life_area_id` is nullable for the reason `T-quota-targets-required`
 already established: SQLite cannot add a `NOT NULL` column without a default
-to a table that may hold rows, so the requirement lives at the triage
-boundary instead. `None` therefore means "written before this migration", not
-"has no life area".
+to a table that may hold rows, so the requirement lived at the triage
+boundary instead. Since #82 there is no requirement to live anywhere, and
+`None` now means either "written before migration `0004`" or "the owner
+named none" — the two are no longer distinguishable, which costs nothing,
+because nothing reads the difference.
 
 The seed keeps every life area cited in a settled decision's reasoning — Fitness
 (`T-three-task-kinds`), Learning (`D-kill-means-archive`), Family

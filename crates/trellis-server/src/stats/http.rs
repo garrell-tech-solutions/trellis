@@ -73,7 +73,7 @@ mod tests {
     }
 
     async fn given_a_task(pool: &SqlitePool, kind: &TaskKind, created_at_ms: i64) {
-        let capture_id = crate::capture::store::insert(pool, "buy milk", "web", 0)
+        let capture_id = crate::capture::store::insert(pool, "buy milk", "web", None, 0)
             .await
             .unwrap();
         crate::triage::store::insert_task(pool, capture_id, kind, None, created_at_ms)

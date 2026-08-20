@@ -43,10 +43,16 @@ pub(crate) async fn resolve_tag(
     ))
 }
 
-/// Writes a new capture and, if a tag was given, resolves and stores it --
-/// the quick-add box's whole write. Returns the new capture's id and the
-/// tag it now carries (already resolved, for the row the caller renders
-/// back).
+/// Writes a new capture carrying whatever tag it was given -- the quick-add
+/// box's whole write. Returns the new capture's id and the tag it now
+/// carries (already resolved, for the row the caller renders back).
+///
+/// **Resolve first, then one `INSERT`.** The order matters only for
+/// honesty, not for the answer: [`resolve_tag`] looks for a tag already
+/// *stored*, and the row being written does not carry one yet either way.
+/// What it buys is that the capture is never briefly on disk without the
+/// tag this function has already promised its caller, and that the write
+/// stays the single statement this module's header budgets for.
 pub(crate) async fn create(
     pool: &SqlitePool,
     raw_text: &str,
@@ -54,11 +60,8 @@ pub(crate) async fn create(
     raw_context_tag: Option<&str>,
     created_at_ms: i64,
 ) -> Result<(i64, Option<String>), sqlx::Error> {
-    let id = store::insert(pool, raw_text, source, created_at_ms).await?;
     let resolved = resolve_tag(pool, raw_context_tag).await?;
-    if let Some(tag) = &resolved {
-        store::set_context_tag(pool, id, tag).await?;
-    }
+    let id = store::insert(pool, raw_text, source, resolved.as_deref(), created_at_ms).await?;
     Ok((id, resolved))
 }
 
@@ -89,6 +92,7 @@ pub(crate) async fn distinct_tags(pool: &SqlitePool) -> Result<Vec<String>, sqlx
 mod tests {
     use super::*;
     use crate::platform::test_support::test_pool;
+    use proptest::prelude::*;
 
     async fn stored_tag(pool: &SqlitePool, id: i64) -> Option<String> {
         sqlx::query_scalar("SELECT context_tag FROM captures WHERE id = ?")
@@ -173,5 +177,95 @@ mod tests {
         retag(&pool, id, None).await.unwrap();
 
         assert_eq!(stored_tag(&pool, id).await.as_deref(), Some("@homedepot"));
+    }
+
+    /// Spellings that collide case-insensitively, padded with whitespace --
+    /// so "same tag, typed differently" is the common case rather than a
+    /// rare one, which is the whole thing this property is about.
+    ///
+    /// **ASCII on purpose.** SQLite's `NOCASE` folds `A-Z` and nothing else,
+    /// so `@CAFÉ` and `@café` are two tags, not one. That is the same
+    /// limitation `life_areas.name UNIQUE COLLATE NOCASE` already carries
+    /// and `life_area.rs` already documents ("if the rule ever outgrows what
+    /// a collation can express -- Unicode folding, say -- it comes back
+    /// here"). Generating non-ASCII here would assert a claim the schema
+    /// does not make.
+    fn any_submission() -> impl Strategy<Value = (String, String)> {
+        let tag = prop_oneof![
+            Just("@homedepot"),
+            Just("@HomeDepot"),
+            Just("@HOMEDEPOT"),
+            Just("@supermarket"),
+            Just("@SuperMarket"),
+        ];
+        let pad = prop_oneof![Just(""), Just(" "), Just("\t"), Just("  ")];
+        (tag, pad.clone(), pad, "[a-z ]{1,12}")
+            .prop_map(|(tag, before, after, text)| (text, format!("{before}{tag}{after}")))
+    }
+
+    fn class_of(raw: &str) -> String {
+        raw.trim().to_lowercase()
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig { cases: 48, ..ProptestConfig::default() })]
+
+        /// **One tag, spelled the way it was first typed** -- the claim
+        /// `context-tags-case-is-one-tag-06` makes about one pair of
+        /// spellings, over arbitrary sequences of them.
+        ///
+        /// Three things at once, because they are the same fact seen from
+        /// three sides: every capture stores the *first* spelling of its
+        /// case-insensitive class rather than the one just submitted;
+        /// [`distinct_tags`] reports exactly one entry per class, in
+        /// first-use order; and nothing a caller can type is refused by
+        /// migration `0010`'s `CHECK`, which is what ties
+        /// `context_tag::normalize`'s postcondition to the column that
+        /// depends on it -- the pure crate has no database to assert that
+        /// against itself.
+        #[test]
+        #[ignore]
+        fn a_tag_is_stored_as_the_spelling_it_was_first_given(
+            submissions in prop::collection::vec(any_submission(), 1..6),
+        ) {
+            let rt = tokio::runtime::Runtime::new().unwrap();
+            let (stored, listed, expected_first, expected_distinct) = rt.block_on(async {
+                let (_dir, pool) = test_pool().await;
+
+                let mut expected_first: Vec<String> = Vec::new();
+                let mut first_by_class: Vec<(String, String)> = Vec::new();
+                let mut stored: Vec<Option<String>> = Vec::new();
+
+                for (text, raw_tag) in &submissions {
+                    let class = class_of(raw_tag);
+                    let first = match first_by_class.iter().find(|(c, _)| *c == class) {
+                        Some((_, spelling)) => spelling.clone(),
+                        None => {
+                            let spelling = raw_tag.trim().to_string();
+                            first_by_class.push((class, spelling.clone()));
+                            spelling
+                        }
+                    };
+                    expected_first.push(first);
+
+                    let (id, _) = create(&pool, text, "web", Some(raw_tag), 0)
+                        .await
+                        .expect("the column CHECK must accept every resolved tag");
+                    stored.push(stored_tag(&pool, id).await);
+                }
+
+                let listed = distinct_tags(&pool).await.unwrap();
+                let expected_distinct: Vec<String> =
+                    first_by_class.into_iter().map(|(_, s)| s).collect();
+                (stored, listed, expected_first, expected_distinct)
+            });
+
+            let stored: Vec<String> = stored
+                .into_iter()
+                .map(|tag| tag.expect("every submission named a tag"))
+                .collect();
+            prop_assert_eq!(stored, expected_first);
+            prop_assert_eq!(listed, expected_distinct);
+        }
     }
 }

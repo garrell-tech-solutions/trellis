@@ -128,10 +128,12 @@ mod tests {
     #[tokio::test]
     async fn an_error_attaches_only_to_the_capture_that_failed_triage() {
         let (_dir, pool) = test_pool().await;
-        let failed_id = insert_capture(&pool, "call the dentist", "web", 0)
+        let failed_id = insert_capture(&pool, "call the dentist", "web", None, 0)
             .await
             .unwrap();
-        let other_id = insert_capture(&pool, "buy milk", "web", 1).await.unwrap();
+        let other_id = insert_capture(&pool, "buy milk", "web", None, 1)
+            .await
+            .unwrap();
 
         let lists = build_lists(&pool, Some((failed_id, "deadline is required".to_string())))
             .await
@@ -146,7 +148,9 @@ mod tests {
     #[tokio::test]
     async fn the_task_list_carries_each_triaged_tasks_kind_and_capture_text() {
         let (_dir, pool) = test_pool().await;
-        let capture_id = insert_capture(&pool, "buy milk", "web", 0).await.unwrap();
+        let capture_id = insert_capture(&pool, "buy milk", "web", None, 0)
+            .await
+            .unwrap();
         crate::triage::store::insert_task(&pool, capture_id, &TaskKind::Pool, None, 0)
             .await
             .unwrap();

@@ -109,7 +109,7 @@ mod tests {
     /// writer rather than retyping its `INSERT` here: a fixture that spells
     /// out another module's SQL is a second copy of that schema.
     async fn given_a_capture(pool: &SqlitePool, raw_text: &str) -> i64 {
-        crate::capture::store::insert(pool, raw_text, "web", 0)
+        crate::capture::store::insert(pool, raw_text, "web", None, 0)
             .await
             .unwrap()
     }
@@ -129,7 +129,7 @@ mod tests {
     async fn list_untriaged_reports_a_captures_own_context_tag() {
         let (_dir, pool) = test_pool().await;
         let id = given_a_capture(&pool, "buy screws").await;
-        crate::capture::store::set_context_tag(&pool, id, "@homedepot")
+        crate::capture::retag(&pool, id, Some("@homedepot"))
             .await
             .unwrap();
 
@@ -277,7 +277,7 @@ mod tests {
     async fn list_tasks_reports_the_tag_of_the_capture_a_task_came_from() {
         let (_dir, pool) = test_pool().await;
         let capture_id = given_a_capture(&pool, "buy screws").await;
-        crate::capture::store::set_context_tag(&pool, capture_id, "@homedepot")
+        crate::capture::retag(&pool, capture_id, Some("@homedepot"))
             .await
             .unwrap();
         insert_task(&pool, capture_id, &TaskKind::Pool, None, 0)

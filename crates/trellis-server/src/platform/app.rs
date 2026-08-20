@@ -243,7 +243,7 @@ mod tests {
             let rt = tokio::runtime::Runtime::new().unwrap();
             let (statuses, first_stamp, final_stamp, tasks, rows) = rt.block_on(async {
                 let (_dir, pool) = test_pool().await;
-                let capture_id = crate::capture::store::insert(&pool, "buy milk", "web", 0)
+                let capture_id = crate::capture::store::insert(&pool, "buy milk", "web", None, 0)
                     .await
                     .unwrap();
 

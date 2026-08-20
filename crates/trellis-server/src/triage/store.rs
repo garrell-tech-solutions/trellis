@@ -60,7 +60,7 @@ mod tests {
     /// writer rather than retyping its `INSERT` here: a fixture that spells
     /// out another module's SQL is a second copy of that schema.
     async fn given_a_capture(pool: &SqlitePool, raw_text: &str) -> i64 {
-        crate::capture::store::insert(pool, raw_text, "web", 0)
+        crate::capture::store::insert(pool, raw_text, "web", None, 0)
             .await
             .unwrap()
     }

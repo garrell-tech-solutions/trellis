@@ -593,7 +593,7 @@ mod tests {
     async fn triaging_with_no_context_tag_leaves_an_existing_one_untouched() {
         let (_dir, pool) = test_pool().await;
         let capture_id = insert_untriaged_capture(&pool, "buy screws").await;
-        crate::capture::store::set_context_tag(&pool, capture_id, "@homedepot")
+        crate::capture::retag(&pool, capture_id, Some("@homedepot"))
             .await
             .unwrap();
 

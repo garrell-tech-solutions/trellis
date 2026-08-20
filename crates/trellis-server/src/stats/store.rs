@@ -46,7 +46,7 @@ mod tests {
     use scheduler_core::task::TaskKind;
 
     async fn given_a_capture(pool: &SqlitePool) -> i64 {
-        crate::capture::store::insert(pool, "buy milk", "web", 0)
+        crate::capture::store::insert(pool, "buy milk", "web", None, 0)
             .await
             .unwrap()
     }

@@ -89,22 +89,28 @@ async fn dispatch_tagged_capture_waiting(
     given_tagged_capture_waiting(world, &raw_text, &tag).await
 }
 
+/// Seeds a tagged capture the way the owner makes one -- through the
+/// quick-add box, over HTTP.
+///
+/// It was a hand-written `INSERT` plus a reach into
+/// `trellis_server::capture::store`, which is two of the things this suite
+/// exists not to do: the `INSERT` was a second copy of the `captures`
+/// schema that named neither `context_tag` nor a real `created_at_ms`, and
+/// the write bypassed the tag-resolution front door, so a fixture could
+/// store a tag no real submission could produce. [`quick_add`] is the same
+/// request the Demo's step 1 makes.
 async fn given_tagged_capture_waiting(
     world: &mut World,
     raw_text: &str,
     tag: &str,
 ) -> Result<(), String> {
-    let pool = world.pool()?;
-    let id: i64 = sqlx::query_scalar(
-        "INSERT INTO captures (raw_text, source, created_at_ms) VALUES (?, 'web', 0) RETURNING id",
-    )
-    .bind(raw_text)
-    .fetch_one(pool)
-    .await
-    .map_err(|e| format!("insert capture: {e}"))?;
-    trellis_server::capture::store::set_context_tag(pool, id, tag)
-        .await
-        .map_err(|e| format!("set context tag: {e}"))?;
+    quick_add(world, raw_text, Some(tag)).await?;
+    let id: i64 =
+        sqlx::query_scalar("SELECT id FROM captures WHERE raw_text = ? ORDER BY id DESC LIMIT 1")
+            .bind(raw_text)
+            .fetch_one(world.pool()?)
+            .await
+            .map_err(|e| format!("read back the capture just added: {e}"))?;
     world.last_capture_id = Some(id);
     Ok(())
 }

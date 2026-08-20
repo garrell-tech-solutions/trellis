@@ -104,7 +104,7 @@ mod tests {
         crate::life_areas::store::insert_guardrail_band(pool, work, "Mon", 540, 1020)
             .await
             .unwrap();
-        let capture_id = crate::capture::store::insert(pool, raw_text, "web", 0)
+        let capture_id = crate::capture::store::insert(pool, raw_text, "web", None, 0)
             .await
             .unwrap();
         crate::triage::store::insert_task(
@@ -145,7 +145,7 @@ mod tests {
         crate::life_areas::store::insert_guardrail_band(&pool, work, "Mon", 540, 660)
             .await
             .unwrap();
-        let capture_id = crate::capture::store::insert(&pool, "rebuild the deck", "web", 0)
+        let capture_id = crate::capture::store::insert(&pool, "rebuild the deck", "web", None, 0)
             .await
             .unwrap();
         crate::triage::store::insert_task(

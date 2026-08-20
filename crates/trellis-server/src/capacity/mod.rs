@@ -122,7 +122,7 @@ mod tests {
     use scheduler_core::task::{DeadlineType, Priority, TaskKind};
 
     async fn given_a_committed_task(pool: &SqlitePool, life_area_id: i64, estimated_minutes: i64) {
-        let capture_id = crate::capture::store::insert(pool, "buy milk", "web", 0)
+        let capture_id = crate::capture::store::insert(pool, "buy milk", "web", None, 0)
             .await
             .unwrap();
         crate::triage::store::insert_task(
@@ -191,7 +191,7 @@ mod tests {
         let (_dir, pool) = test_pool().await;
         let fitness = fitness_with_a_saturday_band(&pool).await;
         given_a_committed_task(&pool, fitness, 180).await;
-        let capture_id = crate::capture::store::insert(&pool, "run", "web", 0)
+        let capture_id = crate::capture::store::insert(&pool, "run", "web", None, 0)
             .await
             .unwrap();
         crate::triage::store::insert_task(
@@ -251,7 +251,7 @@ mod tests {
     async fn an_unestimated_committed_task_is_not_counted_as_zero_but_is_surfaced() {
         let (_dir, pool) = test_pool().await;
         let fitness = fitness_with_a_saturday_band(&pool).await;
-        let capture_id = crate::capture::store::insert(&pool, "buy milk", "web", 0)
+        let capture_id = crate::capture::store::insert(&pool, "buy milk", "web", None, 0)
             .await
             .unwrap();
         // Bypasses the triage boundary: the only way an unestimated

@@ -2,10 +2,10 @@
 //! to itself and to its siblings looks like (`T-nav-is-the-site-map`, the
 //! header is the route table).
 //!
-//! Two pages today — Capture and Pool (#92) — not the four the design draws.
-//! `Quota` and `Committed` arrive with their own slices; **a dead link is
-//! worse than no link**, so [`ALL`] names only what [`platform::app`] can
-//! actually route to.
+//! Three pages today — Capture, Pool (#92) and Committed (#94) — not the
+//! four the design draws. `Quota` arrives with its own slice; **a dead link
+//! is worse than no link**, so [`ALL`] names only what [`platform::app`]
+//! can actually route to.
 
 /// A page the header can link to. Add a variant only alongside the route
 /// it names — [`ALL`] and [`links`] are what keep the header from ever
@@ -14,16 +14,18 @@
 pub(crate) enum Page {
     Capture,
     Pool,
+    Committed,
 }
 
 /// Every page that exists, in the order the header lists them.
-pub(crate) const ALL: [Page; 2] = [Page::Capture, Page::Pool];
+pub(crate) const ALL: [Page; 3] = [Page::Capture, Page::Pool, Page::Committed];
 
 impl Page {
     fn label(self) -> &'static str {
         match self {
             Page::Capture => "Capture",
             Page::Pool => "Pool",
+            Page::Committed => "Committed",
         }
     }
 
@@ -31,6 +33,7 @@ impl Page {
         match self {
             Page::Capture => "/",
             Page::Pool => "/pool",
+            Page::Committed => "/committed",
         }
     }
 }
@@ -64,7 +67,7 @@ mod tests {
         let links = links(Page::Capture);
         assert_eq!(
             links.iter().map(|l| l.label).collect::<Vec<_>>(),
-            vec!["Capture", "Pool"]
+            vec!["Capture", "Pool", "Committed"]
         );
     }
 
@@ -82,6 +85,6 @@ mod tests {
     #[test]
     fn each_pages_own_path_is_distinct() {
         let paths: Vec<&str> = ALL.iter().map(|p| p.path()).collect();
-        assert_eq!(paths, vec!["/", "/pool"]);
+        assert_eq!(paths, vec!["/", "/pool", "/committed"]);
     }
 }

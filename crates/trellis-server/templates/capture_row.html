@@ -11,10 +11,10 @@
 <form class="fields" hx-post="/captures/{{ capture.id }}/triage" hx-target="#lists" hx-swap="outerHTML">
 <input type="hidden" name="kind" value="committed">
 <label>Deadline <input type="text" name="deadline" placeholder="2026-08-20T17:00:00Z"></label>
-<label>Type
-<select name="deadline_type">
-<option value="hard">hard</option>
-<option value="soft">soft</option>
+<label>Commitment
+<select name="commitment">
+<option value="at">at</option>
+<option value="by">by</option>
 </select>
 </label>
 <label>Priority

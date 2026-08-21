@@ -1,5 +1,5 @@
 # acceptance-mutation-manifest-begin
-# {"version":1,"tested_at":"2026-08-21T18:37:04.074780662Z","feature_name":"Trellis serves the routes it has, and only those","feature_path":"features/one_screen.feature","background_hash":"304f93e93e2b217b49069c091950b87589f0c7e789e2d0dc3aaa8d845450cb64","implementation_hash":"sha256:02c1891a283a6864d735106fede1e4b2804093516cb75878c182196d2873b1aa","scenarios":[]}
+# {"version":1,"tested_at":"2026-08-21T21:20:12.472120251Z","feature_name":"Trellis serves the routes it has, and only those","feature_path":"features/one_screen.feature","background_hash":"304f93e93e2b217b49069c091950b87589f0c7e789e2d0dc3aaa8d845450cb64","implementation_hash":"sha256:02c1891a283a6864d735106fede1e4b2804093516cb75878c182196d2873b1aa","scenarios":[]}
 # acceptance-mutation-manifest-end
 
 # one-screen-routes-01: a route the product has answers; every route the demolition removed is gone
@@ -11,8 +11,8 @@
 # rather than lapsed. #70's inversion still applies: if this feature had NOT
 # needed changing, the second screen shipped with no way to reach it.
 #
-# #88 removed five routes and the six modules behind them; #92 added /pool,
-# the first Menu tab.
+# #88 removed five routes and the six modules behind them; #92 added /pool and #94
+# /committed, the first two Menu tabs.
 #
 # THE `path` COLUMN IS FALSIFIABLE NOW, and it was not before. When every row
 # expected 404, mutating /stats to /statX still 404d -- nine mutants survived
@@ -54,6 +54,7 @@ Feature: Trellis serves the routes it has, and only those
       | path        | status |
       | /           | 200    |
       | /pool       | 200    |
+      | /committed  | 200    |
       | /stats      | 404    |
       | /life-areas | 404    |
       | /capacity   | 404    |

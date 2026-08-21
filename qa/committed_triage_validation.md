@@ -1,4 +1,11 @@
-# QA Procedure: Committed triage requires deadline, deadline type, priority and an estimate
+# QA Procedure: Committed triage requires deadline, commitment, priority and an estimate
+
+> **`commitment` replaced `deadline_type` on the committed form in #94.** A
+> committed item is an **at** (a fixed block) or a **by** (a deadline with
+> slack) — `D-committed-is-at-or-by`. `deadline_type`'s only behaviour lived
+> in the scheduler `D-dogfood-first` paused, so it changed nothing while
+> costing a field. **The column is still in the schema and still
+> domain-validated when sent; it is simply no longer asked for or read.**
 
 Covers: `features/committed_triage_validation.feature`
 
@@ -24,7 +31,7 @@ submission:
 | missing_field |
 |---------------|
 | deadline      |
-| deadline_type |
+| commitment    |
 | priority      |
 
 For each row:
@@ -54,7 +61,7 @@ committed submission:
 | empty_field   |
 |---------------|
 | deadline      |
-| deadline_type |
+| commitment    |
 | priority      |
 
 For each row:

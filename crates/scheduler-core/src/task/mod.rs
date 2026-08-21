@@ -11,7 +11,7 @@
 
 mod fields;
 
-pub use fields::{DeadlineType, Field, Period, Priority};
+pub use fields::{Commitment, DeadlineType, Field, Period, Priority};
 
 /// The stored discriminant for each kind. These three strings are the durable
 /// contract shared by the `tasks.kind` column and every delivery mechanism.
@@ -30,7 +30,7 @@ pub const QUOTA: &str = "quota";
 pub struct TriageFields {
     pub kind: Option<String>,
     pub deadline: Option<String>,
-    pub deadline_type: Option<String>,
+    pub commitment: Option<String>,
     pub priority: Option<String>,
     pub target_count: Option<i64>,
     pub target_minutes_each: Option<i64>,
@@ -72,7 +72,7 @@ pub enum TaskKind {
     Pool,
     Committed {
         deadline: i64,
-        deadline_type: DeadlineType,
+        commitment: Commitment,
         priority: Priority,
         /// Required at triage (#62): capacity cannot report what a
         /// committed task asks for if it carries no minutes. A stored task
@@ -103,7 +103,7 @@ pub enum TaskKind {
 pub struct TaskAttributes {
     pub kind: &'static str,
     pub deadline: Option<i64>,
-    pub deadline_type: Option<&'static str>,
+    pub commitment: Option<&'static str>,
     pub priority: Option<&'static str>,
     pub estimated_minutes: Option<i64>,
     pub target_count: Option<i64>,
@@ -149,38 +149,38 @@ impl TaskKind {
     /// Required fields are checked before values, and in a fixed order, so a
     /// submission with several problems names the same one every time.
     fn committed_from(fields: &TriageFields) -> Result<Self, TriageRejection> {
-        let (deadline, deadline_type, priority, estimated_minutes) =
+        let (deadline, commitment, priority, estimated_minutes) =
             Self::require_committed_fields(fields)?;
-        Self::parse_committed_fields(deadline, deadline_type, priority, estimated_minutes)
+        Self::parse_committed_fields(deadline, commitment, priority, estimated_minutes)
     }
 
     fn require_committed_fields(
         fields: &TriageFields,
     ) -> Result<(String, String, String, i64), TriageRejection> {
         let deadline = require(Field::Deadline, &fields.deadline)?;
-        let deadline_type = require(Field::DeadlineType, &fields.deadline_type)?;
+        let commitment = require(Field::Commitment, &fields.commitment)?;
         let priority = require(Field::Priority, &fields.priority)?;
         let estimated_minutes = require_i64(Field::EstimatedMinutes, fields.estimated_minutes)?;
-        Ok((deadline, deadline_type, priority, estimated_minutes))
+        Ok((deadline, commitment, priority, estimated_minutes))
     }
 
     fn parse_committed_fields(
         deadline: String,
-        deadline_type: String,
+        commitment: String,
         priority: String,
         estimated_minutes: i64,
     ) -> Result<Self, TriageRejection> {
         let deadline = fields::parse_deadline_ms(&deadline)
             .ok_or(TriageRejection::InvalidField(Field::Deadline))?;
-        let deadline_type = DeadlineType::parse(&deadline_type)
-            .ok_or(TriageRejection::InvalidField(Field::DeadlineType))?;
+        let commitment = Commitment::parse(&commitment)
+            .ok_or(TriageRejection::InvalidField(Field::Commitment))?;
         let priority =
             Priority::parse(&priority).ok_or(TriageRejection::InvalidField(Field::Priority))?;
         let estimated_minutes = require_positive(Field::EstimatedMinutes, estimated_minutes)?;
 
         Ok(Self::Committed {
             deadline,
-            deadline_type,
+            commitment,
             priority,
             estimated_minutes,
         })
@@ -223,13 +223,13 @@ impl TaskKind {
             },
             Self::Committed {
                 deadline,
-                deadline_type,
+                commitment,
                 priority,
                 estimated_minutes,
             } => TaskAttributes {
                 kind: COMMITTED,
                 deadline: Some(*deadline),
-                deadline_type: Some(deadline_type.as_str()),
+                commitment: Some(commitment.as_str()),
                 priority: Some(priority.as_str()),
                 estimated_minutes: Some(*estimated_minutes),
                 ..TaskAttributes::default()
@@ -284,7 +284,7 @@ mod tests {
         TriageFields {
             kind: Some(COMMITTED.to_string()),
             deadline: Some("2026-08-20T17:00:00Z".to_string()),
-            deadline_type: Some("hard".to_string()),
+            commitment: Some("at".to_string()),
             priority: Some("P1".to_string()),
             estimated_minutes: Some(180),
             ..TriageFields::default()
@@ -297,7 +297,7 @@ mod tests {
             TaskKind::from_fields(&committed_fields()),
             Ok(TaskKind::Committed {
                 deadline: 1787245200000,
-                deadline_type: DeadlineType::Hard,
+                commitment: Commitment::At,
                 priority: Priority::P1,
                 estimated_minutes: 180,
             })
@@ -312,7 +312,7 @@ mod tests {
             TaskAttributes {
                 kind: COMMITTED,
                 deadline: Some(1787245200000),
-                deadline_type: Some("hard"),
+                commitment: Some("at"),
                 priority: Some("P1"),
                 estimated_minutes: Some(180),
                 ..TaskAttributes::default()
@@ -371,12 +371,12 @@ mod tests {
     }
 
     #[test]
-    fn committed_fields_without_a_deadline_type_are_rejected_as_missing() {
+    fn committed_fields_without_a_commitment_are_rejected_as_missing() {
         let mut fields = committed_fields();
-        fields.deadline_type = None;
+        fields.commitment = None;
         assert_eq!(
             TaskKind::from_fields(&fields),
-            Err(TriageRejection::MissingField(Field::DeadlineType))
+            Err(TriageRejection::MissingField(Field::Commitment))
         );
     }
 
@@ -412,12 +412,12 @@ mod tests {
     }
 
     #[test]
-    fn committed_fields_with_an_invalid_deadline_type_are_rejected_naming_it_invalid() {
+    fn committed_fields_with_an_invalid_commitment_are_rejected_naming_it_invalid() {
         let mut fields = committed_fields();
-        fields.deadline_type = Some("squishy".to_string());
+        fields.commitment = Some("hard".to_string());
         assert_eq!(
             TaskKind::from_fields(&fields),
-            Err(TriageRejection::InvalidField(Field::DeadlineType))
+            Err(TriageRejection::InvalidField(Field::Commitment))
         );
     }
 

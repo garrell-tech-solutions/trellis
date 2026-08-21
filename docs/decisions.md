@@ -129,6 +129,7 @@ O4 → #40 · O5 → #41 · O6 → #36. Issue #1 is titled `OQ2`; same question.
 | D-staleness-unset | Staleness threshold is deliberately unset; instrument first, tune at the first monthly reckoning. Per-domain config. | The pool's turnover rate is unknown until the system runs. Seeded at 21 days / ≥3 offers. |
 | D-quota-no-rollover | An unmet quota does **not** roll over. A missed week is missed. | Carrying it forward re-creates exactly the accumulating phantom obligation that D-silence-means-done (silence-means-done) exists to prevent. "You did 1 of 3 runs last week" is a reckoning fact, not a debt. Paired with T-three-task-kinds. |
 | D-visible-slices | **Every pipeline slice ends in something the user can run and see.** A slice is not done when its tests pass; it is done when the owner can start the app and watch the new behaviour happen. A slice with no visible surface carries the thinnest surface that exposes it. Size does not matter — smaller is better. | This is the owner's professional standard with their own clients, not a preference about this project: continuous visible delivery is the customer's best case, and building for fifteen slices before the customer can try anything is the failure mode it exists to prevent. Three things it buys, all of which the plan was otherwise deferring. **Feedback:** #20's risk register (R-guardrail-override/R-browsable-archive/R-pool-on-calendar) names three assumptions that are all behavioural — silence-means-done, the ~40% committed ratio, whether the menu beats a list. None can be tested by building a correct scheduler; they need the owner living with the thing, so calendar time is the scarce resource, not engineering time. #9's AC-6 already conceded this by requiring `/stats` live "weeks before it is read". **Clear thinking:** a working system is a better argument about what to build next than a roadmap is. **Value:** the product is useful as an inbox long before it is useful as a scheduler. Cost, accepted knowingly: some slices grow a surface they would not otherwise need, and early surfaces are plain and will be reworked. Rejected alternative: keep the horizontal milestone cut and add UI at the end — that is precisely the fifteen-slice wait, and it defers every behavioural risk to the point where acting on what is learned is most expensive. |
+| T-commitment-is-chosen-not-derived | **Whether a committed item is an *at* or a *by* is chosen explicitly at triage, never inferred from whether a time was typed.** `deadline_type` is renamed **`commitment`**, taken off the triage form and left in the schema unread. On screen a *by* carries a `BY` prefix in the same cell an *at* fills with its time. **A past item still shows, marked, and first.** | Settled inside `committed-screen` (#94), resolving the disagreement `D-four-screens` predicted: `D-committed-is-at-or-by` says the two *"display differently and behave differently"*, and **the canvas draws no distinction at all** — no badge, no second column, and the string `"at"` appears nowhere as a concept. Canvas authoritative on layout, log on behaviour, so the distinction stood and its drawing was ours. **Deriving it from the presence of a time was the obvious shortcut and is wrong**, for one reason worth keeping: it **cannot express a hard *by*** — *"the tax return, by 5pm on Jan 31, and that one cannot slip"* — a real commitment that would have been **silently unrepresentable**, which is the failure mode `T-unknown-kind-rejected` and `T-period-closed-set` were each written against. A *by* with a time is legal and must stay a *by*. **`deadline_type` came off the form because it had gone back to changing nothing**: its only behaviour was `T-hard-refuses-soft-slips`', which lives in the scheduler `D-dogfood-first` paused — the exact state U2 complained of before that decision fixed it. It stays in the schema on #88's ground, and the distinction from `scheduler_core::ratio` is the useful part: **a derivable number is recoverable from rows that stayed; a hard/soft judgement the owner typed is not.** When the scheduler returns, an *at* is hard and a *by* is soft — derived, not typed twice. **Past items showing is not a display choice but a trust one**: a commitments screen that silently drops what you missed is the one failure it cannot have, in a product whose whole value is that the owner trusts what it shows — and it falls out of chronological order with no special casing. **`ord` is not built.** The canvas sorts by it, but its only derivation anywhere gives an untimed item `ord: 99` to sort it last, and Trellis requires a deadline at committed triage, so chronological is total. The fixture's `ord` agreeing with date order was **coincidence**, which is precisely what made it look like a separate concept. |
 | D-committed-is-at-or-by | **A committed item is either an *at* or a *by*.** **At** is a fixed block — *2pm dentist* — placed where it says. **By** is a deadline with slack before it. They display differently and behave differently. | Settled by the owner 2026-08-20. The current model gives every committed task a `deadline` plus a `deadline_type` of `hard \| soft`, which asks *may this slip* and never asks *is this a time or a limit*. **Those are different questions and only the second one matters without a scheduler**: a dentist appointment is not a deadline that happens to be tight — nothing may be scheduled around it because it is not schedulable at all. **A *by* is precisely what a scheduler would later have slack to place into**, which is why this distinction is the one that survives the solver being deferred: it marks exactly which items automatic placement would have something to do with. That makes it evidence for `D-dogfood-first`'s bar rather than a workaround for the missing scheduler. |
 | D-quotas-are-selected-not-typed | **A quota is chosen from a small set of chips, never typed.** Creating one is a deliberate control requiring a **name and a weekly hour target**, and can be done **directly from the Menu** without a capture. **A mistyped name must not be able to create a quota.** Two first-class shapes: **item-bearing** (specific things to get through) and **pure-hours** (piano practice — no items, ever). Expanding an item-bearing quota shows its items; expanding a pure-hours quota shows **this week's individual sessions**, each editable and deletable. | Settled by the owner 2026-08-20. **The asymmetry with `D-context-tags-are-the-taxonomy` is the point and is not an inconsistency.** Context tags are free text because a typo costs one badly-grouped item; a quota carries a **weekly hour target and a running total**, so a typo does not mis-file an item — it **creates a second quota** that silently splits the week's hours across two counters and makes both wrong. A set of three to five is small enough to pick from and large enough to matter. **Pure-hours quotas are first-class rather than item-bearing quotas with no items**, because *"practice piano four hours a week"* has no completable objects and never will — modelling it as an empty list makes the natural view (this week's sessions) the exception rather than the shape. |
 | D-logging-is-retrospective-and-separate | **Logging hours is independent of completing items.** Quick taps for **+30m** and **+1h**, plus arbitrary duration entry. Completing an item **may offer** to log time and **never does it silently**. **No start/stop timer — all logging is retrospective.** **Counters reset Monday; shortfalls never carry forward**, and **the editable target is the intended response to a persistent shortfall.** | Settled by the owner 2026-08-20, extending `D-quota-no-rollover` from *"an unmet quota does not roll over"* to the mechanism that makes it true weekly. **Separating logging from completion is the load-bearing half:** an hour spent on a quota is a fact about the week; finishing an item is a fact about the item; and inferring either from the other produces a number the owner stops trusting — which is the same failure `T-capacity-never-under-reports-demand` guarded against on the demand side. **No timer, because a timer makes the tool something you must remember to start**, and an unstarted timer silently reports zero — inaction producing a false number rather than a missing one, which inverts `D-inaction-archives`. Retrospective entry can be wrong but is never wrong *by omission*. **A persistent shortfall is answered by editing the target, not by carrying debt**: *"you did 1 of 3 last week"* is a reckoning fact (`D-quota-no-rollover`), and if it is true every week the target was wrong, not the week. |
@@ -2090,3 +2091,61 @@ working: its `path` column is falsifiable at last (#90's deferred fix), and its
 no-header scenario is **gone rather than inverted**, the guarantee moving to
 `pool-screen-tabs-08`, which asserts what the header holds rather than that it
 is absent.
+
+### 2026-08-21 — committed-screen (#94, PR #100): three of four screens
+
+Recorded as `T-commitment-is-chosen-not-derived`. **Capture, Pool and Committed
+exist. Only Quota (#93) remains of `D-four-screens`.**
+
+**The disagreement `D-four-screens` was written to handle actually arrived, and
+the protocol worked.** `D-committed-is-at-or-by` says an *at* and a *by*
+*"display differently and behave differently"*; the canvas draws no distinction
+whatsoever. Canvas authoritative on **layout**, this file on **behaviour** — so
+the distinction stood, the drawing of it was the slice's to invent, and it was
+**raised rather than resolved quietly**. That is the second time the rule has
+paid (the first was #92 refusing the places-vs-sittings taxonomy).
+
+**Deriving at/by from whether a time was typed was the obvious shortcut and is
+wrong**, for a reason worth keeping: it **cannot express a hard *by*** — *"by
+5pm on Jan 31, and that one cannot slip"* — which would have been **silently
+unrepresentable**. Same failure `T-unknown-kind-rejected` and
+`T-period-closed-set` were each written against, arriving as a *missing
+combination* rather than an unvalidated string.
+
+**Two process findings, and one is about this role.**
+
+**A slice arrived with a failing CI gate, and the claim outran it.** The
+implementation commit said five gates passed where four did —
+`complexity-baseline.json` was never updated, so `complexity_baseline` failed on
+a clean checkout of the handed-off commit. The architect verified by stashing
+and re-running, then **fixed it by review rather than by bumping**: all four
+movements are new one-line dispatch arms, not conditionals sneaking into a
+match, which is the distinction `T-complexity-8` is actually about. That is the
+gate working and the *verification claim* failing — a shape this file has met
+before, on 2026-08-13, where a version note claimed *"verified identical before
+and after"* while a count had gone 1 → 3.
+
+**`git fetch` updates `origin/trunk`, not the local branch named `trunk` — and
+the local branch only advances when the PM fast-forwards it in the main
+checkout, never when a pull request merges on GitHub.** The specifier nearly cut
+#94's pull request from a base two merges stale, and caught it. **This is
+partly the PM's doing**: every brief's first gotcha reads *"merge `trunk` before
+your final measurement"*, and the trap is that **the branch named `trunk`
+locally is not the thing that word means in that sentence.** Briefs should say
+`origin/trunk` explicitly. Confirmed live while writing this entry — local
+`trunk` was at `c4102a8` while `origin/trunk` was two merges ahead.
+
+**Raised, not fixed, and already filed:** past deadlines stay on the Committed
+screen forever, because nothing in Trellis can mark a task done (**#97**). The
+Committed tab is where that becomes visible daily, and it will fill with history
+across the fortnight of dogfooding.
+
+**Still unverified, for the third phone-first screen running:** the layout.
+`BY THU 17:00` is the longest string the 66px `tabular-nums` cell must hold and
+the likeliest to clip, and **nobody has seen it.** The owner has since chosen a
+live per-branch preview instance as the fix.
+
+**Measured:** 16 acceptance features, `cargo test --workspace` and the property
+suite green, mutation-clean, **no reorder control in any template** — the canvas
+draws arrows on this screen too, and `pool-screen-nothing-reorders-05` is the
+only thing standing between the design and a feature nobody approved.

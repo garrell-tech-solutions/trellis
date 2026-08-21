@@ -1,5 +1,10 @@
 # QA Procedure: Committed triage validates the values of deadline, deadline type and priority
 
+> **#94 note.** `deadline_type` left the committed *form* and is no longer
+> required, but it is **still domain-validated when a submission carries it**
+> — which is what the deadline-type procedure below exercises. Send it
+> explicitly; the form will not.
+
 Covers: `features/committed_field_domains.feature`
 
 ## Interface used
@@ -30,7 +35,7 @@ the instant it names, as milliseconds since the Unix epoch:
 For each row:
 
 1. Triage the capture as kind `committed`, supplying the row's
-   `submitted_deadline` and a valid `deadline_type`/`priority`.
+   `submitted_deadline`, a valid `commitment`, and a valid `priority`.
 2. Observe the response status.
 3. Query the `deadline` column of the resulting task row directly (it is
    stored as milliseconds since the epoch, not as the submitted text).
@@ -56,7 +61,7 @@ Example rows — a `deadline` value that does not parse to a real instant:
 For each row:
 
 1. Triage the capture as kind `committed`, supplying the row's `bad_deadline`
-   and a valid `deadline_type`/`priority`.
+   and a valid `commitment`/`priority`.
 2. Observe the response status and body.
 3. Query the tasks table and count its rows.
 4. Re-read the untriaged queue.

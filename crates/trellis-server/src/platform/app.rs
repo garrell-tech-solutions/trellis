@@ -17,6 +17,7 @@ use axum::Router;
 use sqlx::SqlitePool;
 
 use crate::capture::http::create_capture;
+use crate::committed::http::show_committed;
 use crate::dismiss::http::dismiss_capture;
 use crate::inbox::http::show_inbox;
 use crate::platform::assets::{htmx_js, space_grotesk_woff2, trellis_css};
@@ -60,6 +61,7 @@ pub fn build_app(pool: SqlitePool, clock: Clock) -> Router {
         .route("/captures/{id}/dismiss", post(dismiss_capture))
         .route("/timezone", post(set_timezone))
         .route("/pool", get(show_pool))
+        .route("/committed", get(show_committed))
         .with_state(AppState { pool, clock })
 }
 

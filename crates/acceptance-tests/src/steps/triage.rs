@@ -6,6 +6,8 @@ use serde_json::{json, Value};
 static GIVEN_EMPTY_TASK_LIST: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"^the trellis server is running with an empty task list$").unwrap()
 });
+static GIVEN_SERVER_BELIEVES_IT_IS: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r#"^the server believes it is "([^"]+)"$"#).unwrap());
 static GIVEN_CAPTURE_WAITING: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r#"^a capture with raw text "([^"]+)" is waiting in the untriaged queue$"#).unwrap()
 });
@@ -59,6 +61,9 @@ pub async fn dispatch(
 ) -> Option<Result<(), String>> {
     if GIVEN_EMPTY_TASK_LIST.is_match(text) {
         return Some(given_empty_task_list(world).await);
+    }
+    if let Some(caps) = GIVEN_SERVER_BELIEVES_IT_IS.captures(text) {
+        return Some(given_server_believes_it_is(world, &caps[1]));
     }
     if let Some(caps) = GIVEN_CAPTURE_WAITING.captures(text) {
         return Some(given_capture_waiting(world, &caps[1]).await);
@@ -119,13 +124,13 @@ async fn dispatch_triaged_as_committed(
     example: &BTreeMap<String, String>,
     caps: &regex::Captures<'_>,
 ) -> Result<(), String> {
-    let deadline_type = example_value(example, &caps[1])?;
+    let commitment = example_value(example, &caps[1])?;
     let deadline = example_value(example, &caps[2])?;
     let priority = example_value(example, &caps[3])?;
     let body = json!({
         "kind": "committed",
         "deadline": deadline,
-        "deadline_type": deadline_type,
+        "commitment": commitment,
         "priority": priority,
         "estimated_minutes": payloads::VALID_ESTIMATED_MINUTES,
         "life_area": payloads::VALID_LIFE_AREA,
@@ -164,9 +169,9 @@ async fn dispatch_has_deadline(
     example: &BTreeMap<String, String>,
     caps: &regex::Captures<'_>,
 ) -> Result<(), String> {
-    let deadline_type = example_value(example, &caps[1])?;
+    let commitment = example_value(example, &caps[1])?;
     let deadline = example_value(example, &caps[2])?;
-    then_task_has_deadline(world, deadline_type, deadline).await
+    then_task_has_deadline(world, commitment, deadline).await
 }
 
 async fn dispatch_has_priority(
@@ -199,6 +204,20 @@ fn dispatch_rejection_names(
 
 pub async fn given_empty_task_list(world: &mut World) -> Result<(), String> {
     empty_migrated_database_world(world).await
+}
+
+/// Pins `world.pinned_now_ms`, which `world.clock()` -- and so every step
+/// module's request-building helper -- reads instead of the real clock
+/// (`committed-screen-past-still-shows-03`: "past" and "today" both need a
+/// fixed instant to mean anything, not whatever day the suite happens to
+/// run on).
+pub fn given_server_believes_it_is(world: &mut World, timestamp: &str) -> Result<(), String> {
+    let ms = timestamp
+        .parse::<jiff::Timestamp>()
+        .map_err(|e| format!("bad pinned instant {timestamp:?}: {e}"))?
+        .as_millisecond();
+    world.pinned_now_ms = Some(ms);
+    Ok(())
 }
 
 pub async fn given_capture_waiting(world: &mut World, raw_text: &str) -> Result<(), String> {
@@ -245,7 +264,7 @@ pub async fn when_triaged_committed_missing(
 pub(super) struct TaskRow {
     pub(super) kind: String,
     pub(super) deadline: Option<i64>,
-    pub(super) deadline_type: Option<String>,
+    pub(super) commitment: Option<String>,
     pub(super) priority: Option<String>,
     pub(super) target_count: Option<i64>,
     pub(super) target_minutes_each: Option<i64>,
@@ -258,7 +277,7 @@ impl sqlx::FromRow<'_, sqlx::sqlite::SqliteRow> for TaskRow {
         Ok(TaskRow {
             kind: row.try_get("kind")?,
             deadline: row.try_get("deadline")?,
-            deadline_type: row.try_get("deadline_type")?,
+            commitment: row.try_get("commitment")?,
             priority: row.try_get("priority")?,
             target_count: row.try_get("target_count")?,
             target_minutes_each: row.try_get("target_minutes_each")?,
@@ -271,13 +290,13 @@ pub(super) async fn task_row(world: &World) -> Result<TaskRow, String> {
     let pool = world.pool()?;
     let capture_id = capture_id(world)?;
     sqlx::query_as(
-            "SELECT kind, deadline, deadline_type, priority, target_count, target_minutes_each, period \
+        "SELECT kind, deadline, commitment, priority, target_count, target_minutes_each, period \
              FROM tasks WHERE capture_id = ?",
-        )
-        .bind(capture_id)
-        .fetch_one(pool)
-        .await
-        .map_err(|e| format!("query resulting task: {e}"))
+    )
+    .bind(capture_id)
+    .fetch_one(pool)
+    .await
+    .map_err(|e| format!("query resulting task: {e}"))
 }
 
 pub async fn then_task_has_kind(world: &World, expected: &str) -> Result<(), String> {
@@ -317,7 +336,7 @@ pub async fn then_task_has_no_quota_target(world: &World) -> Result<(), String> 
 /// instant it names rather than as text.
 pub async fn then_task_has_deadline(
     world: &World,
-    expected_type: &str,
+    expected_commitment: &str,
     expected_deadline: &str,
 ) -> Result<(), String> {
     let expected_ms = expected_deadline
@@ -325,13 +344,13 @@ pub async fn then_task_has_deadline(
         .map_err(|e| format!("bad expected deadline {expected_deadline:?}: {e}"))?
         .as_millisecond();
     let row = task_row(world).await?;
-    if row.deadline == Some(expected_ms) && row.deadline_type.as_deref() == Some(expected_type) {
+    if row.deadline == Some(expected_ms) && row.commitment.as_deref() == Some(expected_commitment) {
         Ok(())
     } else {
         Err(format!(
-            "expected {expected_type} deadline {expected_deadline} ({expected_ms}ms), \
-                 got deadline_type={:?} deadline={:?}",
-            row.deadline_type, row.deadline
+            "expected {expected_commitment} deadline {expected_deadline} ({expected_ms}ms), \
+                 got commitment={:?} deadline={:?}",
+            row.commitment, row.deadline
         ))
     }
 }
@@ -524,7 +543,7 @@ mod tests {
             .unwrap();
 
         then_task_has_kind(&world, "committed").await.unwrap();
-        then_task_has_deadline(&world, "hard", payloads::VALID_DEADLINE)
+        then_task_has_deadline(&world, "at", payloads::VALID_DEADLINE)
             .await
             .unwrap();
         then_task_has_priority(&world, "P1").await.unwrap();
@@ -564,12 +583,11 @@ mod tests {
         given_capture_waiting(&mut world, "call the dentist")
             .await
             .unwrap();
-        let payload =
-            payloads::with_field(payloads::committed(), "deadline_type", json!("squishy"));
+        let payload = payloads::with_field(payloads::committed(), "commitment", json!("squishy"));
         when_triaged(&mut world, payload).await.unwrap();
 
         then_triage_is_rejected(&mut world).unwrap();
-        then_rejection_reports_invalid(&mut world, "deadline_type").unwrap();
+        then_rejection_reports_invalid(&mut world, "commitment").unwrap();
         then_task_list_is_empty(&world).await.unwrap();
         then_capture_still_waiting(&world).await.unwrap();
     }

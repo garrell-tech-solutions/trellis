@@ -5,18 +5,13 @@
 # its HTTP interface only, and inspects persisted state via a read-only
 # sqlite3 query -- never through a project-internal API.
 #
-# qa/triage_from_page.md's "By-hand walkthrough" is deliberately NOT
-# scripted here, for the same reason inbox_view.sh doesn't script its own:
-# this project's stack has no browser-automation tooling, and the document
-# is explicit that the browser-visible half of "no full page reload" is a
-# one-time human check curl cannot honestly replace. That walkthrough was
-# performed manually this QA cycle and passed in full: the inbox row for
-# "buy milk" offered Pool/Committed/Quota; clicking Pool moved it into the
-# task list without a visible reload; the committed form offered deadline
-# type and priority as fixed choices; submitting committed with a field
-# blank named that field, created nothing, and left the capture in the
-# inbox; asking for 0 quota sessions was refused; and everything survived a
-# server restart.
+# qa/triage_from_page.md's "By-hand walkthrough" is NOT scripted here, for
+# the same reason inbox_view.sh doesn't script its own: this project's
+# stack has no browser-automation tooling, and the document is explicit
+# that the browser-visible half of "no full page reload" is a one-time
+# human check curl cannot honestly replace. It has not been performed in a
+# real browser this cycle; report it as unverified rather than implying it
+# was checked.
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
@@ -42,7 +37,7 @@ qa_get_inbox() {
 # Extracts capture_id's pool/committed/quota triage controls from a rendered
 # page as one JSON object: each control's hx-post endpoint (read from the
 # page's own markup, not assumed), plus the committed form's
-# deadline_type/priority <select> options. Per qa/triage_from_page.md's
+# commitment/priority <select> options. Per qa/triage_from_page.md's
 # "Independent of Implementation" note.
 qa_extract_controls() {
   local page="$1" capture_id="$2" block
@@ -59,8 +54,8 @@ for form in re.findall(r"<form\b[^>]*>.*?</form>", block, re.S):
         result["pool_endpoint"] = endpoint
     elif "value=\"committed\"" in form:
         result["committed_endpoint"] = endpoint
-        dt = re.search(r"<select name=\"deadline_type\">(.*?)</select>", form, re.S)
-        result["deadline_type_options"] = re.findall(r"<option value=\"([^\"]+)\"", dt.group(1)) if dt else []
+        dt = re.search(r"<select name=\"commitment\">(.*?)</select>", form, re.S)
+        result["commitment_options"] = re.findall(r"<option value=\"([^\"]+)\"", dt.group(1)) if dt else []
         pr = re.search(r"<select name=\"priority\">(.*?)</select>", form, re.S)
         result["priority_options"] = re.findall(r"<option value=\"([^\"]+)\"", pr.group(1)) if pr else []
     elif "value=\"quota\"" in form:
@@ -161,8 +156,8 @@ if qa_start_server "$BIN" "$TMP_DIR/$name.sqlite" "$TMP_DIR/$name.log"; then
     echo "FAIL: [$name] could not find the committed-triage control" >&2
     FAILURES=1
   else
-    # deadline omitted; deadline_type and priority supplied.
-    qa_triage_form "$endpoint" "kind=committed&deadline_type=hard&priority=P1"
+    # deadline omitted; commitment and priority supplied.
+    qa_triage_form "$endpoint" "kind=committed&commitment=at&priority=P1"
     if [[ "$STATUS" -lt 400 || "$STATUS" -ge 500 ]]; then
       echo "FAIL: [$name] expected a client error, got status $STATUS" >&2
       FAILURES=1
@@ -194,10 +189,10 @@ name="committed-closed-choices"
 if qa_start_server "$BIN" "$TMP_DIR/$name.sqlite" "$TMP_DIR/$name.log"; then
   capture_id="$(qa_submit_capture "call the dentist")"
   controls="$(qa_extract_controls "$(qa_get_inbox)" "$capture_id")"
-  deadline_types="$(python3 -c 'import json,sys; print(",".join(json.loads(sys.argv[1]).get("deadline_type_options", [])))' "$controls")"
+  commitments="$(python3 -c 'import json,sys; print(",".join(json.loads(sys.argv[1]).get("commitment_options", [])))' "$controls")"
   priorities="$(python3 -c 'import json,sys; print(",".join(json.loads(sys.argv[1]).get("priority_options", [])))' "$controls")"
-  if [[ "$deadline_types" != "hard,soft" ]]; then
-    echo "FAIL: [$name] expected the deadline type choices to be exactly hard,soft, got \"$deadline_types\"" >&2
+  if [[ "$commitments" != "at,by" ]]; then
+    echo "FAIL: [$name] expected the commitment choices to be exactly at,by, got \"$commitments\"" >&2
     FAILURES=1
   fi
   if [[ "$priorities" != "P1,P2,P3,P4" ]]; then

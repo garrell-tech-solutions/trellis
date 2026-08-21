@@ -94,24 +94,15 @@ pub async fn list_tasks(pool: &SqlitePool) -> Result<Vec<TaskWithCaptureText>, s
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::platform::test_support::test_pool;
+    use crate::platform::test_support::{insert_capture, test_pool};
     use crate::triage::store::insert_task;
     use proptest::prelude::*;
     use scheduler_core::task::TaskKind;
 
-    /// Setting up "a capture exists" by calling the capture domain's own
-    /// writer rather than retyping its `INSERT` here: a fixture that spells
-    /// out another module's SQL is a second copy of that schema.
-    async fn given_a_capture(pool: &SqlitePool, raw_text: &str) -> i64 {
-        crate::capture::store::insert(pool, raw_text, "web", None, 0)
-            .await
-            .unwrap()
-    }
-
     #[tokio::test]
     async fn list_untriaged_reports_each_captures_id() {
         let (_dir, pool) = test_pool().await;
-        let id = given_a_capture(&pool, "buy milk").await;
+        let id = insert_capture(&pool, "buy milk", None).await;
 
         let captures = list_untriaged(&pool).await.unwrap();
 
@@ -129,8 +120,8 @@ mod tests {
     #[tokio::test]
     async fn list_untriaged_lists_captures_newest_first() {
         let (_dir, pool) = test_pool().await;
-        given_a_capture(&pool, "call the dentist").await;
-        given_a_capture(&pool, "buy milk").await;
+        insert_capture(&pool, "call the dentist", None).await;
+        insert_capture(&pool, "buy milk", None).await;
 
         let captures = list_untriaged(&pool).await.unwrap();
 
@@ -146,8 +137,8 @@ mod tests {
     #[tokio::test]
     async fn list_untriaged_excludes_a_capture_that_has_left_the_inbox() {
         let (_dir, pool) = test_pool().await;
-        given_a_capture(&pool, "buy milk").await;
-        let gone = given_a_capture(&pool, "call the dentist").await;
+        insert_capture(&pool, "buy milk", None).await;
+        let gone = insert_capture(&pool, "call the dentist", None).await;
         close_capture(&pool, gone, 9999).await.unwrap();
 
         let captures = list_untriaged(&pool).await.unwrap();
@@ -159,7 +150,7 @@ mod tests {
     #[tokio::test]
     async fn capture_is_open_is_true_for_a_freshly_inserted_capture() {
         let (_dir, pool) = test_pool().await;
-        let capture_id = given_a_capture(&pool, "buy milk").await;
+        let capture_id = insert_capture(&pool, "buy milk", None).await;
 
         assert!(capture_is_open(&pool, capture_id).await.unwrap());
     }
@@ -167,7 +158,7 @@ mod tests {
     #[tokio::test]
     async fn capture_is_open_is_false_once_it_has_left_the_inbox() {
         let (_dir, pool) = test_pool().await;
-        let capture_id = given_a_capture(&pool, "buy milk").await;
+        let capture_id = insert_capture(&pool, "buy milk", None).await;
         close_capture(&pool, capture_id, 9999).await.unwrap();
 
         assert!(!capture_is_open(&pool, capture_id).await.unwrap());
@@ -183,7 +174,7 @@ mod tests {
     #[tokio::test]
     async fn close_capture_stamps_the_named_capture() {
         let (_dir, pool) = test_pool().await;
-        let capture_id = given_a_capture(&pool, "buy milk").await;
+        let capture_id = insert_capture(&pool, "buy milk", None).await;
 
         close_capture(&pool, capture_id, 4242).await.unwrap();
 
@@ -193,8 +184,8 @@ mod tests {
     #[tokio::test]
     async fn close_capture_leaves_other_captures_in_the_inbox() {
         let (_dir, pool) = test_pool().await;
-        let closed = given_a_capture(&pool, "buy milk").await;
-        let untouched = given_a_capture(&pool, "call the dentist").await;
+        let closed = insert_capture(&pool, "buy milk", None).await;
+        let untouched = insert_capture(&pool, "call the dentist", None).await;
 
         close_capture(&pool, closed, 9999).await.unwrap();
 
@@ -204,7 +195,7 @@ mod tests {
     #[tokio::test]
     async fn close_capture_does_not_delete_the_row() {
         let (_dir, pool) = test_pool().await;
-        let capture_id = given_a_capture(&pool, "buy milk").await;
+        let capture_id = insert_capture(&pool, "buy milk", None).await;
 
         close_capture(&pool, capture_id, 9999).await.unwrap();
 
@@ -221,7 +212,7 @@ mod tests {
     #[tokio::test]
     async fn close_capture_is_a_noop_once_the_capture_has_already_left() {
         let (_dir, pool) = test_pool().await;
-        let capture_id = given_a_capture(&pool, "buy milk").await;
+        let capture_id = insert_capture(&pool, "buy milk", None).await;
         close_capture(&pool, capture_id, 1111).await.unwrap();
 
         close_capture(&pool, capture_id, 2222).await.unwrap();
@@ -247,7 +238,7 @@ mod tests {
     #[tokio::test]
     async fn list_tasks_reports_each_tasks_kind_and_the_text_of_the_capture_it_came_from() {
         let (_dir, pool) = test_pool().await;
-        let capture_id = given_a_capture(&pool, "buy milk").await;
+        let capture_id = insert_capture(&pool, "buy milk", None).await;
 
         insert_task(&pool, capture_id, &TaskKind::Pool, 7)
             .await
@@ -282,8 +273,8 @@ mod tests {
     #[tokio::test]
     async fn list_tasks_lists_tasks_newest_first() {
         let (_dir, pool) = test_pool().await;
-        let first_capture = given_a_capture(&pool, "buy milk").await;
-        let second_capture = given_a_capture(&pool, "call the dentist").await;
+        let first_capture = insert_capture(&pool, "buy milk", None).await;
+        let second_capture = insert_capture(&pool, "call the dentist", None).await;
 
         insert_task(&pool, first_capture, &TaskKind::Pool, 1)
             .await
@@ -336,7 +327,7 @@ mod tests {
 
                 let mut expected: Vec<String> = Vec::new();
                 for (raw_text, exit) in &queue {
-                    let id = given_a_capture(&pool, raw_text).await;
+                    let id = insert_capture(&pool, raw_text, None).await;
                     match exit {
                         1 => {
                             insert_task(&pool, id, &TaskKind::Pool, 9999).await.unwrap();

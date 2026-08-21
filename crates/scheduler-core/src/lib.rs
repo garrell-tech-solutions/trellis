@@ -5,6 +5,7 @@
 //! This is where the product's rules live. Delivery mechanisms (HTTP today)
 //! and persistence adapters depend on this crate; it depends on neither.
 
+pub mod committed_screen;
 pub mod context_tag;
 pub mod interval;
 pub mod pool;

@@ -1,14 +1,24 @@
 //! `GET /pool`: pool work grouped by where it can be done (#92).
+//! `POST /pool/tasks/{id}/done`: marks a pool task done (#97) and swaps in
+//! the `#pool-body` fragment.
 
+use super::body;
+use crate::platform::clock::Clock;
 use crate::platform::nav::{self, NavLink, Page};
-use crate::platform::response::{render_template, write_failed};
-use crate::pool::view::{self, LooseItemView, TripView};
+use crate::platform::response::render_template;
+use crate::platform::response::write_failed;
+use crate::pool::view::{LooseItemView, TripView};
 use askama::Template;
-use axum::extract::State;
+use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::Response;
 use sqlx::SqlitePool;
 
+/// The full page is the only thing that is not the `#pool-body` fragment,
+/// so it is the only caller that takes `body::build`'s fields apart instead
+/// of going through `body::respond`. `pool.html` `{% include %}`s
+/// `pool_body.html`, and an Askama include renders in its parent's context,
+/// so the page template has to carry the same fields by the same names.
 #[derive(Template)]
 #[template(path = "pool.html")]
 struct PoolTemplate {
@@ -20,10 +30,7 @@ struct PoolTemplate {
 }
 
 pub async fn show_pool(State(pool): State<SqlitePool>) -> Result<Response, StatusCode> {
-    let rows = super::store::list_pool_tasks(&pool)
-        .await
-        .map_err(write_failed)?;
-    let built = view::build(rows);
+    let built = body::build(&pool).await.map_err(write_failed)?;
     Ok(render_template(
         StatusCode::OK,
         &PoolTemplate {
@@ -34,6 +41,22 @@ pub async fn show_pool(State(pool): State<SqlitePool>) -> Result<Response, Statu
             nav: nav::links(Page::Pool),
         },
     ))
+}
+
+/// Marks `task_id` done and swaps in the current `#pool-body` fragment,
+/// regardless of whether it had already been marked — `D-inaction-archives`
+/// leaves nothing to un-do, so there is no failure state worth reporting
+/// back on this row (`T-forms-swap-one-fragment`'s contract still holds:
+/// whatever happened, the fragment reflects current state).
+pub async fn mark_pool_task_done(
+    State(pool): State<SqlitePool>,
+    State(clock): State<Clock>,
+    Path(task_id): Path<i64>,
+) -> Result<Response, StatusCode> {
+    crate::mark_done::mark_task_done(&pool, task_id, clock.now_ms())
+        .await
+        .map_err(write_failed)?;
+    body::respond(&pool).await
 }
 
 #[cfg(test)]
@@ -57,6 +80,23 @@ mod tests {
         (status, String::from_utf8(body.to_vec()).unwrap())
     }
 
+    async fn post_mark_done(pool: &SqlitePool, task_id: i64) -> (StatusCode, String) {
+        let app = crate::platform::app::build_app(pool.clone(), Clock::pinned_at(4242));
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!("/pool/tasks/{task_id}/done"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let status = response.status();
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        (status, String::from_utf8(body.to_vec()).unwrap())
+    }
+
     async fn given_a_pool_task(pool: &SqlitePool, raw_text: &str, tag: Option<&str>) -> i64 {
         let capture_id = crate::capture::store::insert(pool, raw_text, "web", tag, 0)
             .await
@@ -65,6 +105,14 @@ mod tests {
             .await
             .unwrap();
         capture_id
+    }
+
+    async fn task_id_for_capture(pool: &SqlitePool, capture_id: i64) -> i64 {
+        sqlx::query_scalar("SELECT id FROM tasks WHERE capture_id = ?")
+            .bind(capture_id)
+            .fetch_one(pool)
+            .await
+            .unwrap()
     }
 
     #[tokio::test]
@@ -148,5 +196,37 @@ mod tests {
         let (_, body) = get_pool(&pool).await;
 
         assert!(body.contains(r#"aria-current="page""#), "got:\n{body}");
+    }
+
+    #[tokio::test]
+    async fn marking_a_task_done_removes_it_from_the_next_render() {
+        let (_dir, pool) = test_pool().await;
+        let capture_id = given_a_pool_task(&pool, "buy screws", Some("@homedepot")).await;
+        let task_id = task_id_for_capture(&pool, capture_id).await;
+
+        let (status, body) = post_mark_done(&pool, task_id).await;
+
+        assert_eq!(status, StatusCode::OK);
+        assert!(!body.contains("buy screws"), "got:\n{body}");
+    }
+
+    #[tokio::test]
+    async fn marking_a_task_done_stamps_the_row_rather_than_deleting_it() {
+        let (_dir, pool) = test_pool().await;
+        let capture_id = given_a_pool_task(&pool, "buy screws", Some("@homedepot")).await;
+        let task_id = task_id_for_capture(&pool, capture_id).await;
+
+        post_mark_done(&pool, task_id).await;
+
+        let archived_at: Option<i64> =
+            sqlx::query_scalar("SELECT archived_at FROM tasks WHERE id = ?")
+                .bind(task_id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert!(
+            archived_at.is_some(),
+            "expected archived_at to be stamped, got None"
+        );
     }
 }

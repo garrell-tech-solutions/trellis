@@ -24,6 +24,7 @@ mod context_tags;
 mod dismiss;
 mod html;
 mod inbox_view;
+mod mark_done;
 mod migrations;
 mod one_screen;
 mod payloads;
@@ -250,6 +251,9 @@ pub async fn dispatch(
         return outcome;
     }
     if let Some(outcome) = committed_screen::dispatch(world, text, example).await {
+        return outcome;
+    }
+    if let Some(outcome) = mark_done::dispatch(world, text, example).await {
         return outcome;
     }
 

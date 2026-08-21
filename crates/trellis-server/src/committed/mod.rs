@@ -6,8 +6,10 @@
 //! distinction, so how it looks is this slice's to invent. `store` owns its
 //! one query, `view` turns a store row into what the template renders
 //! (`scheduler_core::committed_screen::order` does the actual date math),
-//! `http` serves `GET /committed`.
+//! `body` is the `#committed-body` fragment `GET /committed` wraps and
+//! marking a task done (#97) swaps in on its own, `http` owns both routes.
 
+mod body;
 pub mod http;
 pub mod store;
 pub mod view;

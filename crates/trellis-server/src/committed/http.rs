@@ -1,15 +1,21 @@
-//! `GET /committed`.
+//! `GET /committed`. `POST /committed/tasks/{id}/done`: marks a committed
+//! task done (#97) and swaps in the `#committed-body` fragment.
 
-use crate::committed::view::{self, CommittedRowView};
+use super::body;
+use crate::committed::view::CommittedRowView;
 use crate::platform::clock::Clock;
 use crate::platform::nav::{self, NavLink, Page};
 use crate::platform::response::{render_template, write_failed};
 use askama::Template;
-use axum::extract::State;
+use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::Response;
 use sqlx::SqlitePool;
 
+/// The full page is the only thing that is not the `#committed-body`
+/// fragment, so it is the only caller that takes `body::build`'s fields
+/// apart instead of going through `body::respond` -- the same shape
+/// `pool::http::PoolTemplate` takes.
 #[derive(Template)]
 #[template(path = "committed.html")]
 struct CommittedTemplate {
@@ -23,10 +29,7 @@ pub async fn show_committed(
     State(pool): State<SqlitePool>,
     State(clock): State<Clock>,
 ) -> Result<Response, StatusCode> {
-    let rows = super::store::list_committed_tasks(&pool)
-        .await
-        .map_err(write_failed)?;
-    let built = view::build(rows, clock.now_ms());
+    let built = body::build(&pool, clock).await.map_err(write_failed)?;
     Ok(render_template(
         StatusCode::OK,
         &CommittedTemplate {
@@ -36,6 +39,20 @@ pub async fn show_committed(
             nav: nav::links(Page::Committed),
         },
     ))
+}
+
+/// Marks `task_id` done and swaps in the current `#committed-body`
+/// fragment, regardless of whether it had already been marked -- see
+/// `pool::http::mark_pool_task_done`'s identical reasoning.
+pub async fn mark_committed_task_done(
+    State(pool): State<SqlitePool>,
+    State(clock): State<Clock>,
+    Path(task_id): Path<i64>,
+) -> Result<Response, StatusCode> {
+    crate::mark_done::mark_task_done(&pool, task_id, clock.now_ms())
+        .await
+        .map_err(write_failed)?;
+    body::respond(&pool, clock).await
 }
 
 #[cfg(test)]
@@ -110,5 +127,76 @@ mod tests {
         let (_, body) = get_committed(&pool).await;
 
         assert!(body.contains("book the dentist"), "got:\n{body}");
+    }
+
+    async fn given_a_committed_task(pool: &SqlitePool, raw_text: &str) -> i64 {
+        let (capture_id, _) = crate::capture::create(pool, raw_text, "web", None, 0)
+            .await
+            .unwrap();
+        crate::triage::store::insert_task(
+            pool,
+            capture_id,
+            &scheduler_core::task::TaskKind::Committed {
+                deadline: 1787646600000,
+                commitment: scheduler_core::task::Commitment::At,
+                priority: scheduler_core::task::Priority::P1,
+                estimated_minutes: 30,
+            },
+            0,
+        )
+        .await
+        .unwrap();
+        sqlx::query_scalar("SELECT id FROM tasks WHERE capture_id = ?")
+            .bind(capture_id)
+            .fetch_one(pool)
+            .await
+            .unwrap()
+    }
+
+    async fn post_mark_done(pool: &SqlitePool, task_id: i64) -> (StatusCode, String) {
+        let app = crate::platform::app::build_app(pool.clone(), Clock::pinned_at(1787562000000));
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!("/committed/tasks/{task_id}/done"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let status = response.status();
+        let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        (status, String::from_utf8(bytes.to_vec()).unwrap())
+    }
+
+    #[tokio::test]
+    async fn marking_a_committed_task_done_removes_it_from_the_next_render() {
+        let (_dir, pool) = test_pool().await;
+        let task_id = given_a_committed_task(&pool, "book the dentist").await;
+
+        let (status, body) = post_mark_done(&pool, task_id).await;
+
+        assert_eq!(status, StatusCode::OK);
+        assert!(!body.contains("book the dentist"), "got:\n{body}");
+    }
+
+    #[tokio::test]
+    async fn marking_a_committed_task_done_stamps_the_row_rather_than_deleting_it() {
+        let (_dir, pool) = test_pool().await;
+        let task_id = given_a_committed_task(&pool, "book the dentist").await;
+
+        post_mark_done(&pool, task_id).await;
+
+        let archived_at: Option<i64> =
+            sqlx::query_scalar("SELECT archived_at FROM tasks WHERE id = ?")
+                .bind(task_id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert!(
+            archived_at.is_some(),
+            "expected archived_at to be stamped, got None"
+        );
     }
 }

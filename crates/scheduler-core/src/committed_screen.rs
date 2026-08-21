@@ -16,6 +16,8 @@ use crate::task::Commitment;
 /// One committed task as this module needs it: enough to order, mark past
 /// and render its date cell, nothing about how it got here.
 pub struct CommittedTask {
+    /// The task's own database id (#97: marking a specific one done).
+    pub id: i64,
     pub text: String,
     pub context_tag: Option<String>,
     pub deadline_ms: i64,
@@ -24,6 +26,7 @@ pub struct CommittedTask {
 
 /// One row as the committed screen renders it.
 pub struct CommittedRow {
+    pub id: i64,
     pub text: String,
     pub context_tag: Option<String>,
     /// `"TUE 8:30"` for an *at*, `"BY THU"` for a *by* — the same 66px
@@ -44,6 +47,7 @@ pub fn order(mut tasks: Vec<CommittedTask>, now_ms: i64) -> Vec<CommittedRow> {
     tasks
         .into_iter()
         .map(|task| CommittedRow {
+            id: task.id,
             text: task.text,
             context_tag: task.context_tag,
             date_cell: date_cell(task.deadline_ms, task.commitment),
@@ -88,6 +92,7 @@ mod tests {
 
     fn task(text: &str, deadline_ms: i64, commitment: Commitment) -> CommittedTask {
         CommittedTask {
+            id: 1,
             text: text.to_string(),
             context_tag: None,
             deadline_ms,
@@ -198,5 +203,13 @@ mod tests {
     #[test]
     fn an_empty_list_orders_to_nothing() {
         assert!(order(vec![], NOW_MS).is_empty());
+    }
+
+    #[test]
+    fn a_rows_id_is_its_tasks_id() {
+        let mut with_id = task("book the dentist", DENTIST_MS, Commitment::At);
+        with_id.id = 42;
+        let rows = order(vec![with_id], NOW_MS);
+        assert_eq!(rows[0].id, 42);
     }
 }

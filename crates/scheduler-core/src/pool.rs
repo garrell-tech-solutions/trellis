@@ -34,6 +34,14 @@ pub struct PoolTask {
     pub context_tag: Option<String>,
 }
 
+/// One item's own identity and text, wherever a caller needs to act on it
+/// rather than just read it (#97: marking a specific one done).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PoolItem {
+    pub id: i64,
+    pub text: String,
+}
+
 /// A context tag with enough tasks waiting to be worth a special trip.
 pub struct Trip {
     pub tag: String,
@@ -41,13 +49,13 @@ pub struct Trip {
     /// `pool-screen-truncation-06`'s "the count reads five throughout".
     pub count: usize,
     /// The newest [`VISIBLE_TRIP_ITEMS`], in newest-first order.
-    pub visible: Vec<String>,
+    pub visible: Vec<PoolItem>,
     /// Everything beyond `visible`, still newest-first — what a "show more"
     /// control reveals. Empty exactly when [`Trip::more`] is zero; carried
     /// separately from `visible` rather than making the adapter reconstruct
     /// it, since a native `<details>` disclosure needs the actual items to
     /// put inside it, not just a count of them.
-    pub hidden: Vec<String>,
+    pub hidden: Vec<PoolItem>,
     /// How many more exist beyond `visible` — zero when nothing is hidden.
     pub more: usize,
 }
@@ -55,6 +63,7 @@ pub struct Trip {
 /// A pool task with nowhere worth a special trip: either untagged, or
 /// tagged with something too few other tasks share.
 pub struct LooseTask {
+    pub id: i64,
     pub text: String,
     pub context_tag: Option<String>,
 }
@@ -131,15 +140,15 @@ fn bucket_by_tag(tasks: Vec<PoolTask>) -> (Vec<(String, Vec<PoolTask>)>, Vec<Poo
 /// shows and what it hides behind a "show more" control.
 fn trip_from_group(tag: String, list: Vec<PoolTask>) -> Trip {
     let count = list.len();
-    let visible: Vec<String> = list
+    let visible: Vec<PoolItem> = list
         .iter()
         .take(VISIBLE_TRIP_ITEMS)
-        .map(|t| t.text.clone())
+        .map(PoolItem::from_task)
         .collect();
-    let hidden: Vec<String> = list
+    let hidden: Vec<PoolItem> = list
         .iter()
         .skip(VISIBLE_TRIP_ITEMS)
-        .map(|t| t.text.clone())
+        .map(PoolItem::from_task)
         .collect();
     let more = hidden.len();
     Trip {
@@ -151,9 +160,19 @@ fn trip_from_group(tag: String, list: Vec<PoolTask>) -> Trip {
     }
 }
 
+impl PoolItem {
+    fn from_task(task: &PoolTask) -> Self {
+        PoolItem {
+            id: task.sequence,
+            text: task.text.clone(),
+        }
+    }
+}
+
 impl From<PoolTask> for LooseTask {
     fn from(task: PoolTask) -> Self {
         LooseTask {
+            id: task.sequence,
             text: task.text,
             context_tag: task.context_tag,
         }
@@ -254,7 +273,12 @@ mod tests {
             task(3, "third", Some("@homedepot")),
         ]);
 
-        assert_eq!(groups.trips[0].visible, vec!["third", "second", "first"]);
+        let texts: Vec<&str> = groups.trips[0]
+            .visible
+            .iter()
+            .map(|item| item.text.as_str())
+            .collect();
+        assert_eq!(texts, vec!["third", "second", "first"]);
     }
 
     #[test]
@@ -282,10 +306,12 @@ mod tests {
         assert_eq!(groups.trips[0].visible.len(), 3);
         assert_eq!(groups.trips[0].more, 2);
         assert_eq!(groups.trips[0].count, 5);
-        assert_eq!(
-            groups.trips[0].hidden,
-            vec!["b".to_string(), "a".to_string()]
-        );
+        let hidden: Vec<&str> = groups.trips[0]
+            .hidden
+            .iter()
+            .map(|item| item.text.as_str())
+            .collect();
+        assert_eq!(hidden, vec!["b", "a"]);
     }
 
     #[test]
@@ -321,5 +347,24 @@ mod tests {
         let groups = group(vec![]);
         assert!(groups.trips.is_empty());
         assert!(groups.loose.is_empty());
+    }
+
+    #[test]
+    fn a_trip_items_id_is_its_tasks_sequence() {
+        let groups = group(vec![
+            task(1, "buy screws", Some("@homedepot")),
+            task(2, "return the drill", Some("@homedepot")),
+            task(3, "pick up trim", Some("@homedepot")),
+        ]);
+
+        assert_eq!(groups.trips[0].visible[0].id, 3);
+        assert_eq!(groups.trips[0].visible[2].id, 1);
+    }
+
+    #[test]
+    fn a_loose_tasks_id_is_its_sequence() {
+        let groups = group(vec![task(42, "fix the door latch", None)]);
+
+        assert_eq!(groups.loose[0].id, 42);
     }
 }

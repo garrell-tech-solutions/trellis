@@ -11,8 +11,8 @@
 # rather than lapsed. #70's inversion still applies: if this feature had NOT
 # needed changing, the second screen shipped with no way to reach it.
 #
-# #88 removed five routes and the six modules behind them; #92 added /pool,
-# the first Menu tab.
+# #88 removed five routes and the six modules behind them; #92 added /pool and #94
+# /committed, the first two Menu tabs.
 #
 # THE `path` COLUMN IS FALSIFIABLE NOW, and it was not before. When every row
 # expected 404, mutating /stats to /statX still 404d -- nine mutants survived
@@ -54,6 +54,7 @@ Feature: Trellis serves the routes it has, and only those
       | path        | status |
       | /           | 200    |
       | /pool       | 200    |
+      | /committed  | 200    |
       | /stats      | 404    |
       | /life-areas | 404    |
       | /capacity   | 404    |

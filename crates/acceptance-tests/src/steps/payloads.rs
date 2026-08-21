@@ -32,7 +32,7 @@ pub fn committed() -> Value {
     json!({
         "kind": "committed",
         "deadline": VALID_DEADLINE,
-        "deadline_type": "hard",
+        "commitment": "at",
         "priority": "P1",
         "estimated_minutes": VALID_ESTIMATED_MINUTES,
         "life_area": VALID_LIFE_AREA,
@@ -98,7 +98,7 @@ mod tests {
     fn without_field_removes_the_named_field_and_leaves_the_rest() {
         let payload = without_field(committed(), "deadline");
         assert_eq!(payload.get("deadline"), None);
-        assert_eq!(payload["deadline_type"], json!("hard"));
+        assert_eq!(payload["commitment"], json!("at"));
         assert_eq!(payload["priority"], json!("P1"));
     }
 

@@ -1,6 +1,6 @@
 //! The closed-domain vocabulary a triage submission's fields are drawn
 //! from: which field a rejection can name, and the few columns
-//! (`deadline_type`, `priority`, `period`) whose values are a fixed set
+//! (`commitment`, `priority`, `period`) whose values are a fixed set
 //! rather than free text. Split out from [`super`], which composes these
 //! into the triage decision itself -- these types carry no decision logic
 //! of their own, only parsing and the name each reports back.
@@ -9,7 +9,7 @@
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Field {
     Deadline,
-    DeadlineType,
+    Commitment,
     Priority,
     EstimatedMinutes,
     TargetCount,
@@ -23,7 +23,7 @@ pub enum Field {
 /// lookup should not cost against the threshold).
 const FIELD_NAMES: [(Field, &str); 7] = [
     (Field::Deadline, "deadline"),
-    (Field::DeadlineType, "deadline_type"),
+    (Field::Commitment, "commitment"),
     (Field::Priority, "priority"),
     (Field::EstimatedMinutes, "estimated_minutes"),
     (Field::TargetCount, "target_count"),
@@ -67,6 +67,37 @@ impl DeadlineType {
         match self {
             Self::Hard => "hard",
             Self::Soft => "soft",
+        }
+    }
+}
+
+/// `commitment`'s closed domain (`D-committed-is-at-or-by`, #94): an **at**
+/// is a fixed block; a **by** is a deadline with slack. An explicit choice
+/// at triage rather than derived from how precisely the deadline was typed
+/// -- a derived rule cannot express a *hard by* ("the tax return, by Jan 31,
+/// and that one cannot slip"), which is a real commitment a derivation would
+/// have made silently unrepresentable.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Commitment {
+    At,
+    By,
+}
+
+impl Commitment {
+    /// `pub` for the same reason as [`DeadlineType::parse`]: a stored
+    /// committed task's `commitment` column comes back as text.
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "at" => Some(Self::At),
+            "by" => Some(Self::By),
+            _ => None,
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::At => "at",
+            Self::By => "by",
         }
     }
 }
@@ -226,12 +257,30 @@ mod tests {
         assert_eq!(Period::parse("Week"), None, "the domain is case-sensitive");
     }
 
+    // --- Commitment --------------------------------------------------------
+
+    #[test]
+    fn commitment_parses_at_and_by() {
+        assert_eq!(Commitment::parse("at"), Some(Commitment::At));
+        assert_eq!(Commitment::parse("by"), Some(Commitment::By));
+    }
+
+    #[test]
+    fn commitment_rejects_values_outside_the_domain() {
+        assert_eq!(Commitment::parse("hard"), None);
+        assert_eq!(
+            Commitment::parse("AT"),
+            None,
+            "the domain is case-sensitive"
+        );
+    }
+
     // --- Field --------------------------------------------------------
 
     #[test]
     fn each_field_reports_the_name_the_submitter_used() {
         assert_eq!(Field::Deadline.name(), "deadline");
-        assert_eq!(Field::DeadlineType.name(), "deadline_type");
+        assert_eq!(Field::Commitment.name(), "commitment");
         assert_eq!(Field::Priority.name(), "priority");
         assert_eq!(Field::TargetCount.name(), "target_count");
         assert_eq!(Field::TargetMinutesEach.name(), "target_minutes_each");

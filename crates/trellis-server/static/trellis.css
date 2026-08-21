@@ -750,3 +750,81 @@ td {
   text-transform: uppercase;
   color: var(--color-gray-400);
 }
+
+/* --- Committed ---------------------------------------------------------
+ *
+ * The third Menu tab (#94): what has a date on it, in date order. Plain
+ * rows rather than `.panel` cards -- the canvas draws this screen as a
+ * three-column table, not a stack of cards, and a committed item is a
+ * single fact (when, what, where) rather than a group with its own count.
+ */
+
+.committed-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  padding-top: 2px;
+  padding-bottom: 14px;
+}
+
+.committed-header h1 {
+  padding: 0;
+}
+
+.committed-meta {
+  font-size: 11px;
+  color: var(--color-gray-500);
+}
+
+.committed-empty a {
+  display: inline-block;
+  margin-top: 4px;
+  color: var(--color-primary-500);
+}
+
+.committed-row {
+  display: grid;
+  grid-template-columns: 66px 1fr auto;
+  align-items: baseline;
+  gap: 10px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--color-gray-100);
+}
+
+.committed-date {
+  font-variant-numeric: tabular-nums;
+  text-transform: uppercase;
+  font-size: 11px;
+  color: var(--color-gray-600);
+}
+
+.committed-row.past .committed-date {
+  color: var(--color-gold);
+}
+
+.committed-text {
+  font-size: 13.5px;
+  color: var(--color-gray-800);
+}
+
+.committed-trailing {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+}
+
+.committed-tag {
+  text-align: right;
+  text-transform: uppercase;
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  color: var(--color-gray-400);
+}
+
+.committed-past-badge {
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-gold);
+}

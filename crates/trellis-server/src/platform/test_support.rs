@@ -18,3 +18,14 @@ pub(crate) async fn stored_context_tag(pool: &SqlitePool, capture_id: i64) -> Op
         .await
         .unwrap()
 }
+
+/// Setting up "a capture exists" by calling the capture domain's own writer
+/// rather than retyping its `INSERT` here: a fixture that spells out
+/// another module's SQL is a second copy of that schema. Shared by every
+/// store module's own tests (`committed`, `pool`, `triage`, `inbox`) that
+/// need one to triage or list against.
+pub(crate) async fn insert_capture(pool: &SqlitePool, raw_text: &str, tag: Option<&str>) -> i64 {
+    crate::capture::store::insert(pool, raw_text, "web", tag, 0)
+        .await
+        .unwrap()
+}

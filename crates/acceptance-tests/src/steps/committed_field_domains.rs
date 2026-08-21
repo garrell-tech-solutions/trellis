@@ -1,5 +1,5 @@
 //! Step handlers for `features/committed_field_domains.feature`: committed
-//! triage validates the *values* of deadline, deadline type and priority,
+//! triage validates the *values* of deadline, commitment and priority,
 //! not just their presence (`committed_triage_validation` covers presence).
 //!
 //! Kept as its own module rather than added to `triage::dispatch`, which is
@@ -19,8 +19,8 @@ static WHEN_TRIAGED_WITH_DEADLINE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r#"^the capture is triaged as a committed task with a deadline of "<(\w+)>"$"#)
         .unwrap()
 });
-static WHEN_TRIAGED_WITH_DEADLINE_TYPE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r#"^the capture is triaged as a committed task with a deadline type of "<(\w+)>"$"#)
+static WHEN_TRIAGED_WITH_COMMITMENT: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r#"^the capture is triaged as a committed task with a commitment of "<(\w+)>"$"#)
         .unwrap()
 });
 static WHEN_TRIAGED_WITH_PRIORITY: LazyLock<Regex> = LazyLock::new(|| {
@@ -44,8 +44,8 @@ pub async fn dispatch(
     if let Some(caps) = WHEN_TRIAGED_WITH_DEADLINE.captures(text) {
         return Some(dispatch_committed_field(world, example, &caps, "deadline").await);
     }
-    if let Some(caps) = WHEN_TRIAGED_WITH_DEADLINE_TYPE.captures(text) {
-        return Some(dispatch_committed_field(world, example, &caps, "deadline_type").await);
+    if let Some(caps) = WHEN_TRIAGED_WITH_COMMITMENT.captures(text) {
+        return Some(dispatch_committed_field(world, example, &caps, "commitment").await);
     }
     if let Some(caps) = WHEN_TRIAGED_WITH_PRIORITY.captures(text) {
         return Some(dispatch_committed_field(world, example, &caps, "priority").await);
@@ -118,7 +118,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_field_outside_its_domain_is_rejected_and_reports_itself_as_invalid() {
-        for (field, value) in [("deadline_type", "squishy"), ("priority", "P9")] {
+        for (field, value) in [("commitment", "squishy"), ("priority", "P9")] {
             let mut world = migrated_world().await;
             given_capture_waiting(&mut world, "buy milk").await.unwrap();
             let payload = payloads::with_field(payloads::committed(), field, json!(value));

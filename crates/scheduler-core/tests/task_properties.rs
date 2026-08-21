@@ -29,7 +29,7 @@ fn any_fields() -> impl Strategy<Value = TriageFields> {
         .prop_map(
             |(
                 deadline,
-                deadline_type,
+                commitment,
                 priority,
                 estimated_minutes,
                 target_count,
@@ -39,7 +39,7 @@ fn any_fields() -> impl Strategy<Value = TriageFields> {
                 TriageFields {
                     kind: None,
                     deadline,
-                    deadline_type,
+                    commitment,
                     priority,
                     estimated_minutes,
                     target_count,
@@ -59,7 +59,7 @@ fn with_kind(fields: TriageFields, kind: &str) -> TriageFields {
 
 fn has_deadline(attributes: &TaskAttributes) -> bool {
     attributes.deadline.is_some()
-        || attributes.deadline_type.is_some()
+        || attributes.commitment.is_some()
         || attributes.priority.is_some()
 }
 
@@ -72,7 +72,7 @@ fn has_quota_target(attributes: &TaskAttributes) -> bool {
 /// The closed domains, restated here on purpose. The core parses these
 /// strings but does not enumerate them, so writing the membership out is what
 /// lets a property check the domain from outside rather than against itself.
-const DEADLINE_TYPES: [&str; 2] = ["hard", "soft"];
+const COMMITMENTS: [&str; 2] = ["at", "by"];
 const PRIORITIES: [&str; 4] = ["P1", "P2", "P3", "P4"];
 const PERIODS: [&str; 2] = ["week", "month"];
 
@@ -102,10 +102,10 @@ const REQUIRED_STRING_FIELDS: [RequiredField; 4] = [
         set: |fields, value| fields.deadline = value,
     },
     RequiredField {
-        field: Field::DeadlineType,
-        domain: Some(&DEADLINE_TYPES),
+        field: Field::Commitment,
+        domain: Some(&COMMITMENTS),
         base: valid_committed,
-        set: |fields, value| fields.deadline_type = value,
+        set: |fields, value| fields.commitment = value,
     },
     RequiredField {
         field: Field::Priority,
@@ -141,7 +141,7 @@ fn valid_committed() -> TriageFields {
     TriageFields {
         kind: Some(COMMITTED.to_string()),
         deadline: Some(VALID_DEADLINE.to_string()),
-        deadline_type: Some("hard".to_string()),
+        commitment: Some("at".to_string()),
         priority: Some("P1".to_string()),
         estimated_minutes: Some(180),
         ..TriageFields::default()
@@ -186,7 +186,7 @@ proptest! {
     }
 
     /// A committed task reports back exactly the metadata it was given, and
-    /// never a quota target. `deadline_type`/`priority` are drawn from their
+    /// never a quota target. `commitment`/`priority` are drawn from their
     /// closed domains (validity itself is the unit tests' job); the deadline
     /// is reported as the instant it names, not the text that named it.
     #[test]
@@ -194,13 +194,13 @@ proptest! {
     fn a_committed_task_round_trips_its_metadata_and_carries_no_quota_target(
         fields in any_fields(),
         deadline in valid_deadline(),
-        deadline_type in prop::sample::select(vec!["hard", "soft"]),
+        commitment in prop::sample::select(vec!["at", "by"]),
         priority in prop::sample::select(vec!["P1", "P2", "P3", "P4"]),
     ) {
         let (deadline_text, deadline_ms) = deadline;
         let fields = TriageFields {
             deadline: Some(deadline_text.to_string()),
-            deadline_type: Some(deadline_type.to_string()),
+            commitment: Some(commitment.to_string()),
             priority: Some(priority.to_string()),
             estimated_minutes: Some(180),
             ..with_kind(fields, COMMITTED)
@@ -211,7 +211,7 @@ proptest! {
 
         prop_assert_eq!(attributes.kind, COMMITTED);
         prop_assert_eq!(attributes.deadline, Some(deadline_ms));
-        prop_assert_eq!(attributes.deadline_type, Some(deadline_type));
+        prop_assert_eq!(attributes.commitment, Some(commitment));
         prop_assert_eq!(attributes.priority, Some(priority));
         prop_assert!(!has_quota_target(&attributes));
     }
@@ -259,7 +259,7 @@ proptest! {
         let name = [POOL, COMMITTED, QUOTA][kind_index];
         let fields = TriageFields {
             deadline: Some("2026-08-20T17:00:00Z".to_string()),
-            deadline_type: Some("hard".to_string()),
+            commitment: Some("at".to_string()),
             priority: Some("P1".to_string()),
             estimated_minutes: Some(180),
             target_count: Some(3),
@@ -286,7 +286,7 @@ proptest! {
     ) {
         let fields = TriageFields {
             deadline: present[0].then(|| "2026-08-20T17:00:00Z".to_string()),
-            deadline_type: present[1].then(|| "hard".to_string()),
+            commitment: present[1].then(|| "at".to_string()),
             priority: present[2].then(|| "P1".to_string()),
             estimated_minutes: present[3].then_some(180),
             ..with_kind(fields, COMMITTED)
@@ -294,7 +294,7 @@ proptest! {
 
         let expected = [
             Field::Deadline,
-            Field::DeadlineType,
+            Field::Commitment,
             Field::Priority,
             Field::EstimatedMinutes,
         ]
@@ -338,20 +338,20 @@ proptest! {
     #[ignore]
     fn every_value_inside_a_closed_domain_round_trips(
         fields in any_fields(),
-        deadline_type in prop::sample::select(&DEADLINE_TYPES[..]),
+        commitment in prop::sample::select(&COMMITMENTS[..]),
         priority in prop::sample::select(&PRIORITIES[..]),
         period in prop::sample::select(&PERIODS[..]),
     ) {
         let committed = TaskKind::from_fields(&TriageFields {
             deadline: Some(VALID_DEADLINE.to_string()),
-            deadline_type: Some(deadline_type.to_string()),
+            commitment: Some(commitment.to_string()),
             priority: Some(priority.to_string()),
             estimated_minutes: Some(180),
             ..with_kind(fields.clone(), COMMITTED)
         })
         .unwrap()
         .attributes();
-        prop_assert_eq!(committed.deadline_type, Some(deadline_type));
+        prop_assert_eq!(committed.commitment, Some(commitment));
         prop_assert_eq!(committed.priority, Some(priority));
 
         let quota = TaskKind::from_fields(&TriageFields {
@@ -446,7 +446,7 @@ proptest! {
         let fields = TriageFields {
             kind: Some(COMMITTED.to_string()),
             deadline: None,
-            deadline_type: Some("hard".to_string()),
+            commitment: Some("at".to_string()),
             priority: Some(garbage),
             ..TriageFields::default()
         };
@@ -472,7 +472,7 @@ proptest! {
             TaskKind::from_fields(&TriageFields {
                 kind: Some(COMMITTED.to_string()),
                 deadline: Some(text.to_string()),
-                deadline_type: Some("hard".to_string()),
+                commitment: Some("at".to_string()),
                 priority: Some("P1".to_string()),
                 estimated_minutes: Some(180),
                 ..TriageFields::default()

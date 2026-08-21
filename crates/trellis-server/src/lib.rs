@@ -8,6 +8,8 @@
 //! - [`inbox`] — what is still waiting, and what has already become a task.
 //! - [`pool`] — the first Menu tab: pool tasks grouped by where they can be
 //!   done (#92).
+//! - [`committed`] — the third Menu tab: what has a date on it, listed
+//!   chronologically (#94).
 //! - [`settings`] — the owner's timezone, one value for the whole product.
 //!   Its only reader (`free_time`) is gone (#88); kept because #85 needs it.
 //! - [`platform`] — deliberately *not* a capability: the route table, the
@@ -20,6 +22,14 @@
 //! M3 (the scheduler) is paused, not cancelled, by #88's demolition, and
 //! rebuilding 775 subtle lines with 1000-case properties is not cheap the
 //! way the five deleted server capabilities were.
+//!
+//! **A caller is not all they are missing.** `ScheduleTask` requires
+//! `life_area_id` and `deadline_type`, and [`triage::store::insert_task`]
+//! now binds a literal `NULL` for both — life areas went at #88, the
+//! hard/soft axis at #94. Reviving M3 needs those answered first (does
+//! at/by drive the backward pass instead; does the scheduler group by
+//! context tag now that tags are the taxonomy), which is a decision, not a
+//! re-attachment. Recorded in `docs/design/architecture.md`'s gaps index.
 //!
 //! `T-module-boundary`'s dependency rule is unchanged by the packaging; only
 //! its directory shape is. Dependencies still point inward:
@@ -47,6 +57,7 @@
 //! it ever stops covering anything.
 
 pub mod capture;
+pub mod committed;
 pub mod dismiss;
 pub mod inbox;
 pub mod platform;

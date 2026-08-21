@@ -267,6 +267,27 @@ jobs:
       - name: Release build (musl, static)
         run: ./scripts/qa/release_binary.sh
 
+      # issue #98: ops/update.sh installs Trellis on jtg-tower from this
+      # artifact, never by compiling locally. The build two steps up already
+      # produces exactly the binary that host runs and already asserts it is
+      # static -- this step's only job is to keep the artifact instead of
+      # letting the runner discard it, so what gets installed is
+      # byte-identical to what this gate proved green.
+      #
+      # trunk only, and only on push: a PR's build is unmerged code, and
+      # shipping it to the one real host this project runs on would make
+      # "green on trunk" stop meaning what ops/update.sh assumes it means.
+      # pull_request runs of this same job still build and test the binary --
+      # they just do not upload it.
+      - name: Upload release binary (trunk only)
+        if: ${{ github.ref == 'refs/heads/trunk' && github.event_name == 'push' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: trellis-linux-musl
+          path: target/x86_64-unknown-linux-musl/release/trellis
+          if-no-files-found: error
+          retention-days: 90
+
   # The Gherkin acceptance suite and the analyzers (issue #26). Until this job
   # existed, CI enforced none of the thresholds
   # swarmforge/constitution/articles/stack.prompt declares, and the acceptance

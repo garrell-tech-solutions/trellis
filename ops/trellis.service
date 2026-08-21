@@ -1,0 +1,31 @@
+# Trellis, run as a systemd --user unit rather than a system unit.
+#
+# Why user, not system: this host (jtg-tower) has Linger=no by default, which
+# means a user unit would die the moment the desktop session ends -- silently,
+# with no error connecting cause to effect (issue #98). The fix is either
+# `loginctl enable-linger` or a system unit. install.sh runs
+# `loginctl enable-linger "$USER"` as part of setup, which keeps the user
+# instance (and this unit) running from boot without anyone logged in, and
+# without needing root to own the unit file or the service's data directory.
+# A system unit was the alternative; it was not chosen because it would need
+# root for every future edit to this file, where a user unit only needs it
+# once, for the linger flag.
+#
+# %h expands to the invoking user's home directory (systemd specifier), so
+# this file is portable across the account without hardcoding a path.
+
+[Unit]
+Description=Trellis (personal task scheduler)
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/trellis serve --db %h/.local/share/trellis/trellis.db --addr 127.0.0.1:8080
+Restart=on-failure
+RestartSec=5
+# Trellis is a single-user, local-only app (R-multi-tenancy) reachable only
+# through `tailscale serve`'s reverse proxy on 127.0.0.1 -- see
+# ops/install.sh. Nothing here widens that.
+
+[Install]
+WantedBy=default.target

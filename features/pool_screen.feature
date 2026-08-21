@@ -10,8 +10,15 @@
 # pool-screen-nothing-reorders-05: everything is newest first and nothing on the screen can be reordered
 # pool-screen-truncation-06: a long trip shows three and offers the rest
 # pool-screen-empty-07: with nothing pooled the screen says so and points at Capture
-# pool-screen-tabs-08: the tab bar offers Capture and Pool and marks the current one
 # pool-screen-escapes-hostile-text-09: a hostile context tag stays escaped on this screen
+#
+# THE TAB-BAR SCENARIO IS GONE, not inverted. pool-screen-tabs-08 asserted
+# the tab bar offered exactly Capture and Pool -- true only while Pool was
+# the last tab. #94 adds Committed, and committed-screen-tabs-06 already
+# names all three screens over all three tabs, so keeping a second,
+# narrower assertion here would just be two features restating one fact
+# until one of them drifts. The guarantee moved rather than lapsed, the
+# same shape one_screen.feature's own no-header scenario took under #92.
 #
 # THE TRIP THRESHOLD IS THREE, and it is the idea the whole screen turns on.
 # A context tag becomes a trip only once three things are waiting there;
@@ -156,17 +163,6 @@ Feature: The pool screen groups loose work by where it can be done
     Examples:
       | meta  |
       | empty |
-
-  # pool-screen-tabs-08: the tab bar offers Capture and Pool and marks the current one
-  Scenario: The tab bar offers Capture and Pool and marks the current one
-    When the "<screen>" screen is viewed
-    Then the tab bar offers exactly "<tabs>"
-    And the tab bar marks "<current>" as the current tab
-
-    Examples:
-      | screen  | tabs           | current |
-      | capture | Capture, Pool  | Capture |
-      | pool    | Capture, Pool  | Pool    |
 
   # pool-screen-escapes-hostile-text-09: a hostile context tag stays escaped on this screen
   Scenario: A hostile context tag stays escaped on this screen

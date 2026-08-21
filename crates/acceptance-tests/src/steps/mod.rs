@@ -19,6 +19,7 @@ mod build;
 mod capture;
 mod committed_empty_fields;
 mod committed_field_domains;
+mod committed_screen;
 mod context_tags;
 mod dismiss;
 mod html;
@@ -235,6 +236,9 @@ pub async fn dispatch(
         return outcome;
     }
     if let Some(outcome) = pool_screen::dispatch(world, text, example).await {
+        return outcome;
+    }
+    if let Some(outcome) = committed_screen::dispatch(world, text, example).await {
         return outcome;
     }
 

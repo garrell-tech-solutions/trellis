@@ -6,7 +6,7 @@
 # triage-from-page-offers-all-kinds-01: each untriaged capture offers all three triage kinds from the page
 # triage-from-page-pool-02: triaging as pool through the page moves the capture into the task list without a full page reload
 # triage-from-page-committed-rejected-03: triaging as committed through the page with a required field omitted is rejected the same way as the API
-# triage-from-page-committed-closed-choices-04: the committed form offers deadline type and priority as fixed choices, not free text
+# triage-from-page-committed-closed-choices-04: the committed form offers commitment and priority as fixed choices, not free text
 # triage-from-page-quota-rejected-05: triaging as quota through the page with a required field omitted is rejected the same way as the API
 # triage-from-page-escapes-hostile-text-06: hostile capture text stays escaped in the task list
 # triage-from-page-pool-needs-no-form-07: pool triage is submitted straight from the row, with nothing to open first
@@ -44,11 +44,11 @@ Feature: Triage happens on the page, using the same validation as the API
     And the task list is still empty
     And the capture is still waiting in the untriaged queue
 
-  # triage-from-page-committed-closed-choices-04: the committed form offers deadline type and priority as fixed choices, not free text
-  Scenario: The committed form offers deadline type and priority as fixed choices, not free text
+  # triage-from-page-committed-closed-choices-04: the committed form offers commitment and priority as fixed choices, not free text
+  Scenario: The committed form offers commitment and priority as fixed choices, not free text
     Given a capture with raw text "call the dentist" is waiting in the untriaged queue
     When the inbox is viewed
-    Then the committed form offers exactly the deadline type choices "hard" and "soft"
+    Then the committed form offers exactly the commitment choices "at" and "by"
     And the committed form offers exactly the priority choices "P1", "P2", "P3" and "P4"
 
   # triage-from-page-quota-rejected-05: triaging as quota through the page with a required field omitted is rejected the same way as the API

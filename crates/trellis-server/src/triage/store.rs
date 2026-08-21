@@ -13,11 +13,11 @@
 use scheduler_core::task::TaskKind;
 use sqlx::SqlitePool;
 
-/// `tasks.life_area_id` stays in the schema (#88, `T-migrations-append-only`:
-/// dropping the column means rebuilding the table for nothing) but nothing
-/// upstream of this function can produce a value for it any more, so this
-/// always writes `NULL` rather than carrying a parameter every real caller
-/// would pass `None` to.
+/// `tasks.life_area_id` and `tasks.deadline_type` both stay in the schema
+/// (#88 and #94, `T-migrations-append-only`: dropping either column means
+/// rebuilding the table for nothing) but nothing upstream of this function
+/// can produce a value for either any more, so this always writes `NULL`
+/// rather than carrying a parameter every real caller would pass `None` to.
 pub async fn insert_task(
     pool: &SqlitePool,
     capture_id: i64,
@@ -26,15 +26,15 @@ pub async fn insert_task(
 ) -> Result<(), sqlx::Error> {
     let attributes = kind.attributes();
     sqlx::query(
-        "INSERT INTO tasks (capture_id, kind, deadline, deadline_type, priority, \
+        "INSERT INTO tasks (capture_id, kind, deadline, deadline_type, commitment, priority, \
          estimated_minutes, target_count, target_minutes_each, period, life_area_id, \
          created_at_ms) \
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?)",
+         VALUES (?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, NULL, ?)",
     )
     .bind(capture_id)
     .bind(attributes.kind)
     .bind(attributes.deadline)
-    .bind(attributes.deadline_type)
+    .bind(attributes.commitment)
     .bind(attributes.priority)
     .bind(attributes.estimated_minutes)
     .bind(attributes.target_count)
@@ -50,7 +50,7 @@ pub async fn insert_task(
 mod tests {
     use super::*;
     use crate::platform::test_support::test_pool;
-    use scheduler_core::task::{DeadlineType, Period, Priority};
+    use scheduler_core::task::{Commitment, Period, Priority};
 
     /// Setting up "a capture exists" by calling the capture domain's own
     /// writer rather than retyping its `INSERT` here: a fixture that spells
@@ -74,7 +74,7 @@ mod tests {
 
     async fn stored_task(pool: &SqlitePool) -> StoredTask {
         sqlx::query_as(
-            "SELECT kind, deadline, deadline_type, priority, estimated_minutes, \
+            "SELECT kind, deadline, commitment, priority, estimated_minutes, \
              target_count, target_minutes_each, period FROM tasks",
         )
         .fetch_one(pool)
@@ -85,7 +85,7 @@ mod tests {
     fn committed() -> TaskKind {
         TaskKind::Committed {
             deadline: 1787245200000,
-            deadline_type: DeadlineType::Hard,
+            commitment: Commitment::At,
             priority: Priority::P1,
             estimated_minutes: 180,
         }
@@ -128,7 +128,7 @@ mod tests {
             (
                 "committed".to_string(),
                 Some(1787245200000),
-                Some("hard".to_string()),
+                Some("at".to_string()),
                 Some("P1".to_string()),
                 Some(180),
                 None,
@@ -136,6 +136,22 @@ mod tests {
                 None,
             )
         );
+    }
+
+    #[tokio::test]
+    async fn a_committed_task_leaves_the_retired_deadline_type_column_null() {
+        let (_dir, pool) = test_pool().await;
+        let capture_id = given_a_capture(&pool, "buy milk").await;
+
+        insert_task(&pool, capture_id, &committed(), 7)
+            .await
+            .unwrap();
+
+        let deadline_type: Option<String> = sqlx::query_scalar("SELECT deadline_type FROM tasks")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(deadline_type, None);
     }
 
     #[tokio::test]

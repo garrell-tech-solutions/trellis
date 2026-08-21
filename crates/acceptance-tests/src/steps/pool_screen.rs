@@ -238,6 +238,7 @@ async fn dispatch_screen_viewed(
     let path = match screen.as_str() {
         "capture" => "/",
         "pool" => "/pool",
+        "committed" => "/committed",
         other => return Err(format!("unknown screen {other:?}")),
     };
     view_screen(world, path).await

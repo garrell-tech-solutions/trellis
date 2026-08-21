@@ -94,7 +94,7 @@ mod tests {
             committed_capture,
             &TaskKind::Committed {
                 deadline: 1787245200000,
-                deadline_type: scheduler_core::task::DeadlineType::Hard,
+                commitment: scheduler_core::task::Commitment::At,
                 priority: scheduler_core::task::Priority::P1,
                 estimated_minutes: 30,
             },

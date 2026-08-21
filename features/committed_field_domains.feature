@@ -4,9 +4,14 @@
 
 # committed-field-domains-deadline-round-trip-01: a well-formed deadline round-trips to the same instant regardless of its exact textual form
 # committed-field-domains-invalid-deadline-02: an unparseable or invalid deadline is rejected and creates nothing
-# committed-field-domains-invalid-deadline-type-03: a deadline type outside hard and soft is rejected and creates nothing
+# committed-field-domains-invalid-commitment-03: a commitment outside at and by is rejected and creates nothing
 # committed-field-domains-invalid-priority-04: a priority outside P1 through P4 is rejected and creates nothing
-Feature: Committed triage validates the values of deadline, deadline type and priority, not just their presence
+#
+# `commitment` (at | by) replaced `deadline_type` (hard | soft) in #94's
+# required set (D-committed-is-at-or-by); this scenario moved with it --
+# it is the same "a value outside the closed domain is rejected" guarantee
+# `committed_triage_validation.feature` already restated for presence.
+Feature: Committed triage validates the values of deadline, commitment and priority, not just their presence
 
   Background:
     Given the trellis server is running with an empty task list
@@ -36,18 +41,18 @@ Feature: Committed triage validates the values of deadline, deadline type and pr
       | 2026-13-45T99:99:99Z       |
       | '); DROP TABLE tasks;--    |
 
-  # committed-field-domains-invalid-deadline-type-03: a deadline type outside hard and soft is rejected and creates nothing
-  Scenario: A deadline type outside hard and soft is rejected
-    When the capture is triaged as a committed task with a deadline type of "<bad_deadline_type>"
+  # committed-field-domains-invalid-commitment-03: a commitment outside at and by is rejected and creates nothing
+  Scenario: A commitment outside at and by is rejected
+    When the capture is triaged as a committed task with a commitment of "<bad_commitment>"
     Then the triage is rejected
-    And the rejection reports "deadline_type" as invalid
+    And the rejection reports "commitment" as invalid
     And the task list is still empty
     And the capture is still waiting in the untriaged queue
 
     Examples:
-      | bad_deadline_type |
-      | squishy            |
-      | HARD                |
+      | bad_commitment |
+      | hard           |
+      | AT              |
 
   # committed-field-domains-invalid-priority-04: a priority outside P1 through P4 is rejected and creates nothing
   Scenario: A priority outside P1 through P4 is rejected

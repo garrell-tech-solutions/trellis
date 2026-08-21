@@ -8,6 +8,8 @@
 //! - [`inbox`] — what is still waiting, and what has already become a task.
 //! - [`pool`] — the first Menu tab: pool tasks grouped by where they can be
 //!   done (#92).
+//! - [`committed`] — the third Menu tab: what has a date on it, listed
+//!   chronologically (#94).
 //! - [`settings`] — the owner's timezone, one value for the whole product.
 //!   Its only reader (`free_time`) is gone (#88); kept because #85 needs it.
 //! - [`platform`] — deliberately *not* a capability: the route table, the
@@ -47,6 +49,7 @@
 //! it ever stops covering anything.
 
 pub mod capture;
+pub mod committed;
 pub mod dismiss;
 pub mod inbox;
 pub mod platform;

@@ -22,13 +22,18 @@
 pub struct CaptureRow {
     pub id: i64,
     pub text: String,
+    pub context_tag: Option<String>,
     pub error: Option<String>,
 }
 
-/// One task as the task list shows it.
+/// One task as the task list shows it. `context_tag` is the capture's, read
+/// through the join `inbox::store::list_tasks` issues — a task carries no
+/// tag column of its own (`context-tags-survives-triage-07`'s "one fact, one
+/// row").
 pub struct TaskRow {
     pub kind: String,
     pub text: String,
+    pub context_tag: Option<String>,
 }
 
 #[cfg(test)]
@@ -36,24 +41,28 @@ mod tests {
     use super::*;
 
     #[test]
-    fn a_capture_row_carries_its_id_text_and_error() {
+    fn a_capture_row_carries_its_id_text_tag_and_error() {
         let row = CaptureRow {
             id: 7,
             text: "buy milk".to_string(),
+            context_tag: Some("@homedepot".to_string()),
             error: Some("deadline is required".to_string()),
         };
         assert_eq!(row.id, 7);
         assert_eq!(row.text, "buy milk");
+        assert_eq!(row.context_tag.as_deref(), Some("@homedepot"));
         assert_eq!(row.error.as_deref(), Some("deadline is required"));
     }
 
     #[test]
-    fn a_task_row_carries_its_kind_and_text() {
+    fn a_task_row_carries_its_kind_text_and_tag() {
         let row = TaskRow {
             kind: "pool".to_string(),
             text: "buy milk".to_string(),
+            context_tag: Some("@homedepot".to_string()),
         };
         assert_eq!(row.kind, "pool");
         assert_eq!(row.text, "buy milk");
+        assert_eq!(row.context_tag.as_deref(), Some("@homedepot"));
     }
 }

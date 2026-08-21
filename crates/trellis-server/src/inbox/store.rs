@@ -13,13 +13,16 @@ use sqlx::SqlitePool;
 pub struct UntriagedCapture {
     pub id: i64,
     pub raw_text: String,
+    pub context_tag: Option<String>,
 }
 
 /// Untriaged captures, newest first — the inbox's contents.
 pub async fn list_untriaged(pool: &SqlitePool) -> Result<Vec<UntriagedCapture>, sqlx::Error> {
-    sqlx::query_as("SELECT id, raw_text FROM captures WHERE left_inbox_at IS NULL ORDER BY id DESC")
-        .fetch_all(pool)
-        .await
+    sqlx::query_as(
+        "SELECT id, raw_text, context_tag FROM captures WHERE left_inbox_at IS NULL ORDER BY id DESC",
+    )
+    .fetch_all(pool)
+    .await
 }
 
 /// [`list_untriaged`]'s `WHERE` clause asked about one row: is this capture
@@ -64,19 +67,23 @@ pub(super) async fn close_capture(
     Ok(())
 }
 
-/// A row of [`list_tasks`]: a task, alongside the text of the capture it was
-/// triaged from — the task list's own rows have no text of their own to
-/// show, so the join is this query's business, not the page's.
+/// A row of [`list_tasks`]: a task, alongside the text and context tag of
+/// the capture it was triaged from — the task list's own rows have neither
+/// of their own to show, so both are this query's business, not the page's.
+/// `context_tag` comes through the join rather than a column of its own
+/// (`context-tags-survives-triage-07`'s "one fact, one row": the tag lives
+/// on `captures`, and a task reads it, never copies it).
 #[derive(Debug, Clone, PartialEq, Eq, sqlx::FromRow)]
 pub struct TaskWithCaptureText {
     pub kind: String,
     pub raw_text: String,
+    pub context_tag: Option<String>,
 }
 
 /// Every task, newest first.
 pub async fn list_tasks(pool: &SqlitePool) -> Result<Vec<TaskWithCaptureText>, sqlx::Error> {
     sqlx::query_as(
-        "SELECT tasks.kind, captures.raw_text FROM tasks \
+        "SELECT tasks.kind, captures.raw_text, captures.context_tag FROM tasks \
          JOIN captures ON captures.id = tasks.capture_id \
          ORDER BY tasks.id DESC",
     )
@@ -96,7 +103,7 @@ mod tests {
     /// writer rather than retyping its `INSERT` here: a fixture that spells
     /// out another module's SQL is a second copy of that schema.
     async fn given_a_capture(pool: &SqlitePool, raw_text: &str) -> i64 {
-        crate::capture::store::insert(pool, raw_text, "web", 0)
+        crate::capture::store::insert(pool, raw_text, "web", None, 0)
             .await
             .unwrap()
     }
@@ -251,8 +258,25 @@ mod tests {
             vec![TaskWithCaptureText {
                 kind: "pool".to_string(),
                 raw_text: "buy milk".to_string(),
+                context_tag: None,
             }]
         );
+    }
+
+    #[tokio::test]
+    async fn list_tasks_reports_the_context_tag_of_the_capture_it_came_from() {
+        let (_dir, pool) = test_pool().await;
+        let (capture_id, _) =
+            crate::capture::create(&pool, "buy screws", "web", Some("@homedepot"), 0)
+                .await
+                .unwrap();
+
+        insert_task(&pool, capture_id, &TaskKind::Pool, 7)
+            .await
+            .unwrap();
+
+        let tasks = list_tasks(&pool).await.unwrap();
+        assert_eq!(tasks[0].context_tag.as_deref(), Some("@homedepot"));
     }
 
     #[tokio::test]

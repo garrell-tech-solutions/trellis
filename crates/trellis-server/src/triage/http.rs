@@ -51,6 +51,12 @@ fn triage_fields(payload: &Value) -> TriageFields {
 /// every field optional, since which fields matter depends on `kind`. Mirrors
 /// `scheduler_core::task::TriageFields` rather than being that type directly
 /// — the core must not depend on `serde` (T-module-boundary).
+///
+/// `context_tag` rides along but is not part of `TriageFields`: it never
+/// decides a kind or fails a submission (`context-tags-taggable-at-triage-08`
+/// is a second chance to supply a fact the core does not adjudicate), so it
+/// is extracted separately rather than smuggled into the type that exists to
+/// answer "what kind of task is this".
 #[derive(Deserialize, Default)]
 pub struct TriageFormRequest {
     kind: Option<String>,
@@ -61,19 +67,21 @@ pub struct TriageFormRequest {
     target_count: Option<i64>,
     target_minutes_each: Option<i64>,
     period: Option<String>,
+    #[serde(default)]
+    context_tag: Option<String>,
 }
 
-impl From<TriageFormRequest> for TriageFields {
-    fn from(form: TriageFormRequest) -> Self {
+impl From<&TriageFormRequest> for TriageFields {
+    fn from(form: &TriageFormRequest) -> Self {
         TriageFields {
-            kind: form.kind,
-            deadline: form.deadline,
-            deadline_type: form.deadline_type,
-            priority: form.priority,
+            kind: form.kind.clone(),
+            deadline: form.deadline.clone(),
+            deadline_type: form.deadline_type.clone(),
+            priority: form.priority.clone(),
             estimated_minutes: form.estimated_minutes,
             target_count: form.target_count,
             target_minutes_each: form.target_minutes_each,
-            period: form.period,
+            period: form.period.clone(),
         }
     }
 }
@@ -235,18 +243,41 @@ async fn page_response(
     inbox::render_lists(pool, status, error).await
 }
 
-/// The two things every branch of [`TriageInput`] must produce: the fields
-/// the core decides on, and the raw `kind` a rejection echoes back
-/// (T-unknown-kind-rejected).
-fn fields_from_input(input: TriageInput) -> (TriageFields, Value) {
+/// The three things every branch of [`TriageInput`] must produce: the fields
+/// the core decides on, the raw `kind` a rejection echoes back
+/// (T-unknown-kind-rejected), and the raw context tag submitted alongside —
+/// present on both transports, decided by neither.
+fn fields_from_input(input: TriageInput) -> (TriageFields, Value, Option<String>) {
     match input {
         TriageInput::Json(payload) => {
             let kind_submitted = payload.get("kind").cloned().unwrap_or(Value::Null);
-            (triage_fields(&payload), kind_submitted)
+            let context_tag = string_field(&payload, "context_tag");
+            (triage_fields(&payload), kind_submitted, context_tag)
         }
         TriageInput::Form(form) => {
             let kind_submitted = json!(form.kind);
-            (form.into(), kind_submitted)
+            let context_tag = form.context_tag.clone();
+            (TriageFields::from(&form), kind_submitted, context_tag)
+        }
+    }
+}
+
+/// The JSON-API-originated response: the existing contract, unchanged --
+/// `{}` on success, `rejected`'s body on refusal.
+async fn json_response(
+    pool: &SqlitePool,
+    capture_id: i64,
+    outcome: TriageOutcome,
+    kind_submitted: &Value,
+    created_at_ms: i64,
+) -> Result<Response, StatusCode> {
+    match outcome {
+        TriageOutcome::Accepted { kind } => {
+            write_task(pool, capture_id, &kind, created_at_ms).await?;
+            Ok((StatusCode::CREATED, Json(json!({}))).into_response())
+        }
+        TriageOutcome::Rejected(rejection) => {
+            Ok(rejected(&rejection, kind_submitted).into_response())
         }
     }
 }
@@ -258,30 +289,28 @@ pub async fn create_triage(
     input: TriageInput,
 ) -> Result<Response, StatusCode> {
     let from_page = matches!(input, TriageInput::Form(_));
-    let (fields, kind_submitted) = fields_from_input(input);
+    let (fields, kind_submitted, context_tag) = fields_from_input(input);
     let created_at_ms = clock.now_ms();
 
     let outcome = decide_triage(&pool, capture_id, &fields).await?;
 
-    if from_page {
-        return page_response(&pool, capture_id, &outcome, &kind_submitted, created_at_ms).await;
+    if let TriageOutcome::Accepted { .. } = &outcome {
+        crate::capture::retag(&pool, capture_id, context_tag.as_deref())
+            .await
+            .map_err(write_failed)?;
     }
 
-    match outcome {
-        TriageOutcome::Accepted { kind } => {
-            write_task(&pool, capture_id, &kind, created_at_ms).await?;
-            Ok((StatusCode::CREATED, Json(json!({}))).into_response())
-        }
-        TriageOutcome::Rejected(rejection) => {
-            Ok(rejected(&rejection, &kind_submitted).into_response())
-        }
+    if from_page {
+        page_response(&pool, capture_id, &outcome, &kind_submitted, created_at_ms).await
+    } else {
+        json_response(&pool, capture_id, outcome, &kind_submitted, created_at_ms).await
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::platform::test_support::test_pool;
+    use crate::platform::test_support::{stored_context_tag, test_pool};
     use axum::body::Body;
     use axum::http::Request;
     use proptest::prelude::*;
@@ -395,6 +424,73 @@ mod tests {
         assert_eq!(row.2, None, "pool task must have no quota target");
         assert_eq!(row.3, None, "pool task must have no quota target");
         assert_eq!(row.4, None, "pool task must have no quota target");
+    }
+
+    #[tokio::test]
+    async fn triaging_with_a_context_tag_writes_it_onto_the_capture_not_the_task() {
+        let (_dir, pool) = test_pool().await;
+        let capture_id = insert_untriaged_capture(&pool, "buy screws").await;
+
+        let response = triage_response(
+            &pool,
+            capture_id,
+            json!({ "kind": "pool", "context_tag": "@homedepot" }),
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::CREATED);
+        assert_eq!(
+            stored_context_tag(&pool, capture_id).await.as_deref(),
+            Some("@homedepot")
+        );
+    }
+
+    #[tokio::test]
+    async fn triaging_a_capture_that_already_carries_a_tag_with_no_tag_submitted_leaves_it() {
+        let (_dir, pool) = test_pool().await;
+        let (capture_id, _) =
+            crate::capture::create(&pool, "buy screws", "web", Some("@homedepot"), 0)
+                .await
+                .unwrap();
+
+        let response = triage_response(&pool, capture_id, json!({ "kind": "pool" })).await;
+
+        assert_eq!(response.status(), StatusCode::CREATED);
+        assert_eq!(
+            stored_context_tag(&pool, capture_id).await.as_deref(),
+            Some("@homedepot")
+        );
+    }
+
+    #[tokio::test]
+    async fn a_rejected_triage_does_not_write_the_submitted_tag() {
+        let (_dir, pool) = test_pool().await;
+        let capture_id = insert_untriaged_capture(&pool, "buy screws").await;
+
+        let response =
+            triage_response(&pool, capture_id, json!({ "context_tag": "@homedepot" })).await;
+
+        assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+        assert_eq!(stored_context_tag(&pool, capture_id).await, None);
+    }
+
+    #[tokio::test]
+    async fn triaging_through_the_page_with_a_context_tag_writes_it() {
+        let (_dir, pool) = test_pool().await;
+        let capture_id = insert_untriaged_capture(&pool, "buy screws").await;
+
+        let response = page_triage_response(
+            &pool,
+            capture_id,
+            &[("kind", "pool"), ("context_tag", "@homedepot")],
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::CREATED);
+        assert_eq!(
+            stored_context_tag(&pool, capture_id).await.as_deref(),
+            Some("@homedepot")
+        );
     }
 
     #[tokio::test]
@@ -1032,6 +1128,7 @@ mod tests {
             target_count: fields.target_count,
             target_minutes_each: fields.target_minutes_each,
             period: fields.period.clone(),
+            context_tag: None,
         }
     }
 
@@ -1069,10 +1166,37 @@ mod tests {
             };
 
             let from_json = triage_fields(&json_body(&submission));
-            let from_form: TriageFields = form_request(&submission).into();
+            let from_form: TriageFields = TriageFields::from(&form_request(&submission));
 
             prop_assert_eq!(&from_json, &submission);
             prop_assert_eq!(from_json, from_form);
+        }
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig { cases: 32, ..ProptestConfig::default() })]
+
+        /// The context-tag counterpart of the property above: not part of
+        /// `TriageFields` (it decides no kind and fails no submission), but
+        /// still a field both transports must agree on
+        /// (`context-tags-taggable-at-triage-08`).
+        #[test]
+        #[ignore]
+        fn both_transports_extract_the_same_context_tag(
+            context_tag in proptest::option::of(".{0,20}"),
+        ) {
+            let mut json_payload = json_body(&TriageFields::default());
+            if let Some(tag) = &context_tag {
+                json_payload["context_tag"] = Value::from(tag.clone());
+            }
+            let (_, _, from_json) = fields_from_input(TriageInput::Json(json_payload));
+
+            let mut form = form_request(&TriageFields::default());
+            form.context_tag = context_tag.clone();
+            let (_, _, from_form) = fields_from_input(TriageInput::Form(form));
+
+            prop_assert_eq!(from_json, context_tag.clone());
+            prop_assert_eq!(from_form, context_tag);
         }
     }
 }

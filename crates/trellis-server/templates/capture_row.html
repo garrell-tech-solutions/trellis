@@ -1,8 +1,9 @@
 <li id="capture-row-{{ capture.id }}" class="row">
-<div class="row-text">{{ capture.text }}</div>
+<div class="row-text">{{ capture.text }}{% if let Some(tag) = capture.context_tag %} {{ tag }}{% endif %}</div>
 <div class="kinds">
 <form class="kind kind-wide" hx-post="/captures/{{ capture.id }}/triage" hx-target="#lists" hx-swap="outerHTML">
 <input type="hidden" name="kind" value="pool">
+<label>Tag <input type="text" name="context_tag" list="context-tag-suggestions" placeholder="@homedepot"></label>
 <button type="submit">Pool</button>
 </form>
 <details class="kind">
@@ -25,6 +26,7 @@
 </select>
 </label>
 <label>Estimate (minutes) <input type="number" name="estimated_minutes" placeholder="180"></label>
+<label>Tag <input type="text" name="context_tag" list="context-tag-suggestions" placeholder="@homedepot"></label>
 <div class="actions"><button type="submit">Add</button></div>
 </form>
 </details>
@@ -40,6 +42,7 @@
 <option value="month">month</option>
 </select>
 </label>
+<label>Tag <input type="text" name="context_tag" list="context-tag-suggestions" placeholder="@homedepot"></label>
 <div class="actions"><button type="submit">Add</button></div>
 </form>
 </details>

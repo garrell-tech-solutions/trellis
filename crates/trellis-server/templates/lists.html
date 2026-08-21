@@ -1,4 +1,9 @@
 <div id="lists">
+<datalist id="context-tag-suggestions">
+{% for tag in context_tag_suggestions %}
+<option value="{{ tag }}">
+{% endfor %}
+</datalist>
 <h2>Recent</h2>
 {% if captures.is_empty() %}
 <p>Nothing to triage. Start with the thing you keep half&#8209;remembering.</p>

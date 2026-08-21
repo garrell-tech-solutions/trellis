@@ -15,13 +15,14 @@ use sqlx::SqlitePool;
 struct InboxTemplate {
     captures: Vec<CaptureRow>,
     tasks: Vec<TaskRow>,
+    context_tag_suggestions: Vec<String>,
 }
 
 /// The full page is the only thing that is not the `#lists` fragment, so it
-/// is the only caller that takes `build_lists`' two lists apart instead
+/// is the only caller that takes `build_lists`' three fields apart instead
 /// of going through `lists::respond`. `inbox.html` `{% include %}`s
 /// `lists.html`, and an Askama include renders in its parent's context, so
-/// the page template has to carry the same two fields by the same names.
+/// the page template has to carry the same three fields by the same names.
 ///
 /// No header, no nav (#88, `one-screen-no-header-02`): with `/` the only
 /// route, there is nothing to navigate between until #85 brings a second
@@ -33,6 +34,7 @@ pub async fn show_inbox(State(pool): State<SqlitePool>) -> Result<Response, Stat
         &InboxTemplate {
             captures: lists.captures,
             tasks: lists.tasks,
+            context_tag_suggestions: lists.context_tag_suggestions,
         },
     ))
 }

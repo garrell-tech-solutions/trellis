@@ -26,6 +26,11 @@ use sqlx::SqlitePool;
 pub(super) struct ListsTemplate {
     pub(super) captures: Vec<CaptureRow>,
     pub(super) tasks: Vec<TaskRow>,
+    /// Every tag in use, for the `<datalist>` every triage form and the
+    /// quick-add box reference by `list=` (`context-tags-suggestions-05`).
+    /// Rebuilt on every render from stored values, never from anything the
+    /// process remembers — the same reason `captures` and `tasks` are.
+    pub(super) context_tag_suggestions: Vec<String>,
 }
 
 /// `T-forms-swap-one-fragment`'s response contract, implemented once:
@@ -63,6 +68,7 @@ pub(super) async fn build_lists(
     Ok(ListsTemplate {
         captures: build_capture_rows(pool, error).await?,
         tasks: build_task_rows(pool).await?,
+        context_tag_suggestions: crate::capture::distinct_tags(pool).await?,
     })
 }
 
@@ -75,6 +81,7 @@ async fn build_capture_rows(
         .into_iter()
         .map(|capture| CaptureRow {
             id: capture.id,
+            context_tag: capture.context_tag,
             error: error
                 .as_ref()
                 .filter(|(id, _)| *id == capture.id)
@@ -91,6 +98,7 @@ async fn build_task_rows(pool: &SqlitePool) -> Result<Vec<TaskRow>, sqlx::Error>
         .map(|task| TaskRow {
             kind: task.kind,
             text: task.raw_text,
+            context_tag: task.context_tag,
         })
         .collect())
 }
@@ -105,10 +113,12 @@ mod tests {
     #[tokio::test]
     async fn an_error_attaches_only_to_the_capture_that_failed_triage() {
         let (_dir, pool) = test_pool().await;
-        let failed_id = insert_capture(&pool, "call the dentist", "web", 0)
+        let failed_id = insert_capture(&pool, "call the dentist", "web", None, 0)
             .await
             .unwrap();
-        let other_id = insert_capture(&pool, "buy milk", "web", 1).await.unwrap();
+        let other_id = insert_capture(&pool, "buy milk", "web", None, 1)
+            .await
+            .unwrap();
 
         let lists = build_lists(&pool, Some((failed_id, "deadline is required".to_string())))
             .await
@@ -123,7 +133,9 @@ mod tests {
     #[tokio::test]
     async fn the_task_list_carries_each_triaged_tasks_kind_and_capture_text() {
         let (_dir, pool) = test_pool().await;
-        let capture_id = insert_capture(&pool, "buy milk", "web", 0).await.unwrap();
+        let capture_id = insert_capture(&pool, "buy milk", "web", None, 0)
+            .await
+            .unwrap();
         crate::triage::store::insert_task(&pool, capture_id, &TaskKind::Pool, 0)
             .await
             .unwrap();
@@ -133,5 +145,41 @@ mod tests {
         assert_eq!(tasks.len(), 1);
         assert_eq!(tasks[0].kind, "pool");
         assert_eq!(tasks[0].text, "buy milk");
+    }
+
+    #[tokio::test]
+    async fn context_tag_suggestions_is_empty_against_a_fresh_database() {
+        let (_dir, pool) = test_pool().await;
+
+        let lists = build_lists(&pool, None).await.unwrap();
+
+        assert_eq!(lists.context_tag_suggestions, Vec::<String>::new());
+    }
+
+    #[tokio::test]
+    async fn context_tag_suggestions_reflects_tags_in_use() {
+        let (_dir, pool) = test_pool().await;
+        crate::capture::create(&pool, "buy screws", "web", Some("@homedepot"), 0)
+            .await
+            .unwrap();
+
+        let lists = build_lists(&pool, None).await.unwrap();
+
+        assert_eq!(
+            lists.context_tag_suggestions,
+            vec!["@homedepot".to_string()]
+        );
+    }
+
+    #[tokio::test]
+    async fn a_capture_row_carries_its_context_tag() {
+        let (_dir, pool) = test_pool().await;
+        crate::capture::create(&pool, "buy screws", "web", Some("@homedepot"), 0)
+            .await
+            .unwrap();
+
+        let lists = build_lists(&pool, None).await.unwrap();
+
+        assert_eq!(lists.captures[0].context_tag.as_deref(), Some("@homedepot"));
     }
 }

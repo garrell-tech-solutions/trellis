@@ -279,6 +279,22 @@ main > h1 {
   cursor: pointer;
 }
 
+.quick-add-tag {
+  display: block;
+  width: 100%;
+  height: 36px;
+  margin: 6px 0 0;
+  padding: 0 10px;
+  border: 1px solid var(--color-gray-300);
+  outline: none;
+  font-size: 13px;
+  color: var(--color-gray-800);
+}
+
+.quick-add-tag::placeholder {
+  color: var(--color-gray-400);
+}
+
 .hint {
   margin: 0 0 16px;
   font-size: 11.5px;
@@ -428,7 +444,8 @@ main > h1 {
   color: var(--color-gray-500);
 }
 
-.kinds .kind-wide > label select {
+.kinds .kind-wide > label select,
+.kinds .kind-wide > label input[type='text'] {
   display: block;
   width: 100%;
   height: var(--tap);

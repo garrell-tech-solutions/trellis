@@ -1,7 +1,8 @@
 //! **Capture** — getting a thought out of a head and into the system before
 //! it evaporates. One route, `POST /captures`, content-negotiated so the JSON
 //! API and the inbox's quick-add box are one code path; a 50ms budget, which
-//! is why nothing slower than an insert and one indexed update happens here.
+//! is why a tagged capture costs one lookup and one insert, and an untagged
+//! one costs the insert alone.
 //!
 //! A capture is raw text and an optional context tag. It is not yet a task,
 //! carries no kind, no deadline and no priority, and is never deleted —
@@ -56,11 +57,8 @@ pub(crate) async fn create(
     raw_context_tag: Option<&str>,
     created_at_ms: i64,
 ) -> Result<(i64, Option<String>), sqlx::Error> {
-    let id = store::insert(pool, raw_text, source, created_at_ms).await?;
     let resolved = resolve_tag(pool, raw_context_tag).await?;
-    if let Some(tag) = &resolved {
-        store::set_context_tag(pool, id, tag).await?;
-    }
+    let id = store::insert(pool, raw_text, source, resolved.as_deref(), created_at_ms).await?;
     Ok((id, resolved))
 }
 
@@ -90,6 +88,7 @@ pub(crate) async fn distinct_tags(pool: &SqlitePool) -> Result<Vec<String>, sqlx
 mod tests {
     use super::*;
     use crate::platform::test_support::{stored_context_tag, test_pool};
+    use proptest::prelude::*;
 
     #[tokio::test]
     async fn resolve_tag_reports_none_for_an_absent_tag() {
@@ -192,5 +191,78 @@ mod tests {
             distinct_tags(&pool).await.unwrap(),
             vec!["@homedepot".to_string()]
         );
+    }
+
+    /// Spellings that collide case-insensitively, padded with whitespace, so
+    /// "same tag, typed differently" is the common case rather than a rare
+    /// one — which is the whole thing this property is about.
+    ///
+    /// **ASCII on purpose.** SQLite's `NOCASE` folds `A-Z` and nothing else,
+    /// so `@CAFÉ` and `@café` are two tags, not one. Generating non-ASCII
+    /// here would assert a claim the schema does not make.
+    fn any_submission() -> impl Strategy<Value = (String, String)> {
+        let tag = prop_oneof![
+            Just("@homedepot"),
+            Just("@HomeDepot"),
+            Just("@HOMEDEPOT"),
+            Just("@supermarket"),
+            Just("@SuperMarket"),
+        ];
+        let pad = prop_oneof![Just(""), Just(" "), Just("\t"), Just("  ")];
+        (tag, pad.clone(), pad, "[a-z ]{1,12}")
+            .prop_map(|(tag, before, after, text)| (text, format!("{before}{tag}{after}")))
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig { cases: 48, ..ProptestConfig::default() })]
+
+        /// **One tag, spelled the way it was first typed** —
+        /// `context-tags-case-is-one-tag-06`'s claim about one pair of
+        /// spellings, over arbitrary sequences of them.
+        ///
+        /// Two things at once, because they are one fact seen from two
+        /// sides: every capture stores the *first* spelling of its
+        /// case-insensitive class rather than the one just submitted, and
+        /// nothing a caller can type is refused by migration `0010`'s
+        /// `CHECK`. That second half is what ties
+        /// `context_tag::normalize`'s postcondition to the column that
+        /// mirrors it — a pure crate has no database to assert it against.
+        #[test]
+        #[ignore]
+        fn a_tag_is_stored_as_the_spelling_it_was_first_given(
+            submissions in prop::collection::vec(any_submission(), 1..6),
+        ) {
+            let rt = tokio::runtime::Runtime::new().unwrap();
+            let (stored, expected) = rt.block_on(async {
+                let (_dir, pool) = test_pool().await;
+                let mut first_by_class: Vec<(String, String)> = Vec::new();
+                let mut expected: Vec<String> = Vec::new();
+                let mut stored: Vec<Option<String>> = Vec::new();
+
+                for (text, raw_tag) in &submissions {
+                    let class = raw_tag.trim().to_lowercase();
+                    let first = match first_by_class.iter().find(|(c, _)| *c == class) {
+                        Some((_, spelling)) => spelling.clone(),
+                        None => {
+                            let spelling = raw_tag.trim().to_string();
+                            first_by_class.push((class, spelling.clone()));
+                            spelling
+                        }
+                    };
+                    expected.push(first);
+                    let (id, _) = create(&pool, text, "web", Some(raw_tag), 0)
+                        .await
+                        .expect("the column CHECK must accept every resolved tag");
+                    stored.push(stored_context_tag(&pool, id).await);
+                }
+                (stored, expected)
+            });
+
+            let stored: Vec<String> = stored
+                .into_iter()
+                .map(|t| t.expect("every submission named a tag"))
+                .collect();
+            prop_assert_eq!(stored, expected);
+        }
     }
 }

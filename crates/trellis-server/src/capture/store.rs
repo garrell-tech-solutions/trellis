@@ -12,27 +12,50 @@ use sqlx::SqlitePool;
 
 /// Returns the new capture's id — the inbox row this request renders needs
 /// it to aim a later triage action at.
+///
+/// `context_tag` is written by this statement rather than by a follow-up
+/// `UPDATE`. It must arrive **already resolved** — normalized and settled to
+/// whichever spelling was first used — which is [`super::resolve_tag`]'s
+/// job, not this one's; the column's `CHECK` refuses a padded or empty
+/// string either way.
+///
+/// Two reasons it belongs here. The write path this module's own header
+/// budgets at 50ms was three round trips (insert, look the tag up, update)
+/// where two will do. And between the second and the third, the row existed
+/// **untagged** while `create` had already handed its caller the tag it was
+/// supposed to carry — a window with no reader today, and one that a
+/// re-render or a retry would eventually find.
 pub async fn insert(
     pool: &SqlitePool,
     raw_text: &str,
     source: &str,
+    context_tag: Option<&str>,
     created_at_ms: i64,
 ) -> Result<i64, sqlx::Error> {
     sqlx::query_scalar(
-        "INSERT INTO captures (raw_text, source, created_at_ms) VALUES (?, ?, ?) RETURNING id",
+        "INSERT INTO captures (raw_text, source, context_tag, created_at_ms) \
+         VALUES (?, ?, ?, ?) RETURNING id",
     )
     .bind(raw_text)
     .bind(source)
+    .bind(context_tag)
     .bind(created_at_ms)
     .fetch_one(pool)
     .await
 }
 
-/// Writes `tag` (already normalized — trimmed, non-empty) onto `capture_id`.
-/// Called both by a fresh capture that arrived with a tag and by a
-/// triage-time retag, so it takes the id rather than assuming the row was
-/// just inserted.
-pub async fn set_context_tag(
+/// Writes `tag` (already normalized — trimmed, non-empty) onto `capture_id`
+/// — the retag path, for a capture that already exists. A capture created
+/// *with* a tag gets it from [`insert`] instead, in one statement.
+///
+/// `pub(super)`, so the front door this module's header describes is
+/// enforced by the compiler and not only by `platform::boundary`'s substring
+/// lint. `resolve_tag` decides case identity "in exactly one place" only if
+/// nothing can write a tag without going through it; while this was `pub`,
+/// any capability could store an unresolved spelling and split one tag in
+/// two. Same move `T-inbox-owns-membership` made for
+/// `inbox::store::close_capture`.
+pub(super) async fn set_context_tag(
     pool: &SqlitePool,
     capture_id: i64,
     tag: &str,
@@ -88,7 +111,7 @@ mod tests {
     async fn insert_returns_the_new_captures_id() {
         let (_dir, pool) = test_pool().await;
 
-        let id = insert(&pool, "buy milk", "web", 1234).await.unwrap();
+        let id = insert(&pool, "buy milk", "web", None, 1234).await.unwrap();
 
         let row_id: i64 = sqlx::query_scalar("SELECT id FROM captures")
             .fetch_one(&pool)
@@ -101,7 +124,7 @@ mod tests {
     async fn insert_stores_the_submitted_text_source_and_timestamp() {
         let (_dir, pool) = test_pool().await;
 
-        insert(&pool, "buy milk", "web", 1234).await.unwrap();
+        insert(&pool, "buy milk", "web", None, 1234).await.unwrap();
 
         let row: (String, String, i64) =
             sqlx::query_as("SELECT raw_text, source, created_at_ms FROM captures")
@@ -115,7 +138,7 @@ mod tests {
     async fn a_freshly_inserted_capture_is_untriaged() {
         let (_dir, pool) = test_pool().await;
 
-        insert(&pool, "buy milk", "web", 1234).await.unwrap();
+        insert(&pool, "buy milk", "web", None, 1234).await.unwrap();
 
         let left_inbox_at: Option<i64> = sqlx::query_scalar("SELECT left_inbox_at FROM captures")
             .fetch_one(&pool)
@@ -131,13 +154,13 @@ mod tests {
             .await
             .unwrap();
 
-        assert!(insert(&pool, "buy milk", "web", 0).await.is_err());
+        assert!(insert(&pool, "buy milk", "web", None, 0).await.is_err());
     }
 
     #[tokio::test]
     async fn a_freshly_inserted_capture_has_no_context_tag() {
         let (_dir, pool) = test_pool().await;
-        insert(&pool, "buy milk", "web", 0).await.unwrap();
+        insert(&pool, "buy milk", "web", None, 0).await.unwrap();
 
         let tag: Option<String> = sqlx::query_scalar("SELECT context_tag FROM captures")
             .fetch_one(&pool)
@@ -149,7 +172,7 @@ mod tests {
     #[tokio::test]
     async fn set_context_tag_writes_the_named_captures_tag() {
         let (_dir, pool) = test_pool().await;
-        let id = insert(&pool, "buy screws", "web", 0).await.unwrap();
+        let id = insert(&pool, "buy screws", "web", None, 0).await.unwrap();
 
         set_context_tag(&pool, id, "@homedepot").await.unwrap();
 
@@ -165,8 +188,10 @@ mod tests {
     #[tokio::test]
     async fn set_context_tag_leaves_other_captures_untouched() {
         let (_dir, pool) = test_pool().await;
-        let tagged = insert(&pool, "buy screws", "web", 0).await.unwrap();
-        let other = insert(&pool, "call the dentist", "web", 1).await.unwrap();
+        let tagged = insert(&pool, "buy screws", "web", None, 0).await.unwrap();
+        let other = insert(&pool, "call the dentist", "web", None, 1)
+            .await
+            .unwrap();
 
         set_context_tag(&pool, tagged, "@homedepot").await.unwrap();
 
@@ -189,8 +214,10 @@ mod tests {
     #[tokio::test]
     async fn canonical_tag_reports_the_earliest_spelling_used() {
         let (_dir, pool) = test_pool().await;
-        let first = insert(&pool, "buy screws", "web", 0).await.unwrap();
-        let second = insert(&pool, "return the drill", "web", 1).await.unwrap();
+        let first = insert(&pool, "buy screws", "web", None, 0).await.unwrap();
+        let second = insert(&pool, "return the drill", "web", None, 1)
+            .await
+            .unwrap();
         set_context_tag(&pool, first, "@HomeDepot").await.unwrap();
         set_context_tag(&pool, second, "@homedepot").await.unwrap();
 
@@ -209,10 +236,14 @@ mod tests {
     #[tokio::test]
     async fn distinct_tags_reports_each_tag_once_in_its_first_spelling() {
         let (_dir, pool) = test_pool().await;
-        let first = insert(&pool, "buy screws", "web", 0).await.unwrap();
-        let second = insert(&pool, "return the drill", "web", 1).await.unwrap();
-        let third = insert(&pool, "pick up milk", "web", 2).await.unwrap();
-        let untagged = insert(&pool, "renew the passport", "web", 3).await.unwrap();
+        let first = insert(&pool, "buy screws", "web", None, 0).await.unwrap();
+        let second = insert(&pool, "return the drill", "web", None, 1)
+            .await
+            .unwrap();
+        let third = insert(&pool, "pick up milk", "web", None, 2).await.unwrap();
+        let untagged = insert(&pool, "renew the passport", "web", None, 3)
+            .await
+            .unwrap();
         set_context_tag(&pool, first, "@HomeDepot").await.unwrap();
         set_context_tag(&pool, second, "@homedepot").await.unwrap();
         set_context_tag(&pool, third, "@supermarket").await.unwrap();

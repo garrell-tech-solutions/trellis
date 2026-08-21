@@ -114,13 +114,14 @@ async fn dispatch_given_tagged_capture_waiting(
 ) -> Result<(), String> {
     let raw_text = resolve(example, &caps[1])?;
     let tag = resolve(example, &caps[2])?;
+    quick_add(world, &raw_text, Some(&tag)).await?;
     let pool = world.pool()?.clone();
-    let id = trellis_server::capture::store::insert(&pool, &raw_text, "web", 0)
-        .await
-        .map_err(|e| format!("insert capture: {e}"))?;
-    trellis_server::capture::store::set_context_tag(&pool, id, &tag)
-        .await
-        .map_err(|e| format!("set context tag: {e}"))?;
+    let id: i64 =
+        sqlx::query_scalar("SELECT id FROM captures WHERE raw_text = ? ORDER BY id DESC LIMIT 1")
+            .bind(&raw_text)
+            .fetch_one(&pool)
+            .await
+            .map_err(|e| format!("read back the capture just added: {e}"))?;
     world.last_capture_id = Some(id);
     Ok(())
 }

@@ -368,10 +368,76 @@ deadline" is a fact about the type rather than a claim about one payload.
 `TaskAttributes` is the nullable row-shaped projection; at most one attribute
 group is ever populated.
 
+## Context tags — built (`D-context-tags-are-the-taxonomy`, #82)
+
+**The product's only taxonomy**, and the only one left after #88. Free text,
+optional, numerous, cheap, disposable — deliberately the opposite call from a
+life area's: a typo costs one badly-grouped item rather than an unschedulable
+one.
+
+```
+scheduler_core::context_tag::normalize(Option<&str>) -> Option<String>
+
+trellis_server::capture::resolve_tag(pool, raw)      the front door
+trellis_server::capture::create(pool, text, source, raw_tag, at_ms)
+trellis_server::capture::retag(pool, capture_id, raw_tag)
+trellis_server::capture::distinct_tags(pool)         the suggestions datalist
+```
+
+**The rule splits across the boundary, and the split is the point.** What one
+submitted string means on its own is decidable without a database, so
+`normalize` is in the core: trim, and collapse blank-or-absent to `None`
+(`T-empty-equals-absent`). Deciding *which existing spelling wins* needs a
+lookup against every tag stored before, which a pure crate cannot do
+(`T-core-no-tokio`), so canonicalization is the adapter's.
+
+**A tag lives on the capture, not the task** — one fact, one row. A task
+reads it through the capture it came from.
+
+**`@HomeDepot` and `@homedepot` are one tag, stored as first typed.**
+`captures.context_tag` is `COLLATE NOCASE`, which settles only how two
+spellings *compare* — never which is stored. No `UNIQUE`: many captures share
+one tag by design.
+
+> **NOCASE folds ASCII only.** `@CAFÉ` and `@café` are two tags. The same
+> limitation `life_areas.name` carried before #88, and the same escape hatch:
+> if the rule outgrows a collation the fold moves into the core and the
+> constraint becomes the backstop.
+
+**Two write paths reach the tag, so the door is shut by the compiler.** A
+fresh capture and a triage-time retag both go through `resolve_tag`; if they
+canonicalized differently the same typed word would land as two tags, which
+is the one thing this capability's central claim rests on.
+`store::set_context_tag` is `pub(super)`, so "decided in exactly one place"
+is enforced rather than described — the same move `T-inbox-owns-membership`
+made for `inbox::store::close_capture`.
+
+**A tagged capture costs one lookup and one insert**; an untagged one costs
+the insert alone. The tag is bound into the `INSERT` that creates the row
+rather than written by a follow-up `UPDATE`: three round trips on a path
+budgeted at 50ms where two will do, and the `UPDATE` form left the row
+briefly on disk *untagged* while `create` had already handed its caller the
+tag it was supposed to carry.
+
+> **`canonical_tag` is an unindexed scan.** `WHERE context_tag = ?` has no
+> index behind it, and it runs on every tagged capture write. Correct and
+> irrelevant at the scale `D-single-user` implies — tens of tags, captures
+> that arrive by hand — and it is the thing to look at first if the 50ms
+> budget is ever missed, before anything cleverer.
+
+**What ties `normalize` to the column** is a property, not a comment.
+Migration `0010`'s `CHECK` says a tag is `NULL` or non-empty-and-trimmed and
+its own comment says it "mirrors" `normalize`. `context_tag_properties.rs`
+states that postcondition over generated whitespace — including the
+non-ASCII kinds `str::trim` strips and SQLite's `TRIM` does not — and
+`capture`'s `a_tag_is_stored_as_the_spelling_it_was_first_given` asserts the
+schema accepts every resolved tag, which is the half a pure crate has no
+database to check.
+
 ### Schema — built
 
 ```sql
-captures(id, raw_text, source, created_at_ms, left_inbox_at)
+captures(id, raw_text, source, created_at_ms, left_inbox_at, context_tag)
 tasks(id, capture_id, kind, deadline, deadline_type, priority,
       target_count, target_minutes_each, period, life_area_id,
       archived_at, created_at_ms)
@@ -388,8 +454,9 @@ tasks(id, capture_id, kind, deadline, deadline_type, priority,
 > owner's data as a second safety net beside git. A revival unpauses against
 > real rows rather than an empty schema.
 >
-> The one migration that *is* gone is `0010_context_tags.sql`, because
-> `454580d` parked `#82` wholesale before the demolition ran.
+> `0010_context_tags.sql` was parked with `#82` by `454580d` and returned
+> when the slice was rebuilt against the demolished tree — it is `0010`
+> again, adding `captures.context_tag`.
 
 `kind`, `deadline_type`, `priority` and `period` carry `CHECK` constraints.
 `deadline` does **not** — SQLite's INTEGER affinity does not reject text, so a

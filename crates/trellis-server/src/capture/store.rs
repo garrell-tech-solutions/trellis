@@ -28,6 +28,57 @@ pub async fn insert(
     .await
 }
 
+/// Writes `tag` (already normalized — trimmed, non-empty) onto `capture_id`.
+/// Called both by a fresh capture that arrived with a tag and by a
+/// triage-time retag, so it takes the id rather than assuming the row was
+/// just inserted.
+pub async fn set_context_tag(
+    pool: &SqlitePool,
+    capture_id: i64,
+    tag: &str,
+) -> Result<(), sqlx::Error> {
+    sqlx::query("UPDATE captures SET context_tag = ? WHERE id = ?")
+        .bind(tag)
+        .bind(capture_id)
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
+/// The stored spelling of `normalized`, if some earlier capture already used
+/// a tag that is the same one under the column's `COLLATE NOCASE` comparison
+/// — what `context-tags-case-is-one-tag-06` means by "shown as first typed".
+/// `ORDER BY id ASC LIMIT 1` picks the earliest row that used it, so a tag's
+/// canonical spelling is whichever came first, never whichever query ran
+/// last.
+pub async fn canonical_tag(
+    pool: &SqlitePool,
+    normalized: &str,
+) -> Result<Option<String>, sqlx::Error> {
+    sqlx::query_scalar(
+        "SELECT context_tag FROM captures WHERE context_tag = ? ORDER BY id ASC LIMIT 1",
+    )
+    .bind(normalized)
+    .fetch_optional(pool)
+    .await
+}
+
+/// Every tag in use, once each, in the spelling `canonical_tag` would report
+/// for it — what the suggestion control offers
+/// (`context-tags-suggestions-05`). `MIN(id)` per `context_tag` picks each
+/// tag's earliest row under the column's own collation, so a tag used with
+/// two case spellings is grouped and reported once, in whichever spelling
+/// was first.
+pub async fn distinct_tags(pool: &SqlitePool) -> Result<Vec<String>, sqlx::Error> {
+    sqlx::query_scalar(
+        "SELECT context_tag FROM captures \
+         WHERE id IN (SELECT MIN(id) FROM captures WHERE context_tag IS NOT NULL GROUP BY context_tag) \
+         ORDER BY id ASC",
+    )
+    .fetch_all(pool)
+    .await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -81,5 +132,97 @@ mod tests {
             .unwrap();
 
         assert!(insert(&pool, "buy milk", "web", 0).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn a_freshly_inserted_capture_has_no_context_tag() {
+        let (_dir, pool) = test_pool().await;
+        insert(&pool, "buy milk", "web", 0).await.unwrap();
+
+        let tag: Option<String> = sqlx::query_scalar("SELECT context_tag FROM captures")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(tag, None);
+    }
+
+    #[tokio::test]
+    async fn set_context_tag_writes_the_named_captures_tag() {
+        let (_dir, pool) = test_pool().await;
+        let id = insert(&pool, "buy screws", "web", 0).await.unwrap();
+
+        set_context_tag(&pool, id, "@homedepot").await.unwrap();
+
+        let tag: Option<String> =
+            sqlx::query_scalar("SELECT context_tag FROM captures WHERE id = ?")
+                .bind(id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(tag.as_deref(), Some("@homedepot"));
+    }
+
+    #[tokio::test]
+    async fn set_context_tag_leaves_other_captures_untouched() {
+        let (_dir, pool) = test_pool().await;
+        let tagged = insert(&pool, "buy screws", "web", 0).await.unwrap();
+        let other = insert(&pool, "call the dentist", "web", 1).await.unwrap();
+
+        set_context_tag(&pool, tagged, "@homedepot").await.unwrap();
+
+        let tag: Option<String> =
+            sqlx::query_scalar("SELECT context_tag FROM captures WHERE id = ?")
+                .bind(other)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(tag, None);
+    }
+
+    #[tokio::test]
+    async fn canonical_tag_reports_none_when_no_capture_has_used_it() {
+        let (_dir, pool) = test_pool().await;
+
+        assert_eq!(canonical_tag(&pool, "@homedepot").await.unwrap(), None);
+    }
+
+    #[tokio::test]
+    async fn canonical_tag_reports_the_earliest_spelling_used() {
+        let (_dir, pool) = test_pool().await;
+        let first = insert(&pool, "buy screws", "web", 0).await.unwrap();
+        let second = insert(&pool, "return the drill", "web", 1).await.unwrap();
+        set_context_tag(&pool, first, "@HomeDepot").await.unwrap();
+        set_context_tag(&pool, second, "@homedepot").await.unwrap();
+
+        let canonical = canonical_tag(&pool, "@homedepot").await.unwrap();
+
+        assert_eq!(canonical.as_deref(), Some("@HomeDepot"));
+    }
+
+    #[tokio::test]
+    async fn distinct_tags_is_empty_against_a_fresh_database() {
+        let (_dir, pool) = test_pool().await;
+
+        assert_eq!(distinct_tags(&pool).await.unwrap(), Vec::<String>::new());
+    }
+
+    #[tokio::test]
+    async fn distinct_tags_reports_each_tag_once_in_its_first_spelling() {
+        let (_dir, pool) = test_pool().await;
+        let first = insert(&pool, "buy screws", "web", 0).await.unwrap();
+        let second = insert(&pool, "return the drill", "web", 1).await.unwrap();
+        let third = insert(&pool, "pick up milk", "web", 2).await.unwrap();
+        let untagged = insert(&pool, "renew the passport", "web", 3).await.unwrap();
+        set_context_tag(&pool, first, "@HomeDepot").await.unwrap();
+        set_context_tag(&pool, second, "@homedepot").await.unwrap();
+        set_context_tag(&pool, third, "@supermarket").await.unwrap();
+        let _ = untagged;
+
+        let tags = distinct_tags(&pool).await.unwrap();
+
+        assert_eq!(
+            tags,
+            vec!["@HomeDepot".to_string(), "@supermarket".to_string()]
+        );
     }
 }

@@ -145,8 +145,16 @@ fn then_html_body_contains(world: &mut World, expected: &str) -> Result<(), Stri
     super::then_html_body_contains(world, expected, "no HTML response recorded")
 }
 
+/// [`html::captures_section`], falling back to the whole body when there is
+/// no `<ul id="captures">` wrapper to scope to. A quick-add response swaps
+/// `#captures` from the *outside* (`hx-swap="afterbegin"` on the request),
+/// so it is itself just the new row's own markup -- never wrapped in the
+/// `<ul>` a full page carries. Falling back to the whole body is exactly
+/// what a real `<ul id="captures">` element would have scoped to anyway,
+/// one level up.
 fn captures_section(world: &World) -> Result<&str, String> {
-    html::captures_section(html_body(world)?)
+    let body = html_body(world)?;
+    Ok(html::captures_section(body).unwrap_or(body))
 }
 
 fn then_captures_section_contains(world: &mut World, expected: &str) -> Result<(), String> {
@@ -225,6 +233,17 @@ mod tests {
         when_inbox_viewed(&mut world).await.unwrap();
 
         then_captures_section_contains(&mut world, "buy milk").unwrap();
+    }
+
+    #[test]
+    fn then_captures_section_contains_falls_back_to_the_whole_body_for_a_bare_row_response() {
+        let mut world = World::new();
+        world.last_html_body = Some(
+            r#"<li id="capture-row-1">buy screws @homedepot</li><datalist id="context-tag-suggestions" hx-swap-oob="true"></datalist>"#
+                .to_string(),
+        );
+
+        then_captures_section_contains(&mut world, "buy screws").unwrap();
     }
 
     #[tokio::test]

@@ -26,6 +26,7 @@ mod inbox_view;
 mod migrations;
 mod one_screen;
 mod payloads;
+mod pool_screen;
 mod quota_triage_validation;
 mod triage;
 mod triage_from_page;
@@ -231,6 +232,9 @@ pub async fn dispatch(
         return outcome;
     }
     if let Some(outcome) = one_screen::dispatch(world, text, example).await {
+        return outcome;
+    }
+    if let Some(outcome) = pool_screen::dispatch(world, text, example).await {
         return outcome;
     }
 

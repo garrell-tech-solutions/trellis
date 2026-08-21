@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+{% block title %}Pool{% endblock %}
+{% block content %}
+<div class="pool-header">
+<h1>Pool</h1>
+<div class="pool-meta">{{ meta }}</div>
+</div>
+
+{% if empty %}
+<div class="pool-empty">
+<p>Nothing in the pool. Whatever you sort here gets grouped by context.</p>
+<a href="/" class="pool-go-capture">Go to Capture &rarr;</a>
+</div>
+{% endif %}
+
+{% if !trips.is_empty() %}
+<div class="pool-section">
+<h2>Worth a trip</h2>
+<p class="pool-subtitle">Grouped by where you would do it.</p>
+</div>
+{% endif %}
+
+<div class="trips">
+{% for trip in trips %}
+<div class="trip panel">
+<div class="trip-header">
+<div class="trip-tag">{{ trip.tag }}</div>
+<div class="trip-count">{{ trip.count_label }}</div>
+</div>
+<ul class="trip-items">
+{% for item in trip.items %}
+<li>{{ item }}</li>
+{% endfor %}
+</ul>
+{% if let Some(more) = trip.more_label %}
+<details class="trip-more">
+<summary>{{ more }}</summary>
+<ul class="trip-items">
+{% for item in trip.hidden %}
+<li>{{ item }}</li>
+{% endfor %}
+</ul>
+</details>
+{% endif %}
+</div>
+{% endfor %}
+</div>
+
+{% if !loose.is_empty() %}
+<div class="pool-section">
+{% if !trips.is_empty() %}
+<h2>Loose ends</h2>
+{% else %}
+<h2>Anywhere</h2>
+{% endif %}
+</div>
+<ul class="loose">
+{% for item in loose %}
+<li class="loose-item">
+<div class="loose-text">{{ item.text }}</div>
+{% if let Some(tag) = item.context_tag %}
+<div class="loose-tag">{{ tag }}</div>
+{% endif %}
+</li>
+{% endfor %}
+</ul>
+{% endif %}
+{% endblock %}

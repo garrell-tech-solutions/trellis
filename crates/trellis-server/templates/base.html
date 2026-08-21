@@ -16,6 +16,15 @@ htmx.config.responseHandling.unshift({code: "422", swap: true});
 </script>
 </head>
 <body>
+<header>
+<nav>
+<ul>
+{% for link in nav %}
+<li><a href="{{ link.path }}"{% if link.current %} aria-current="page"{% endif %}>{{ link.label }}</a></li>
+{% endfor %}
+</ul>
+</nav>
+</header>
 <main>
 {% block content %}{% endblock %}
 </main>

@@ -3,14 +3,6 @@
 <div class="kinds">
 <form class="kind kind-wide" hx-post="/captures/{{ capture.id }}/triage" hx-target="#lists" hx-swap="outerHTML">
 <input type="hidden" name="kind" value="pool">
-<label>Life area
-<select name="life_area">
-<option value="">— choose —</option>
-{% for life_area in life_areas %}
-<option value="{{ life_area.name }}">{{ life_area.name }}</option>
-{% endfor %}
-</select>
-</label>
 <button type="submit">Pool</button>
 </form>
 <details class="kind">
@@ -33,14 +25,6 @@
 </select>
 </label>
 <label>Estimate (minutes) <input type="number" name="estimated_minutes" placeholder="180"></label>
-<label>Life area
-<select name="life_area">
-<option value="">— choose —</option>
-{% for life_area in life_areas %}
-<option value="{{ life_area.name }}">{{ life_area.name }}</option>
-{% endfor %}
-</select>
-</label>
 <div class="actions"><button type="submit">Add</button></div>
 </form>
 </details>
@@ -54,14 +38,6 @@
 <select name="period">
 <option value="week">week</option>
 <option value="month">month</option>
-</select>
-</label>
-<label>Life area
-<select name="life_area">
-<option value="">— choose —</option>
-{% for life_area in life_areas %}
-<option value="{{ life_area.name }}">{{ life_area.name }}</option>
-{% endfor %}
 </select>
 </label>
 <div class="actions"><button type="submit">Add</button></div>

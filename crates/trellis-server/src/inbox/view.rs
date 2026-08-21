@@ -25,13 +25,10 @@ pub struct CaptureRow {
     pub error: Option<String>,
 }
 
-/// One task as the task list shows it. `life_area` is `None` only for a task
-/// written before the life-areas migration landed -- every task accepted
-/// through the triage boundary since carries one.
+/// One task as the task list shows it.
 pub struct TaskRow {
     pub kind: String,
     pub text: String,
-    pub life_area: Option<String>,
 }
 
 #[cfg(test)]
@@ -51,14 +48,12 @@ mod tests {
     }
 
     #[test]
-    fn a_task_row_carries_its_kind_text_and_life_area() {
+    fn a_task_row_carries_its_kind_and_text() {
         let row = TaskRow {
             kind: "pool".to_string(),
             text: "buy milk".to_string(),
-            life_area: Some("Home".to_string()),
         };
         assert_eq!(row.kind, "pool");
         assert_eq!(row.text, "buy milk");
-        assert_eq!(row.life_area.as_deref(), Some("Home"));
     }
 }

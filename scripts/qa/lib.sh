@@ -136,7 +136,7 @@ qa_capture_row_block() {
   python3 -c '
 import re, sys
 page, capture_id = sys.argv[1], sys.argv[2]
-m = re.search(r"<li id=\"capture-row-" + re.escape(capture_id) + r"\">(.*?)</li>", page, re.S)
+m = re.search(r"<li id=\"capture-row-" + re.escape(capture_id) + r"\"[^>]*>(.*?)</li>", page, re.S)
 print(m.group(1) if m else "")
 ' "$page" "$capture_id"
 }

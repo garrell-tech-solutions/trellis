@@ -2,7 +2,6 @@
 //! (APS acceptance-generator.md step handler contract).
 
 use std::path::PathBuf;
-use std::time::Duration;
 
 #[derive(Default)]
 pub struct World {
@@ -11,7 +10,6 @@ pub struct World {
     pub pool: Option<sqlx::SqlitePool>,
 
     pub last_status: Option<u16>,
-    pub last_elapsed: Option<Duration>,
     pub last_response_body: Option<serde_json::Value>,
     pub last_html_body: Option<String>,
 

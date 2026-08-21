@@ -5,13 +5,7 @@
 //! This is where the product's rules live. Delivery mechanisms (HTTP today)
 //! and persistence adapters depend on this crate; it depends on neither.
 
-pub mod capacity;
-pub mod exception;
-pub mod free_time;
-pub mod guardrail;
 pub mod interval;
-pub mod life_area;
-pub mod ratio;
 pub mod schedule;
 pub mod task;
 pub mod timezone;

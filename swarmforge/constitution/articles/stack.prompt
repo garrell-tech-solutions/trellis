@@ -36,11 +36,36 @@ No Rust tool emits the contract natively. Each `Run` is a wrapper under
   Run:         `scripts/analyzers/coverage.sh <path>`
   Threshold:   80  # minimum coverage (%)
 
-- Mutation:    cargo-mutants
-  Install:     `cargo install cargo-mutants`
+- Mutation:    cargo-mutants (runs tests via cargo-nextest)
+  Install:     `cargo install cargo-mutants cargo-nextest`
   Run:         `scripts/analyzers/mutation.sh <path>`
   Threshold:   90  # minimum kill rate (%)
+  Scope:       scheduler-core and trellis-server only. `crates/acceptance-tests`
+               is excluded in `.cargo/mutants.toml`: its mutants are assertion
+               helpers and Gherkin step dispatchers, so killing them means
+               testing our tests. Gherkin acceptance mutation covers that layer
+               first-order. This is half of all mutants and ~90% of the cost.
+  Test tool:   nextest, with the `mutants` profile in `.config/nextest.toml`.
+               It runs test binaries concurrently instead of one after another
+               and stops at the first failure. It also shrinks the baseline
+               test time, and cargo-mutants derives its per-mutant timeout from
+               that (5x, floored at 20s) -- so a hung mutant is found in ~20s
+               rather than ~268s.
+  Build cache: `target-mutants/`, set by the analyzer. Never the normal
+               `target/`. cargo-mutants tests a patched *copy* of the tree, so
+               sharing one cache leaves mutated artifacts behind that later
+               `cargo test` runs link against -- a red suite with a clean
+               `git status`.
+  Timeouts:    not counted as kills. A timeout means the suite did not finish,
+               which is a fact about the machine, not the mutant. The analyzer
+               reports them separately and fails on them.
   Parallelism: scheduler-core: 8   |   every other crate: 1
+               Established, not a default, and do not raise it. `-j > 1` gives
+               each mutant its own build directory, so each build is cold:
+               cheap for the small pure crate, ruinous for trellis-server's
+               axum/sqlx/tokio tree, where it produced timeouts on every
+               mutant. Those crates get their speed from the warm shared
+               `target-mutants/` cache instead, which requires `-j 1`.
 
 - Complexity:  rust-code-analysis-cli
   Install:     `cargo install rust-code-analysis-cli`

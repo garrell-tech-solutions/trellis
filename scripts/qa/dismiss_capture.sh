@@ -301,7 +301,9 @@ if qa_start_server "$BIN" "$TMP_DIR/$name.sqlite" "$TMP_DIR/$name.log"; then
   endpoint="$(qa_dismiss_endpoint "$(qa_get_inbox)" "$cid")"
   qa_dismiss "$endpoint"
   page="$(qa_get_inbox)"
-  if [[ "$page" != *"Nothing to triage. Add a capture above to get started."* ]]; then
+  # The empty-state copy changed under PR #87's design pass (qa/dismiss_
+  # capture.md still names the old wording; flagged to the specifier).
+  if [[ "$page" != *"Nothing to triage. Start with the thing you keep half"* ]]; then
     echo "FAIL: [$name] expected the ordinary empty-state message, got:
 $page" >&2
     FAILURES=1

@@ -15,24 +15,17 @@ use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
 
 mod app_client;
-mod app_shell;
 mod build;
-mod capacity;
 mod capture;
 mod committed_empty_fields;
 mod committed_field_domains;
 mod dismiss;
-mod exceptions;
-mod free_time;
-mod guardrails;
 mod html;
 mod inbox_view;
-mod life_areas;
 mod migrations;
+mod one_screen;
 mod payloads;
 mod quota_triage_validation;
-mod schedule;
-mod stats_ratio;
 mod triage;
 mod triage_from_page;
 mod unknown_kind_rejection;
@@ -109,26 +102,6 @@ pub(super) fn then_html_body_contains(
     } else {
         Err(format!(
             "expected {expected:?} in the response, got:\n{body}"
-        ))
-    }
-}
-
-/// Whether `section` (already scoped to one row or one page's own list)
-/// contains `expected`, framed as "expected {subject} to {verb}
-/// {expected:?}" -- the shape most step modules' own scoped-section
-/// assertions already repeat by hand, predating this one (#52 tracks the
-/// wider duplication; new code should not add another copy of the shape).
-pub(super) fn then_section_contains(
-    section: &str,
-    subject: &str,
-    verb: &str,
-    expected: &str,
-) -> Result<(), String> {
-    if section.contains(expected) {
-        Ok(())
-    } else {
-        Err(format!(
-            "expected {subject:?} to {verb} {expected:?}, got:\n{section}"
         ))
     }
 }
@@ -244,13 +217,7 @@ pub async fn dispatch(
     if let Some(outcome) = triage_from_page::dispatch(world, text, example).await {
         return outcome;
     }
-    if let Some(outcome) = life_areas::dispatch(world, text, example).await {
-        return outcome;
-    }
     if let Some(outcome) = dismiss::dispatch(world, text, example).await {
-        return outcome;
-    }
-    if let Some(outcome) = stats_ratio::dispatch(world, text, example).await {
         return outcome;
     }
     if let Some(outcome) = migrations::dispatch(world, text).await {
@@ -259,22 +226,7 @@ pub async fn dispatch(
     if let Some(outcome) = build::dispatch(world, text, example) {
         return outcome;
     }
-    if let Some(outcome) = app_shell::dispatch(world, text, example).await {
-        return outcome;
-    }
-    if let Some(outcome) = guardrails::dispatch(world, text, example).await {
-        return outcome;
-    }
-    if let Some(outcome) = free_time::dispatch(world, text, example).await {
-        return outcome;
-    }
-    if let Some(outcome) = exceptions::dispatch(world, text, example).await {
-        return outcome;
-    }
-    if let Some(outcome) = capacity::dispatch(world, text, example).await {
-        return outcome;
-    }
-    if let Some(outcome) = schedule::dispatch(world, text, example).await {
+    if let Some(outcome) = one_screen::dispatch(world, text, example).await {
         return outcome;
     }
 

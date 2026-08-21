@@ -34,3 +34,25 @@ For each row:
 This procedure only depends on the HTTP capture endpoint's request/response
 contract and the durable row it leaves behind — not on internal handler
 structure, ORM choice, or module layout.
+
+## Procedure — the 50 ms budget, which now lives here
+
+**Moved out of the acceptance and unit suites in #88**
+(`T-latency-is-a-qa-assertion`). It is a property of the deployed system, and
+`qa/one_screen.md` carries the same procedure with the full reasoning.
+
+1. Start the server against a fresh database **on a quiet machine**. Record
+   the load average before you begin.
+2. Send ten capture requests and record each response time.
+
+### Expected Observable Outcomes
+- Every response is **201**, every row persists, and every response arrives
+  **within 50 ms**.
+- **A reading taken under load is not evidence.** Say what the load was and
+  re-run if it was high — this assertion cost four spurious re-runs in six
+  slices while it lived in the suites, and once silently voided the whole
+  `trellis-server` crate's mutation coverage by failing `cargo-mutants`'
+  unmutated baseline at 1.885 s.
+- 50 ms remains the **design constraint** — `capture`'s module header cites
+  it and `T-classifier-covers-domain` reasons from it. Only where it is
+  asserted changed.

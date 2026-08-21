@@ -43,11 +43,13 @@ qa_status() {
 # qa/one_screen.md's own prose still describes this feature under its old
 # title ("every removed path is gone") and still names a "no header
 # renders" procedure that #92 (pool-screen) superseded: the header came
-# back with two tabs, and features/one_screen.feature's own scenario was
-# renamed to "Trellis serves the routes it has, and only those" with / and
-# /pool added at 200 -- the header assertion moved to
-# scripts/qa/pool_screen.sh's "the tab bar" procedure. This block matches
-# the feature file and the current acceptance step module
+# back, and features/one_screen.feature's own scenario was renamed to
+# "Trellis serves the routes it has, and only those", gaining / and /pool
+# at 200 under #92 and /committed at 200 under #94 -- the header/tab-bar
+# assertion moved to scripts/qa/committed_screen.sh's own "the tab bar"
+# procedure, which is where committed-screen-tabs-06 now covers all three
+# screens over all three tabs in one place. This block matches the feature
+# file and the current acceptance step module
 # (crates/acceptance-tests/src/steps/one_screen.rs), which is authoritative
 # over the doc's stale prose here.
 name="a-route-the-product-has-answers"
@@ -60,6 +62,11 @@ if qa_start_server "$BIN" "$TMP_DIR/$name.sqlite" "$TMP_DIR/$name.log"; then
   status="$(qa_status /pool)"
   if [[ "$status" != "200" ]]; then
     echo "FAIL: [$name] /pool returned $status, expected 200" >&2
+    FAILURES=1
+  fi
+  status="$(qa_status /committed)"
+  if [[ "$status" != "200" ]]; then
+    echo "FAIL: [$name] /committed returned $status, expected 200" >&2
     FAILURES=1
   fi
   for path in /stats /life-areas /free-time /capacity /schedule; do

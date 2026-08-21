@@ -366,6 +366,27 @@ print(m.group(1) if m else "")
 ' "$page" "$html_id"
 }
 
+# The text strictly between the first occurrence of `start` and the next
+# occurrence of `end` after it, or "" if `start` is absent or `end` never
+# follows it. General-purpose scoping for the div/span-wrapped fields a
+# view-model template renders one value into (e.g. `<div class="foo">value
+# </div>`), shared by every script that needs one without a full HTML
+# parser.
+qa_between() {
+  local text="$1" start="$2" end="$3"
+  python3 -c '
+import sys
+text, start, end = sys.argv[1], sys.argv[2], sys.argv[3]
+i = text.find(start)
+if i == -1:
+    print("")
+    sys.exit()
+i += len(start)
+j = text.find(end, i)
+print(text[i:j] if j != -1 else "")
+' "$text" "$start" "$end"
+}
+
 # True (exit 0) if capture_id is still present and untriaged. Migration 0005
 # renamed captures.triaged_at to left_inbox_at (it now means "left the
 # inbox", by either triage or dismissal, not just triage) -- this still

@@ -25,11 +25,11 @@ trap qa_stop_server EXIT
 setup_scenario() { qa_setup_scenario "$BIN" "$1" "$TMP_DIR" "buy milk"; }
 
 # Prints the resulting task row for CAPTURE_ID as
-# kind|deadline|deadline_type|priority|target_count|target_minutes_each|period,
+# kind|deadline|commitment|priority|target_count|target_minutes_each|period,
 # with NULLs rendered as the empty string.
 task_row() {
   sqlite3 -separator '|' "$DB_PATH" \
-    "SELECT kind, IFNULL(deadline,''), IFNULL(deadline_type,''), IFNULL(priority,''), \
+    "SELECT kind, IFNULL(deadline,''), IFNULL(commitment,''), IFNULL(priority,''), \
             IFNULL(target_count,''), IFNULL(target_minutes_each,''), IFNULL(period,'') \
      FROM tasks WHERE capture_id = $CAPTURE_ID;"
 }
@@ -73,18 +73,18 @@ qa_stop_server
 # expected_deadline_ms is the instant the submitted deadline text names,
 # computed the same way the triage boundary parses a submission.
 run_committed_example() {
-  local deadline="$1" deadline_type="$2" priority="$3" expected_deadline_ms="$4"
-  local name="committed-$deadline_type"
+  local deadline="$1" commitment="$2" priority="$3" expected_deadline_ms="$4"
+  local name="committed-$commitment"
   setup_scenario "$name" || return
   local body
-  body="$(printf '{"kind":"committed","deadline":"%s","deadline_type":"%s","priority":"%s","estimated_minutes":180,"life_area":"Work"}' \
-    "$deadline" "$deadline_type" "$priority")"
+  body="$(printf '{"kind":"committed","deadline":"%s","commitment":"%s","priority":"%s","estimated_minutes":180,"life_area":"Work"}' \
+    "$deadline" "$commitment" "$priority")"
   assert_status_created "$name" "$body"
   if assert_one_task "$name"; then
-    IFS='|' read -r kind row_deadline row_deadline_type row_priority target_count target_minutes_each period < <(task_row)
+    IFS='|' read -r kind row_deadline row_commitment row_priority target_count target_minutes_each period < <(task_row)
     [[ "$kind" == "committed" ]] || { echo "FAIL: [$name] expected kind committed, got \"$kind\"" >&2; FAILURES=1; }
-    if [[ "$row_deadline" != "$expected_deadline_ms" || "$row_deadline_type" != "$deadline_type" || "$row_priority" != "$priority" ]]; then
-      echo "FAIL: [$name] expected deadline=$expected_deadline_ms deadline_type=$deadline_type priority=$priority, got deadline=$row_deadline deadline_type=$row_deadline_type priority=$row_priority" >&2
+    if [[ "$row_deadline" != "$expected_deadline_ms" || "$row_commitment" != "$commitment" || "$row_priority" != "$priority" ]]; then
+      echo "FAIL: [$name] expected deadline=$expected_deadline_ms commitment=$commitment priority=$priority, got deadline=$row_deadline commitment=$row_commitment priority=$row_priority" >&2
       FAILURES=1
     fi
     [[ -z "$target_count$target_minutes_each$period" ]] || {
@@ -94,8 +94,8 @@ run_committed_example() {
   fi
   qa_stop_server
 }
-run_committed_example "2026-08-20T17:00:00Z" "hard" "P1" "1787245200000"
-run_committed_example "2026-08-31T09:00:00Z" "soft" "P3" "1788166800000"
+run_committed_example "2026-08-20T17:00:00Z" "at" "P1" "1787245200000"
+run_committed_example "2026-08-31T09:00:00Z" "by" "P3" "1788166800000"
 
 # --- Scenario: quota ---
 run_quota_example() {

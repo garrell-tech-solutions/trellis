@@ -158,6 +158,18 @@ mod tests {
         assert!(!rows[0].past);
     }
 
+    /// The boundary itself: a deadline exactly at `now_ms` is not yet past.
+    /// `a_deadline_at_or_after_now_is_not_marked_past` uses a deadline well
+    /// after `now_ms`, which cannot distinguish `<` from `<=`.
+    #[test]
+    fn a_deadline_exactly_at_now_is_not_marked_past() {
+        let rows = order(
+            vec![task("Renew the passport", NOW_MS, Commitment::By)],
+            NOW_MS,
+        );
+        assert!(!rows[0].past);
+    }
+
     #[test]
     fn a_past_deadline_sorts_first() {
         let rows = order(

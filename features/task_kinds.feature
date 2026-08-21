@@ -1,5 +1,5 @@
 # acceptance-mutation-manifest-begin
-# {"version":1,"tested_at":"2026-08-12T18:23:53.222129929Z","feature_name":"Triage creates tasks in one of three kinds","feature_path":"features/task_kinds.feature","background_hash":"0c56ef91538254d551a330ee3bf0b84ef91c3138861767ae4fe24fedb5500548","implementation_hash":"sha256:f42eb6e18ae094316ca129abf7901128ee1ad1c94067533923abb7ac41c9b218","scenarios":[]}
+# {"version":1,"tested_at":"2026-08-21T21:20:24.814201464Z","feature_name":"Triage creates tasks in one of three kinds","feature_path":"features/task_kinds.feature","background_hash":"0c56ef91538254d551a330ee3bf0b84ef91c3138861767ae4fe24fedb5500548","implementation_hash":"sha256:f42eb6e18ae094316ca129abf7901128ee1ad1c94067533923abb7ac41c9b218","scenarios":[{"index":1,"name":"Triaging a capture as a committed task records its scheduling metadata","scenario_hash":"535925e7208693a887657d7f1d570459a3956c3f656a1dd548fafc2a4e13db80","mutation_count":6,"result":{"Total":6,"Killed":6,"Survived":0,"Errors":0},"tested_at":"2026-08-21T21:20:24.814201464Z"}]}
 # acceptance-mutation-manifest-end
 
 # task-kinds-pool-01: triaging a capture as pool creates a pool task with no deadline and no quota target

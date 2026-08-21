@@ -1,0 +1,1006 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="_ds/gts-design-system-2e718b41-01f6-4aca-a2a4-28e4f49a0c4c/styles.css">
+<script src="_ds/gts-design-system-2e718b41-01f6-4aca-a2a4-28e4f49a0c4c/_ds_bundle.js"></script>
+<style>
+  body { margin: 0; font-family: "Space Grotesk", system-ui, sans-serif; background: var(--color-gray-100); }
+  a { color: var(--color-primary-500); text-decoration: none; }
+  a:hover { color: var(--color-primary-800); }
+  input { font-family: inherit; }
+  button { font-family: inherit; cursor: pointer; }
+</style>
+</helmet>
+
+<div style="min-height:100vh;display:flex;flex-direction:column;align-items:center;gap:12px;padding:16px 12px 28px;box-sizing:border-box">
+
+  <sc-if value="{{ showSwitcher }}" hint-placeholder-val="{{ true }}">
+    <div style="width:390px;display:flex;flex-direction:column;gap:8px">
+      <div style="display:flex;gap:6px">
+        <sc-for list="{{ presetChips }}" as="p" hint-placeholder-count="3">
+          <button onClick="{{ p.onPick }}" style="{{ p.style }}">{{ p.label }}</button>
+        </sc-for>
+      </div>
+      <div style="font-size:11px;line-height:1.5;color:var(--color-gray-500)">{{ presetNote }}</div>
+      <div style="display:flex;align-items:center;gap:8px;padding-top:2px;border-top:1px solid var(--color-gray-200)">
+        <div style="font-size:10px;letter-spacing:0.14em;text-transform:uppercase;color:var(--color-gray-500);padding-top:6px">Quotas defined</div>
+        <div style="display:flex;gap:5px;padding-top:6px">
+          <sc-for list="{{ quotaSetChips }}" as="q" hint-placeholder-count="3">
+            <button onClick="{{ q.onPick }}" style="{{ q.style }}">{{ q.label }}</button>
+          </sc-for>
+        </div>
+      </div>
+      <div style="font-size:11px;line-height:1.5;color:var(--color-gray-500)">Tap <strong style="font-weight:600;color:var(--color-gray-700)">Quota</strong> on an untriaged row to see the picker at that size.</div>
+    </div>
+  </sc-if>
+
+  <div style="width:390px;height:844px;background:#fff;border:1px solid var(--color-gray-300);border-radius:30px;overflow:hidden;display:flex;flex-direction:column;flex:none">
+
+    <div style="height:38px;flex:none;display:flex;align-items:center;justify-content:space-between;padding:0 22px;font-size:11px;color:var(--color-gray-500);letter-spacing:0.02em">
+      <div style="font-weight:500;color:var(--color-gray-600)">9:41</div>
+      <div>Wi-Fi &middot; 84%</div>
+    </div>
+
+    <div style="flex:1;overflow-y:auto;scrollbar-width:none;overscroll-behavior:contain">
+
+      <sc-if value="{{ isCapture }}" hint-placeholder-val="{{ true }}">
+        <div>
+          <div style="padding:2px 18px 12px;display:flex;align-items:baseline;justify-content:space-between">
+            <div style="font-size:14px;font-weight:600;letter-spacing:0.18em;text-transform:uppercase;color:var(--color-primary-800)">Trellis</div>
+            <div style="font-size:11px;color:var(--color-gray-500)">Tue 19 Aug</div>
+          </div>
+
+          <div style="padding:0 18px 16px">
+            <div style="display:flex;align-items:stretch;border:1px solid var(--color-gray-300);border-bottom:2px solid var(--color-primary-800);background:var(--color-gray-50)">
+              <input type="text" placeholder="What just came to mind" autoFocus="{{ true }}" ref="{{ inputRef }}" value="{{ draft }}" onChange="{{ onDraft }}" onKeyDown="{{ onDraftKey }}" enterkeyhint="done" style="flex:1;min-width:0;height:54px;padding:0 12px;border:none;outline:none;background:transparent;font-size:16.5px;color:var(--color-gray-900)">
+              <button onClick="{{ onSubmit }}" aria-label="Save capture" style="width:56px;flex:none;border:none;background:var(--color-gold);color:var(--color-primary-900);font-size:17px;font-weight:600;line-height:1">&#9166;</button>
+            </div>
+            <div style="margin-top:8px;font-size:11.5px;color:var(--color-gray-500)">Enter saves it. Sorting can wait.</div>
+          </div>
+
+          <div style="padding:0 18px 4px">
+            <x-import component-from-global-scope="GTSDesignSystem.SectionHeading" hint-size="100%,30px">Recent</x-import>
+          </div>
+
+          <sc-if value="{{ isEmpty }}" hint-placeholder-val="{{ false }}">
+            <div style="padding:14px 18px 0;font-size:13.5px;line-height:1.6;color:var(--color-gray-500);max-width:290px;text-wrap:pretty">Nothing captured yet. Start with the thing you keep half&#8209;remembering.</div>
+          </sc-if>
+
+          <div style="margin-top:10px">
+            <sc-for list="{{ captures }}" as="c" hint-placeholder-count="4">
+              <div style="{{ c.rowStyle }}">
+                <div style="display:flex;gap:10px;align-items:baseline">
+                  <div style="{{ c.textStyle }}">{{ c.text }}</div>
+                  <div style="font-size:10.5px;color:var(--color-gray-400);white-space:nowrap;font-variant-numeric:tabular-nums">{{ c.when }}</div>
+                </div>
+
+                <sc-if value="{{ c.triaged }}" hint-placeholder-val="{{ false }}">
+                  <div style="margin-top:3px;font-size:10.5px;letter-spacing:0.12em;text-transform:uppercase;color:var(--color-gray-400)">{{ c.meta }}</div>
+                </sc-if>
+
+                <sc-if value="{{ c.untriaged }}" hint-placeholder-val="{{ true }}">
+                  <div style="margin-top:10px;display:flex;gap:6px">
+                    <sc-for list="{{ c.kindButtons }}" as="k" hint-placeholder-count="3">
+                      <button onClick="{{ k.onPick }}" style="{{ k.style }}">{{ k.label }}</button>
+                    </sc-for>
+                  </div>
+
+                  <sc-if value="{{ c.tagRow }}" hint-placeholder-val="{{ true }}">
+                    <div style="margin-top:6px">
+                      <input type="text" placeholder="context" value="{{ c.tagValue }}" onFocus="{{ c.onTagFocus }}" onChange="{{ c.onTagChange }}" onKeyDown="{{ c.onTagKey }}" style="width:100%;box-sizing:border-box;height:44px;padding:0 10px;border:1px solid var(--color-gray-200);background:#fff;outline:none;font-size:13px;color:var(--color-gray-800);letter-spacing:0.02em">
+                      <sc-if value="{{ c.tagOpen }}" hint-placeholder-val="{{ false }}">
+                        <div style="margin-top:6px;display:flex;flex-wrap:wrap;gap:6px">
+                          <sc-for list="{{ c.suggestions }}" as="s" hint-placeholder-count="4">
+                            <button onClick="{{ s.onPick }}" style="height:34px;padding:0 10px;border:1px solid var(--color-gray-200);background:var(--color-gray-50);font-size:11.5px;letter-spacing:0.06em;color:var(--color-primary-800)">{{ s.label }}</button>
+                          </sc-for>
+                        </div>
+                        <div style="margin-top:5px;font-size:10.5px;color:var(--color-gray-400)">Or type a new one. Tags are cheap.</div>
+                      </sc-if>
+                    </div>
+                  </sc-if>
+
+                  <sc-if value="{{ c.quotaOpen }}" hint-placeholder-val="{{ false }}">
+                    <div style="margin-top:10px;border:1px solid var(--color-gray-200);background:var(--color-gray-50)">
+                      <div style="padding:10px 10px 11px">
+                        <div style="font-size:10px;letter-spacing:0.14em;text-transform:uppercase;color:var(--color-gray-500)">{{ c.quotaPrompt }}</div>
+                        <sc-if value="{{ c.hasQuotaChips }}" hint-placeholder-val="{{ true }}">
+                          <div style="margin-top:8px;display:flex;flex-wrap:wrap;gap:6px">
+                            <sc-for list="{{ c.quotaChips }}" as="q" hint-placeholder-count="3">
+                              <button onClick="{{ q.onPick }}" style="height:44px;padding:0 12px;border:1px solid var(--color-primary-800);background:#fff;color:var(--color-primary-800);font-size:13px;display:flex;align-items:center;gap:7px">
+                                <span>{{ q.label }}</span>
+                                <span style="font-size:10.5px;color:var(--color-gray-500);font-variant-numeric:tabular-nums">{{ q.meta }}</span>
+                              </button>
+                            </sc-for>
+                          </div>
+                        </sc-if>
+                        <sc-if value="{{ c.noQuotas }}" hint-placeholder-val="{{ false }}">
+                          <div style="margin-top:7px;font-size:12.5px;color:var(--color-gray-600)">No quotas defined yet.</div>
+                        </sc-if>
+                      </div>
+
+                      <sc-if value="{{ c.newClosed }}" hint-placeholder-val="{{ true }}">
+                        <div style="padding:9px 10px 10px;border-top:1px dashed var(--color-gray-300);background:#fff">
+                          <button onClick="{{ c.onOpenNew }}" style="width:100%;height:44px;border:1px dashed var(--color-gray-400);background:#fff;color:var(--color-primary-800);font-size:12.5px;letter-spacing:0.06em">+ Define a new quota</button>
+                          <div style="margin-top:6px;font-size:10.5px;line-height:1.45;color:var(--color-gray-400)">{{ c.newHint }}</div>
+                        </div>
+                      </sc-if>
+
+                      <sc-if value="{{ c.newOpen }}" hint-placeholder-val="{{ false }}">
+                        <div style="padding:10px;border-top:1px solid var(--color-gray-300);background:#fff">
+                          <div style="font-size:10px;letter-spacing:0.14em;text-transform:uppercase;color:var(--color-primary-800)">New quota</div>
+                          <input type="text" placeholder="Name, e.g. Guitar" value="{{ newName }}" onChange="{{ onNewName }}" style="margin-top:7px;width:100%;box-sizing:border-box;height:44px;padding:0 10px;border:1px solid var(--color-gray-300);outline:none;font-size:13.5px;color:var(--color-gray-900)">
+                          <div style="margin-top:6px;display:flex;align-items:center;gap:8px">
+                            <input type="number" min="0.5" step="0.5" placeholder="0" value="{{ newHours }}" onChange="{{ onNewHours }}" style="width:76px;flex:none;height:44px;padding:0 10px;border:1px solid var(--color-gray-300);outline:none;font-size:13.5px;color:var(--color-gray-900)">
+                            <div style="font-size:12px;color:var(--color-gray-500)">hours a week &mdash; both are required</div>
+                          </div>
+                          <sc-if value="{{ hasWarning }}" hint-placeholder-val="{{ false }}">
+                            <div style="margin-top:9px;padding:9px 10px;background:var(--color-mint);border-top:3px solid var(--color-gold)">
+                              <div style="font-size:12px;line-height:1.5;color:var(--color-gray-700);text-wrap:pretty">{{ warningText }}</div>
+                              <button onClick="{{ c.onUseExisting }}" style="margin-top:6px;height:38px;padding:0 12px;border:1px solid var(--color-primary-800);background:#fff;color:var(--color-primary-800);font-size:12.5px">{{ useExistingLabel }}</button>
+                            </div>
+                          </sc-if>
+                          <div style="margin-top:9px;display:flex;align-items:center;justify-content:flex-end;gap:4px">
+                            <button onClick="{{ c.onCancelNew }}" style="height:44px;padding:0 12px;border:none;background:none;font-size:12.5px;color:var(--color-gray-500)">Cancel</button>
+                            <button onClick="{{ c.onCreate }}" style="{{ createStyle }}">{{ createLabel }}</button>
+                          </div>
+                        </div>
+                      </sc-if>
+                    </div>
+                  </sc-if>
+                </sc-if>
+              </div>
+            </sc-for>
+          </div>
+
+          <sc-if value="{{ hasOlder }}" hint-placeholder-val="{{ false }}">
+            <div style="padding:14px 18px 0;font-size:11.5px;color:var(--color-gray-400)">{{ olderNote }}</div>
+          </sc-if>
+
+          <div style="height:28px"></div>
+        </div>
+      </sc-if>
+
+      <sc-if value="{{ isPool }}" hint-placeholder-val="{{ false }}">
+        <div>
+          <div style="padding:2px 18px 14px;display:flex;align-items:baseline;justify-content:space-between">
+            <div style="font-size:14px;font-weight:600;letter-spacing:0.18em;text-transform:uppercase;color:var(--color-primary-800)">Pool</div>
+            <div style="font-size:11px;color:var(--color-gray-500)">{{ poolMeta }}</div>
+          </div>
+
+          <sc-if value="{{ poolEmpty }}" hint-placeholder-val="{{ false }}">
+            <div style="padding:0 18px">
+              <div style="font-size:13.5px;line-height:1.6;color:var(--color-gray-500);max-width:290px;text-wrap:pretty">Nothing in the pool. Whatever you sort here gets grouped by context.</div>
+              <button onClick="{{ goCapture }}" style="margin-top:12px;border:none;background:none;padding:0;font-size:13px;color:var(--color-primary-500)">Go to Capture &rarr;</button>
+            </div>
+          </sc-if>
+
+          <sc-if value="{{ hasTrips }}" hint-placeholder-val="{{ true }}">
+            <div style="padding:0 18px">
+              <x-import component-from-global-scope="GTSDesignSystem.SectionHeading" hint-size="100%,30px">Worth a trip</x-import>
+              <div style="margin-top:8px;font-size:11.5px;color:var(--color-gray-500)">Grouped by where you would do it.</div>
+            </div>
+          </sc-if>
+
+          <div style="padding:12px 18px 0;display:flex;flex-direction:column;gap:10px">
+            <sc-for list="{{ tripGroups }}" as="g" hint-placeholder-count="2">
+              <x-import component-from-global-scope="GTSDesignSystem.MintPanel" hint-size="100%,180px">
+                <div style="display:flex;align-items:baseline;justify-content:space-between;gap:10px">
+                  <div style="font-size:12px;font-weight:600;letter-spacing:0.16em;text-transform:uppercase;color:var(--color-primary-800)">{{ g.label }}</div>
+                  <div style="font-size:11px;color:var(--color-gray-600);white-space:nowrap;font-variant-numeric:tabular-nums">{{ g.count }}</div>
+                </div>
+                <div style="margin-top:4px;font-size:12px;color:var(--color-gray-600)">{{ g.note }}</div>
+                <div style="margin-top:8px">
+                  <sc-for list="{{ g.visible }}" as="it" hint-placeholder-count="3">
+                    <div style="{{ it.rowStyle }}">
+                      <div style="{{ it.textStyle }}">{{ it.text }}</div>
+                      <button onClick="{{ it.onUp }}" aria-label="Raise priority" style="{{ it.upStyle }}">&#9650;</button>
+                      <button onClick="{{ it.onDown }}" aria-label="Lower priority" style="{{ it.downStyle }}">&#9660;</button>
+                    </div>
+                  </sc-for>
+                </div>
+                <sc-if value="{{ g.hasMore }}" hint-placeholder-val="{{ false }}">
+                  <button onClick="{{ g.onToggle }}" style="margin-top:8px;border:none;background:none;padding:0;font-size:12px;color:var(--color-primary-800);letter-spacing:0.02em">{{ g.moreLabel }}</button>
+                </sc-if>
+              </x-import>
+            </sc-for>
+          </div>
+
+          <sc-if value="{{ hasLoose }}" hint-placeholder-val="{{ true }}">
+            <div style="padding:20px 18px 0">
+              <x-import component-from-global-scope="GTSDesignSystem.SectionHeading" hint-size="100%,30px">{{ looseLabel }}</x-import>
+              <div style="margin-top:6px">
+                <sc-for list="{{ looseItems }}" as="it" hint-placeholder-count="4">
+                  <div style="{{ it.rowStyle }}">
+                    <div style="flex:1;min-width:0">
+                      <div style="{{ it.textStyle }}">{{ it.text }}</div>
+                      <div style="margin-top:1px;font-size:10px;letter-spacing:0.12em;text-transform:uppercase;color:var(--color-gray-400)">{{ it.ctxLabel }}</div>
+                    </div>
+                    <button onClick="{{ it.onUp }}" aria-label="Raise priority" style="{{ it.upStyle }}">&#9650;</button>
+                    <button onClick="{{ it.onDown }}" aria-label="Lower priority" style="{{ it.downStyle }}">&#9660;</button>
+                  </div>
+                </sc-for>
+              </div>
+            </div>
+          </sc-if>
+
+          <div style="height:34px"></div>
+        </div>
+      </sc-if>
+
+      <sc-if value="{{ isQuota }}" hint-placeholder-val="{{ false }}">
+        <div>
+          <div style="padding:2px 18px 14px;display:flex;align-items:baseline;justify-content:space-between">
+            <div style="font-size:14px;font-weight:600;letter-spacing:0.18em;text-transform:uppercase;color:var(--color-primary-800)">Quota</div>
+            <div style="font-size:11px;color:var(--color-gray-500)">{{ quotaMeta }}</div>
+          </div>
+            <div style="padding:0 18px">
+              <div style="font-size:11.5px;line-height:1.5;color:var(--color-gray-500);max-width:300px;text-wrap:pretty">{{ quotaNote }}</div>
+              <div style="margin-top:4px">
+                <sc-for list="{{ quotas }}" as="q" hint-placeholder-count="3">
+                  <div style="padding:11px 0 13px;border-bottom:1px solid var(--color-gray-200)">
+                    <button onClick="{{ q.onToggle }}" style="width:100%;min-height:34px;display:flex;align-items:baseline;gap:10px;border:none;background:none;padding:0;text-align:left">
+                      <span style="{{ q.textStyle }}">{{ q.text }}</span>
+                      <span style="font-size:12px;color:var(--color-gray-500);white-space:nowrap;font-variant-numeric:tabular-nums">{{ q.readout }}</span>
+                      <span style="{{ q.caretStyle }}">&#9662;</span>
+                    </button>
+                    <div style="margin-top:8px;height:6px;background:var(--color-gray-200)">
+                      <div style="{{ q.fillStyle }}"></div>
+                    </div>
+                    <div style="margin-top:8px;display:flex;align-items:center;justify-content:space-between;gap:10px">
+                      <div style="font-size:11.5px;color:var(--color-gray-500)">{{ q.note }}</div>
+                      <div style="display:flex;align-items:center;gap:2px">
+                        <button onClick="{{ q.onUp }}" aria-label="Raise priority" style="{{ q.upStyle }}">&#9650;</button>
+                        <button onClick="{{ q.onDown }}" aria-label="Lower priority" style="{{ q.downStyle }}">&#9660;</button>
+                      </div>
+                    </div>
+                    <div style="margin-top:2px;display:flex;gap:6px">
+                      <button onClick="{{ q.onLog30 }}" style="flex:1;height:44px;border:1px solid var(--color-gray-300);background:#fff;font-size:12.5px;color:var(--color-primary-800)">+30m</button>
+                      <button onClick="{{ q.onLog60 }}" style="flex:1;height:44px;border:1px solid var(--color-gray-300);background:#fff;font-size:12.5px;color:var(--color-primary-800)">+1h</button>
+                      <button onClick="{{ q.onOther }}" style="{{ q.otherStyle }}">{{ q.otherLabel }}</button>
+                    </div>
+
+                    <sc-if value="{{ q.otherOpen }}" hint-placeholder-val="{{ false }}">
+                      <div style="margin-top:7px;padding:9px 10px;border:1px solid var(--color-gray-300);background:var(--color-gray-50)">
+                        <div style="font-size:10px;letter-spacing:0.14em;text-transform:uppercase;color:var(--color-gray-500)">Log a session</div>
+                        <div style="margin-top:7px;display:flex;align-items:center;gap:6px">
+                          <select value="{{ otherDay }}" onChange="{{ onOtherDay }}" aria-label="Day" style="height:44px;padding:0 6px;border:1px solid var(--color-gray-300);background:#fff;font-size:13px;color:var(--color-gray-900)">
+                            <sc-for list="{{ days }}" as="d" hint-placeholder-count="7">
+                              <option value="{{ d }}">{{ d }}</option>
+                            </sc-for>
+                          </select>
+                          <input type="number" min="5" step="5" placeholder="20" value="{{ otherMins }}" onChange="{{ onOtherMins }}" aria-label="Minutes" style="width:72px;flex:none;height:44px;padding:0 8px;border:1px solid var(--color-gray-300);background:#fff;font-size:13px;color:var(--color-gray-900)">
+                          <div style="font-size:12px;color:var(--color-gray-500);flex:1">minutes</div>
+                          <button onClick="{{ q.onAddOther }}" style="{{ addOtherStyle }}">Add</button>
+                        </div>
+                      </div>
+                    </sc-if>
+
+                    <sc-if value="{{ q.expanded }}" hint-placeholder-val="{{ false }}">
+                      <div style="margin-top:12px;border-top:1px solid var(--color-gray-200);padding-top:10px">
+                        <sc-if value="{{ q.hasFiled }}" hint-placeholder-val="{{ false }}">
+                          <div style="margin-bottom:12px">
+                            <div style="font-size:10px;letter-spacing:0.14em;text-transform:uppercase;color:var(--color-gray-500)">Filed here</div>
+                            <div style="margin-top:6px;display:flex;flex-direction:column;gap:4px">
+                              <sc-for list="{{ q.filed }}" as="f" hint-placeholder-count="1">
+                                <div style="font-size:13px;line-height:1.35;color:var(--color-gray-700);padding-left:10px;border-left:2px solid var(--color-primary-800);text-wrap:pretty">{{ f.text }}</div>
+                              </sc-for>
+                            </div>
+                          </div>
+                        </sc-if>
+
+                        <div style="display:flex;align-items:baseline;justify-content:space-between;gap:10px">
+                          <div style="font-size:10px;letter-spacing:0.14em;text-transform:uppercase;color:var(--color-gray-500)">This week</div>
+                          <div style="font-size:10.5px;color:var(--color-gray-400);font-variant-numeric:tabular-nums">{{ q.sessionSummary }}</div>
+                        </div>
+                        <div style="margin-top:4px">
+                          <sc-for list="{{ q.sessions }}" as="ss" hint-placeholder-count="2">
+                            <div style="display:flex;align-items:center;gap:6px;padding:4px 0;border-bottom:1px solid var(--color-gray-200)">
+                              <select value="{{ ss.day }}" onChange="{{ ss.onDay }}" aria-label="Day" style="width:92px;flex:none;height:44px;padding:0 6px;border:1px solid var(--color-gray-200);background:#fff;font-size:13px;color:var(--color-gray-700)">
+                                <sc-for list="{{ days }}" as="d" hint-placeholder-count="7">
+                                  <option value="{{ d }}">{{ d }}</option>
+                                </sc-for>
+                              </select>
+                              <input type="number" min="5" step="5" value="{{ ss.mins }}" onChange="{{ ss.onMins }}" aria-label="Minutes" style="width:70px;flex:none;height:44px;padding:0 8px;border:1px solid var(--color-gray-200);background:#fff;font-size:13px;color:var(--color-gray-900)">
+                              <div style="flex:1;min-width:0;font-size:11.5px;color:var(--color-gray-400)">min</div>
+                              <button onClick="{{ ss.onDelete }}" aria-label="Delete session" style="width:44px;height:44px;flex:none;border:none;background:none;font-size:15px;color:var(--color-gray-400);line-height:1">&times;</button>
+                            </div>
+                          </sc-for>
+                        </div>
+                        <sc-if value="{{ q.noSessions }}" hint-placeholder-val="{{ false }}">
+                          <div style="padding:6px 0 2px;font-size:12.5px;color:var(--color-gray-500)">No sessions yet this week. Log one above when you have done it.</div>
+                        </sc-if>
+                      </div>
+                    </sc-if>
+                  </div>
+                </sc-for>
+              </div>
+
+              <sc-if value="{{ menuNewClosed }}" hint-placeholder-val="{{ true }}">
+                <button onClick="{{ onOpenMenuNew }}" style="margin-top:12px;width:100%;height:44px;border:1px dashed var(--color-gray-400);background:#fff;color:var(--color-primary-800);font-size:12.5px;letter-spacing:0.06em">+ Define a new quota</button>
+              </sc-if>
+              <sc-if value="{{ menuNewOpen }}" hint-placeholder-val="{{ false }}">
+                <div style="margin-top:12px;padding:10px;border:1px solid var(--color-gray-300);background:var(--color-gray-50)">
+                  <div style="font-size:10px;letter-spacing:0.14em;text-transform:uppercase;color:var(--color-primary-800)">New quota</div>
+                  <input type="text" placeholder="Name, e.g. Piano" value="{{ newName }}" onChange="{{ onNewName }}" style="margin-top:7px;width:100%;box-sizing:border-box;height:44px;padding:0 10px;border:1px solid var(--color-gray-300);background:#fff;outline:none;font-size:13.5px;color:var(--color-gray-900)">
+                  <div style="margin-top:6px;display:flex;align-items:center;gap:8px">
+                    <input type="number" min="0.5" step="0.5" placeholder="0" value="{{ newHours }}" onChange="{{ onNewHours }}" aria-label="Hours a week" style="width:76px;flex:none;height:44px;padding:0 10px;border:1px solid var(--color-gray-300);background:#fff;outline:none;font-size:13.5px;color:var(--color-gray-900)">
+                    <div style="font-size:12px;color:var(--color-gray-500)">hours a week &mdash; both are required</div>
+                  </div>
+                  <sc-if value="{{ hasWarning }}" hint-placeholder-val="{{ false }}">
+                    <div style="margin-top:9px;padding:9px 10px;background:var(--color-mint);border-top:3px solid var(--color-gold)">
+                      <div style="font-size:12px;line-height:1.5;color:var(--color-gray-700);text-wrap:pretty">{{ warningText }}</div>
+                    </div>
+                  </sc-if>
+                  <div style="margin-top:9px;display:flex;align-items:center;justify-content:flex-end;gap:4px">
+                    <button onClick="{{ onCancelNew }}" style="height:44px;padding:0 12px;border:none;background:none;font-size:12.5px;color:var(--color-gray-500)">Cancel</button>
+                    <button onClick="{{ onCreateMenu }}" style="{{ createStyle }}">{{ createLabel }}</button>
+                  </div>
+                </div>
+              </sc-if>
+            </div>
+          <div style="height:34px"></div>
+        </div>
+      </sc-if>
+
+      <sc-if value="{{ isCommitted }}" hint-placeholder-val="{{ false }}">
+        <div>
+          <div style="padding:2px 18px 14px;display:flex;align-items:baseline;justify-content:space-between">
+            <div style="font-size:14px;font-weight:600;letter-spacing:0.18em;text-transform:uppercase;color:var(--color-primary-800)">Committed</div>
+            <div style="font-size:11px;color:var(--color-gray-500)">{{ committedMeta }}</div>
+          </div>
+
+          <sc-if value="{{ committedEmpty }}" hint-placeholder-val="{{ false }}">
+            <div style="padding:0 18px">
+              <div style="font-size:13.5px;line-height:1.6;color:var(--color-gray-500);max-width:290px;text-wrap:pretty">Nothing with a time on it. That is allowed.</div>
+              <button onClick="{{ goCapture }}" style="margin-top:12px;border:none;background:none;padding:0;font-size:13px;color:var(--color-primary-500)">Go to Capture &rarr;</button>
+            </div>
+          </sc-if>
+
+            <div style="padding:0 18px">
+              <div style="margin-top:2px">
+                <sc-for list="{{ committed }}" as="it" hint-placeholder-count="3">
+                  <div style="display:flex;align-items:baseline;gap:12px;padding:10px 0;border-bottom:1px solid var(--color-gray-200)">
+                    <div style="width:66px;flex:none;font-size:10.5px;letter-spacing:0.08em;text-transform:uppercase;color:var(--color-gray-500);font-variant-numeric:tabular-nums">{{ it.at }}</div>
+                    <div style="flex:1;min-width:0;font-size:14px;line-height:1.35;color:var(--color-gray-900);text-wrap:pretty">{{ it.text }}</div>
+                    <div style="font-size:10px;letter-spacing:0.12em;text-transform:uppercase;color:var(--color-gray-400);white-space:nowrap">{{ it.ctxLabel }}</div>
+                  </div>
+                </sc-for>
+              </div>
+            </div>
+          <div style="height:34px"></div>
+        </div>
+      </sc-if>
+
+    </div>
+
+    <div style="flex:none;display:flex;border-top:1px solid var(--color-gray-200);background:#fff">
+      <sc-for list="{{ tabs }}" as="t" hint-placeholder-count="2">
+        <button onClick="{{ t.onPick }}" style="{{ t.style }}">{{ t.label }}</button>
+      </sc-for>
+    </div>
+
+  </div>
+</div>
+
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:430,&quot;height&quot;:1050},&quot;startScreen&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;capture&quot;,&quot;pool&quot;,&quot;quota&quot;,&quot;committed&quot;],&quot;default&quot;:&quot;capture&quot;,&quot;tsType&quot;:&quot;\&quot;capture\&quot; | \&quot;pool\&quot; | \&quot;quota\&quot; | \&quot;committed\&quot;&quot;},&quot;startState&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;empty&quot;,&quot;healthy&quot;,&quot;overloaded&quot;],&quot;default&quot;:&quot;healthy&quot;,&quot;tsType&quot;:&quot;\&quot;empty\&quot; | \&quot;healthy\&quot; | \&quot;overloaded\&quot;&quot;},&quot;quotaCount&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[1,3,5],&quot;default&quot;:3,&quot;tsType&quot;:&quot;number&quot;,&quot;section&quot;:&quot;Behaviour&quot;},&quot;tripThreshold&quot;:{&quot;editor&quot;:&quot;int&quot;,&quot;default&quot;:3,&quot;min&quot;:2,&quot;max&quot;:6,&quot;tsType&quot;:&quot;number&quot;,&quot;section&quot;:&quot;Behaviour&quot;},&quot;showStateSwitcher&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Prototype&quot;}}">
+const CANON = ["home-depot", "grocery", "phone", "desk", "garage"];
+const PLACE = ["home-depot", "grocery", "garage", "store", "hardware", "market", "pharmacy", "errand", "errands", "car"];
+const SITTING = { phone: "calls", desk: "at the desk", email: "at the desk", admin: "at the desk", inbox: "at the desk" };
+
+function groupNote(ctx, n) {
+  if (PLACE.indexOf(ctx) >= 0) {
+    return n >= 6 ? "One stop clears " + n + ". Worth the trip today." : "One stop clears all " + n + ".";
+  }
+  if (SITTING[ctx]) {
+    const noun = SITTING[ctx] === "calls" ? n + " calls" : n + " " + SITTING[ctx];
+    return n >= 6 ? noun + " \u2014 one sitting clears the lot." : noun + " \u2014 one sitting.";
+  }
+  return n >= 6 ? "All " + n + " in one go. Worth blocking the time." : "All " + n + " in one go.";
+}
+
+function norm(s) { return (s || "").toLowerCase().replace(/[^a-z0-9]/g, ""); }
+
+function lev(a, b) {
+  const m = a.length, n = b.length;
+  if (!m || !n) return Math.max(m, n);
+  let prev = [], cur = [];
+  for (let j = 0; j <= n; j++) prev[j] = j;
+  for (let i = 1; i <= m; i++) {
+    cur[0] = i;
+    for (let j = 1; j <= n; j++) {
+      cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+    }
+    prev = cur.slice();
+  }
+  return prev[n];
+}
+
+function matchQuota(name, quotas) {
+  const a = norm(name);
+  if (a.length < 2) return null;
+  for (const q of quotas) if (norm(q.name) === a) return { kind: "exact", q };
+  for (const q of quotas) {
+    const b = norm(q.name);
+    if (a.length >= 4 && b.length >= 4 && (a.indexOf(b) >= 0 || b.indexOf(a) >= 0)) return { kind: "near", q };
+    if (lev(a, b) <= 2) return { kind: "near", q };
+  }
+  return null;
+}
+
+const DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+const TODAY = "Tue";
+
+const QUOTA_MASTER = [
+  { id: "q1", name: "Rust, async book", target: 3, pri: 2, sessions: [["Mon", 45], ["Wed", 45]] },
+  { id: "q2", name: "Piano", target: 2, pri: 1, sessions: [["Mon", 25], ["Thu", 35]] },
+  { id: "q3", name: "Running", target: 3, pri: 1, sessions: [["Sun", 60], ["Tue", 60]] },
+  { id: "q4", name: "Spanish", target: 2, pri: 0, sessions: [["Mon", 20], ["Tue", 10]] },
+  { id: "q5", name: "Weekly review", target: 1, pri: 1, sessions: [] }
+];
+const QUOTA_LOADED = { q1: [["Mon", 30]], q2: [["Wed", 30]], q3: [["Sun", 60]], q4: [], q5: [] };
+
+function hrs(mins) { return Math.round((mins / 60) * 100) / 100; }
+
+function fmtMins(m) {
+  m = Math.max(0, Math.round(m));
+  const h = Math.floor(m / 60), r = m % 60;
+  if (!h) return r + "m";
+  if (!r) return h + "h";
+  return h + "h " + r + "m";
+}
+
+function sortSessions(list) {
+  return list.slice().sort((a, b) => DAYS.indexOf(a.day) - DAYS.indexOf(b.day));
+}
+
+function mk(rows) {
+  const n = rows.length;
+  return rows.map((r, i) => ({
+    id: "i" + i, seq: n - i,
+    text: r[0], kind: r[1] || null, ctx: r[2] || null,
+    pri: r[3] == null ? 1 : r[3], when: r[4] || "",
+    at: r[5] || "", ord: r[6] || 0, quota: r[7] || null
+  }));
+}
+
+const HEALTHY = [
+  ["Take the car in", null, null, 1, "just now"],
+  ["Pick up furnace filters", null, null, 1, "12m"],
+  ["Cancel the second cloud storage plan", null, null, 1, "2h"],
+  ["Rice, olive oil, coffee", "pool", "grocery", 1, "yest"],
+  ["Return the drill bits", "pool", "home-depot", 2, "yest"],
+  ["Q3 planning doc", "committed", "desk", 2, "yest", "Thu 17:00", 3],
+  ["Switch plate for the bathroom fan", "pool", "home-depot", 1, "Sun"],
+  ["Rust async \u2014 chapter 4", "quota", null, 2, "Sun", "", 0, "q1"],
+  ["Book the dentist", "committed", "phone", 1, "Sun", "Tue 8:30", 1],
+  ["Call about the water bill", "pool", "phone", 1, "Sun"],
+  ["Weatherstripping for the garage door", "pool", "home-depot", 1, "Fri"],
+  ["Replace the bathroom fan switch", "pool", "garage", 2, "Fri"],
+  ["Reschedule the eye exam", "pool", "phone", 0, "Thu"],
+  ["Furnace service window", "committed", null, 1, "Thu", "Fri 13:00", 4],
+  ["Two 2\u00d74s for the basement shelf", "pool", "home-depot", 0, "Thu"],
+  ["Birthday card for Ellen", "pool", "grocery", 1, "Wed"]
+];
+
+const LOADED = [
+  ["Take the car in", null, null, 1, "just now"],
+  ["Pick up furnace filters", null, null, 1, "8m"],
+  ["Look at the crack in the driveway", null, null, 1, "40m"],
+  ["Cancel the second cloud storage plan", null, null, 1, "2h"],
+  ["Ask the neighbour about the fence line", null, null, 1, "yest"],
+  ["Renew the library card", null, null, 0, "yest"],
+  ["Q3 planning doc", "committed", "desk", 2, "yest", "Thu 17:00", 3],
+  ["Book the dentist", "committed", "phone", 1, "Sun", "Tue 8:30", 1],
+  ["Furnace service window", "committed", null, 1, "Thu", "Fri 13:00", 4],
+  ["Rust async \u2014 chapter 4", "quota", null, 2, "Sun", "", 0, "q1"],
+  ["Return the drill bits", "pool", "home-depot", 2, "yest"],
+  ["Switch plate for the bathroom fan", "pool", "home-depot", 1, "yest"],
+  ["Weatherstripping for the garage door", "pool", "home-depot", 1, "Sun"],
+  ["Two 2\u00d74s for the basement shelf", "pool", "home-depot", 0, "Sun"],
+  ["Furnace filters, 20\u00d725", "pool", "home-depot", 2, "Sun"],
+  ["Hose washers", "pool", "home-depot", 0, "Fri"],
+  ["Drywall anchors", "pool", "home-depot", 0, "Fri"],
+  ["Paint sample for the hallway", "pool", "home-depot", 0, "Thu"],
+  ["Replacement screen for the porch door", "pool", "home-depot", 1, "Thu"],
+  ["Sandpaper, 120 and 220", "pool", "home-depot", 0, "Wed"],
+  ["Rice, olive oil, coffee", "pool", "grocery", 1, "yest"],
+  ["Birthday card for Ellen", "pool", "grocery", 2, "yest"],
+  ["Dish soap", "pool", "grocery", 1, "Sun"],
+  ["Bread flour", "pool", "grocery", 0, "Sun"],
+  ["Cat litter", "pool", "grocery", 1, "Fri"],
+  ["Batteries, AA", "pool", "grocery", 0, "Fri"],
+  ["Frozen peas", "pool", "grocery", 0, "Thu"],
+  ["Foil", "pool", "grocery", 0, "Wed"],
+  ["Call about the water bill", "pool", "phone", 2, "yest"],
+  ["Reschedule the eye exam", "pool", "phone", 1, "Sun"],
+  ["Chase the roof estimate", "pool", "phone", 2, "Sun"],
+  ["Call Ellen back", "pool", "phone", 1, "Fri"],
+  ["Cancel the gym membership", "pool", "phone", 0, "Fri"],
+  ["Ask the vet about the refill", "pool", "phone", 1, "Thu"],
+  ["Call the bank about the fee", "pool", "phone", 0, "Wed"],
+  ["File the mileage receipts", "pool", "desk", 2, "yest"],
+  ["Reply to the school form", "pool", "desk", 1, "Sun"],
+  ["Back up the photos", "pool", "desk", 1, "Fri"],
+  ["Renew the domain", "pool", "desk", 0, "Fri"],
+  ["Update the r\u00e9sum\u00e9", "pool", "desk", 0, "Thu"],
+  ["Sort the tax folder", "pool", "desk", 0, "Wed"],
+  ["Replace the bathroom fan switch", "pool", "garage", 2, "yest"],
+  ["Sharpen the mower blade", "pool", "garage", 0, "Sun"],
+  ["Hang the bike hooks", "pool", "garage", 1, "Fri"],
+  ["Oil the gate hinge", "pool", "garage", 0, "Thu"],
+  ["Patch the wall by the light switch", "pool", "garage", 1, "Wed"],
+  ["Fix the flickering porch light", "pool", null, 2, "Sun"],
+  ["Water the plants at Dad's", "pool", null, 1, "Fri"],
+  ["Find the dishwasher warranty", "pool", null, 0, "Thu"],
+  ["Book the chimney sweep", "pool", null, 1, "Wed"]
+];
+
+const PRESETS = [
+  { key: "empty", label: "Empty", note: "First open. One field, nothing behind it." },
+  { key: "healthy", label: "Healthy week", note: "Sixteen captures, one trip worth making, three commitments." },
+  { key: "overloaded", label: "Overloaded pool", note: "Forty in the pool. Nothing is triaged away \u2014 the grouping does the deciding." }
+];
+
+const KINDS = [
+  { key: "committed", label: "Commit" },
+  { key: "pool", label: "Pool" },
+  { key: "quota", label: "Quota" }
+];
+
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    const preset = props.startState || "healthy";
+    const count = props.quotaCount || 3;
+    this.state = {
+      preset, quotaCount: count,
+      screen: props.startScreen || "capture",
+      items: this.loadItems(preset, count),
+      quotas: this.loadQuotas(preset, count),
+      draft: "",
+      tagFor: null, tagDraft: "",
+      quotaFor: null, newFor: null, newName: "", newHours: "",
+      expandedQuota: count > 1 ? "q2" : "q1",
+      otherFor: null, otherDay: TODAY, otherMins: "",
+      expanded: {}, nextId: 1000
+    };
+    this.inputRef = React.createRef();
+  }
+
+  loadQuotas(preset, count) {
+    if (preset === "empty") return [];
+    let n = 0;
+    return QUOTA_MASTER.slice(0, count).map(q => {
+      const src = preset === "overloaded" ? QUOTA_LOADED[q.id] : q.sessions;
+      return {
+        id: q.id, name: q.name, target: q.target, pri: q.pri,
+        sessions: src.map(p => ({ id: q.id + "s" + (n++), day: p[0], mins: p[1] }))
+      };
+    });
+  }
+
+  loadItems(preset, count) {
+    if (preset === "empty") return [];
+    const ids = QUOTA_MASTER.slice(0, count).map(q => q.id);
+    return mk(preset === "overloaded" ? LOADED : HEALTHY)
+      .filter(it => it.kind !== "quota" || ids.indexOf(it.quota) >= 0)
+      .map(o => Object.assign({}, o));
+  }
+
+  componentDidMount() { this.focus(); }
+
+  focus() { const el = this.inputRef.current; if (el) el.focus(); }
+
+  closeAll(extra) {
+    return Object.assign({ tagFor: null, tagDraft: "", quotaFor: null, newFor: null, newName: "", newHours: "" }, extra || {});
+  }
+
+  reset(preset, count) {
+    this.setState(this.closeAll({
+      preset, quotaCount: count,
+      items: this.loadItems(preset, count),
+      quotas: this.loadQuotas(preset, count),
+      draft: "", expanded: {}, otherFor: null, otherMins: "",
+      expandedQuota: count > 1 ? "q2" : "q1"
+    }), () => { if (this.state.screen === "capture") this.focus(); });
+  }
+
+  submit() {
+    const text = this.state.draft.trim();
+    if (!text) { this.focus(); return; }
+    this.setState(s => Object.assign(this.closeAll(), {
+      items: [{ id: "n" + s.nextId, seq: 10000 + s.nextId, text, kind: null, ctx: null, pri: 1, when: "just now", at: "", ord: 0, quota: null }].concat(s.items),
+      draft: "", nextId: s.nextId + 1
+    }), () => this.focus());
+  }
+
+  patch(id, fields) {
+    this.setState(s => ({ items: s.items.map(it => it.id === id ? Object.assign({}, it, fields) : it) }));
+  }
+
+  triage(id, kind) {
+    if (kind === "quota") {
+      this.setState(s => this.closeAll({ quotaFor: s.quotaFor === id ? null : id }));
+      return;
+    }
+    const it = this.state.items.find(x => x.id === id);
+    const fields = { kind };
+    if (kind === "committed" && !it.at) { fields.at = "Unset"; fields.ord = 99; }
+    this.setState(this.closeAll(), () => this.patch(id, fields));
+  }
+
+  fileToQuota(id, qid) {
+    this.setState(this.closeAll(), () => this.patch(id, { kind: "quota", quota: qid, ctx: null }));
+  }
+
+  createQuota(itemId) {
+    const name = this.state.newName.trim();
+    const target = parseFloat(this.state.newHours);
+    if (!name || !(target > 0)) return;
+    const qid = "qn" + Date.now();
+    this.setState(s => ({
+      quotas: s.quotas.concat([{ id: qid, name, target, pri: 1, sessions: [] }]),
+      newFor: null, newName: "", newHours: "",
+      expandedQuota: itemId ? s.expandedQuota : qid
+    }), () => { if (itemId) this.fileToQuota(itemId, qid); });
+  }
+
+  toggleQuota(id) {
+    this.setState(s => ({ expandedQuota: s.expandedQuota === id ? null : id, otherFor: null, otherMins: "" }));
+  }
+
+  addSession(qid, day, mins) {
+    if (!(mins > 0)) return;
+    this.setState(s => ({
+      quotas: s.quotas.map(q => q.id === qid ? Object.assign({}, q, {
+        sessions: q.sessions.concat([{ id: qid + "s" + Date.now(), day, mins }])
+      }) : q),
+      otherFor: null, otherMins: "", otherDay: TODAY
+    }));
+  }
+
+  editSession(qid, sid, fields) {
+    this.setState(s => ({
+      quotas: s.quotas.map(q => q.id === qid ? Object.assign({}, q, {
+        sessions: q.sessions.map(x => x.id === sid ? Object.assign({}, x, fields) : x)
+      }) : q)
+    }));
+  }
+
+  deleteSession(qid, sid) {
+    this.setState(s => ({
+      quotas: s.quotas.map(q => q.id === qid ? Object.assign({}, q, {
+        sessions: q.sessions.filter(x => x.id !== sid)
+      }) : q)
+    }));
+  }
+
+  bump(id, d) {
+    this.setState(s => ({ items: s.items.map(it => it.id === id ? Object.assign({}, it, { pri: Math.max(0, Math.min(2, it.pri + d)) }) : it) }));
+  }
+
+  bumpQuota(id, d) {
+    this.setState(s => ({ quotas: s.quotas.map(q => q.id === id ? Object.assign({}, q, { pri: Math.max(0, Math.min(2, q.pri + d)) }) : q) }));
+  }
+
+  tagSuggestions() {
+    const counts = {};
+    this.state.items.forEach(it => { if (it.ctx) counts[it.ctx] = (counts[it.ctx] || 0) + 1; });
+    const used = Object.keys(counts).sort((a, b) => counts[b] - counts[a]);
+    const all = used.concat(CANON.filter(c => used.indexOf(c) < 0));
+    const q = (this.state.tagDraft || "").trim().toLowerCase();
+    return (q ? all.filter(t => t.indexOf(q) >= 0) : all).slice(0, 6);
+  }
+
+  chip(active) {
+    return "height:32px;padding:0 11px;font-size:11.5px;letter-spacing:0.06em;border:1px solid " +
+      (active ? "var(--color-primary-800)" : "var(--color-gray-300)") +
+      ";background:" + (active ? "var(--color-primary-800)" : "#fff") +
+      ";color:" + (active ? "#fff" : "var(--color-gray-600)");
+  }
+
+  arrow(dim) {
+    return {
+      width: 44, height: 44, flex: "none", border: "none", background: "none",
+      color: dim ? "var(--color-gray-300)" : "var(--color-gray-500)",
+      fontSize: 9, lineHeight: 1, padding: 0
+    };
+  }
+
+  poolRow(it, indent) {
+    const hi = it.pri === 2;
+    return {
+      text: it.text,
+      ctxLabel: it.ctx || "no context",
+      rowStyle: {
+        display: "flex", alignItems: "center", gap: 6, minHeight: 44,
+        padding: "2px 0", borderTop: "1px solid " + (indent ? "var(--color-gray-200)" : "rgba(0,0,0,0.08)")
+      },
+      textStyle: {
+        flex: 1, minWidth: 0, fontSize: 14.5, lineHeight: 1.3,
+        fontWeight: hi ? 600 : 400,
+        color: hi ? "var(--color-gray-900)" : "var(--color-gray-700)",
+        textWrap: "pretty", paddingLeft: hi ? 8 : 0,
+        borderLeft: hi ? "2px solid var(--color-primary-800)" : "2px solid transparent"
+      },
+      upStyle: this.arrow(it.pri >= 2),
+      downStyle: this.arrow(it.pri <= 0),
+      onUp: () => this.bump(it.id, 1),
+      onDown: () => this.bump(it.id, -1)
+    };
+  }
+
+  renderVals() {
+    const s = this.state;
+    const threshold = this.props.tripThreshold || 3;
+    const items = s.items;
+    const qs = s.quotas;
+    const qById = {};
+    qs.forEach(q => { qById[q.id] = q; });
+    const bySeq = items.slice().sort((a, b) => b.seq - a.seq);
+    const byPri = (a, b) => (b.pri - a.pri) || (b.seq - a.seq);
+
+    const match = s.newFor ? matchQuota(s.newName, qs) : null;
+    const nameOk = !!s.newName.trim();
+    const hoursOk = parseFloat(s.newHours) > 0;
+    const blocked = !!(match && match.kind === "exact");
+    const canCreate = nameOk && hoursOk && !blocked;
+
+    const captures = bySeq.slice(0, 14).map(it => {
+      const untriaged = !it.kind;
+      const tagOpen = s.tagFor === it.id;
+      const quotaOpen = s.quotaFor === it.id;
+      const newOpen = s.newFor === it.id;
+      const filedQ = it.quota ? qById[it.quota] : null;
+      return {
+        text: it.text, when: it.when, untriaged, triaged: !untriaged,
+        meta: untriaged ? ""
+          : it.kind === "committed" ? "Committed \u00b7 " + it.at + (it.ctx ? " \u00b7 " + it.ctx : "")
+          : it.kind === "quota" ? "Quota \u00b7 " + (filedQ ? filedQ.name : "\u2014")
+          : "Pool" + (it.ctx ? " \u00b7 " + it.ctx : " \u00b7 no context"),
+        rowStyle: {
+          padding: untriaged ? "12px 18px 13px 16px" : "11px 18px 11px 18px",
+          borderBottom: "1px solid var(--color-gray-200)",
+          borderLeft: untriaged ? "2px solid var(--color-primary-800)" : "2px solid transparent",
+          background: untriaged ? "#fff" : "var(--color-gray-50)"
+        },
+        textStyle: {
+          flex: 1, minWidth: 0, lineHeight: 1.35, textWrap: "pretty",
+          fontSize: untriaged ? 15.5 : 13.5,
+          color: untriaged ? "var(--color-gray-900)" : "var(--color-gray-500)"
+        },
+        kindButtons: KINDS.map(k => {
+          const on = k.key === "quota" && quotaOpen;
+          return {
+            label: k.label,
+            style: "flex:1;height:44px;font-size:12px;letter-spacing:0.06em;border:1px solid " +
+              (on ? "var(--color-primary-800)" : "var(--color-gray-300)") +
+              ";background:" + (on ? "var(--color-primary-800)" : "#fff") +
+              ";color:" + (on ? "#fff" : "var(--color-gray-700)"),
+            onPick: () => this.triage(it.id, k.key)
+          };
+        }),
+
+        tagRow: !quotaOpen,
+        tagValue: tagOpen ? s.tagDraft : (it.ctx || ""),
+        tagOpen,
+        suggestions: tagOpen ? this.tagSuggestions().map(t => ({
+          label: t,
+          onPick: () => this.setState(this.closeAll(), () => this.patch(it.id, { ctx: t }))
+        })) : [],
+        onTagFocus: () => this.setState(this.closeAll({ tagFor: it.id, tagDraft: it.ctx || "" })),
+        onTagChange: e => this.setState({ tagFor: it.id, tagDraft: e.target.value }),
+        onTagKey: e => {
+          if (e.key === "Enter") {
+            const v = s.tagDraft.trim().toLowerCase().replace(/\s+/g, "-");
+            this.setState(this.closeAll(), () => this.patch(it.id, { ctx: v || null }));
+          }
+        },
+
+        quotaOpen,
+        quotaPrompt: qs.length ? "File it under a quota" : "Quotas",
+        hasQuotaChips: qs.length > 0,
+        noQuotas: qs.length === 0,
+        quotaChips: quotaOpen ? qs.map(q => ({
+          label: q.name,
+          meta: fmtMins(Math.round(q.target * 60)),
+          onPick: () => this.fileToQuota(it.id, q.id)
+        })) : [],
+        newClosed: quotaOpen && !newOpen,
+        newOpen,
+        newHint: qs.length === 0
+          ? "A quota is a weekly hour target you keep. Most things are not one."
+          : qs.length === 1
+            ? "Only if this is a standing weekly commitment, not a one-off."
+            : "Rare. Pick from above unless this is genuinely new.",
+        onOpenNew: () => this.setState({ newFor: it.id, newName: "", newHours: "" }),
+        onCancelNew: () => this.setState({ newFor: null, newName: "", newHours: "" }),
+        onCreate: () => { if (canCreate) this.createQuota(it.id); },
+        onUseExisting: () => { if (match) this.fileToQuota(it.id, match.q.id); }
+      };
+    });
+
+    const pool = items.filter(it => it.kind === "pool");
+    const map = {};
+    pool.forEach(it => { const k = it.ctx || "\u2014"; (map[k] = map[k] || []).push(it); });
+    const groups = Object.keys(map).map(k => ({ key: k, list: map[k].slice().sort(byPri) }))
+      .sort((a, b) => b.list.length - a.list.length || a.key.localeCompare(b.key));
+    const trips = groups.filter(g => g.list.length >= threshold && g.key !== "\u2014");
+    const loose = [].concat.apply([], groups.filter(g => trips.indexOf(g) < 0).map(g => g.list)).sort(byPri);
+
+    const tripGroups = trips.map(g => {
+      const open = !!s.expanded[g.key];
+      const visible = open ? g.list : g.list.slice(0, 3);
+      const more = g.list.length - visible.length;
+      return {
+        label: g.key,
+        count: g.list.length + " things",
+        note: groupNote(g.key, g.list.length),
+        visible: visible.map(it => this.poolRow(it, false)),
+        hasMore: more > 0 || open,
+        moreLabel: more > 0 ? "Show " + more + " more" : "Show fewer",
+        onToggle: () => this.setState(st => ({ expanded: Object.assign({}, st.expanded, { [g.key]: !st.expanded[g.key] }) }))
+      };
+    });
+
+    const otherMinsNum = parseInt(s.otherMins, 10);
+    const quotaRows = qs.slice().sort((a, b) => (b.pri - a.pri)).map(q => {
+      const mins = q.sessions.reduce((t, x) => t + (x.mins || 0), 0);
+      const targetMins = Math.round(q.target * 60);
+      const pct = targetMins ? Math.min(100, Math.round((mins / targetMins) * 100)) : 0;
+      const leftMins = Math.max(0, targetMins - mins);
+      const filed = items.filter(it => it.kind === "quota" && it.quota === q.id);
+      const expanded = s.expandedQuota === q.id;
+      const otherOpen = s.otherFor === q.id;
+      return {
+        text: q.name,
+        textStyle: { flex: 1, minWidth: 0, fontSize: 14.5, lineHeight: 1.3, fontWeight: q.pri === 2 ? 600 : 400, color: "var(--color-gray-900)" },
+        readout: fmtMins(mins) + " / " + fmtMins(targetMins),
+        caretStyle: {
+          fontSize: 10, lineHeight: 1, color: "var(--color-gray-400)", flex: "none",
+          transform: expanded ? "rotate(180deg)" : "none", transition: "transform 160ms ease"
+        },
+        fillStyle: { width: pct + "%", height: "100%", background: "var(--color-primary-800)", transition: "width 220ms ease" },
+        note: leftMins <= 0 ? "Target met this week." : fmtMins(leftMins) + " left this week \u00b7 " + pct + "%",
+        onToggle: () => this.toggleQuota(q.id),
+        onLog30: () => this.addSession(q.id, TODAY, 30),
+        onLog60: () => this.addSession(q.id, TODAY, 60),
+        otherLabel: otherOpen ? "Close" : "Other\u2026",
+        otherStyle: "flex:1;height:44px;font-size:12.5px;border:1px solid " +
+          (otherOpen ? "var(--color-primary-800)" : "var(--color-gray-300)") +
+          ";background:" + (otherOpen ? "var(--color-primary-800)" : "#fff") +
+          ";color:" + (otherOpen ? "#fff" : "var(--color-primary-800)"),
+        onOther: () => this.setState(st => ({ otherFor: st.otherFor === q.id ? null : q.id, otherMins: "", otherDay: TODAY, expandedQuota: q.id })),
+        otherOpen,
+        onAddOther: () => this.addSession(q.id, s.otherDay, otherMinsNum),
+        upStyle: this.arrow(q.pri >= 2),
+        downStyle: this.arrow(q.pri <= 0),
+        onUp: () => this.bumpQuota(q.id, 1),
+        onDown: () => this.bumpQuota(q.id, -1),
+        expanded,
+        hasFiled: filed.length > 0,
+        filed: filed.map(f => ({ text: f.text })),
+        sessions: sortSessions(q.sessions).map(x => ({
+          day: x.day, mins: x.mins,
+          onDay: e => this.editSession(q.id, x.id, { day: e.target.value }),
+          onMins: e => this.editSession(q.id, x.id, { mins: Math.max(0, parseInt(e.target.value, 10) || 0) }),
+          onDelete: () => this.deleteSession(q.id, x.id)
+        })),
+        noSessions: q.sessions.length === 0,
+        sessionSummary: q.sessions.length === 0 ? "nothing logged"
+          : q.sessions.length + (q.sessions.length === 1 ? " session \u00b7 " : " sessions \u00b7 ") + fmtMins(mins)
+      };
+    });
+
+    const committed = items.filter(it => it.kind === "committed")
+      .sort((a, b) => a.ord - b.ord)
+      .map(it => ({ text: it.text, at: it.at, ctxLabel: it.ctx || "" }));
+
+    const untriagedCount = items.filter(it => !it.kind).length;
+    const open = pool.length + qs.length + committed.length + untriagedCount;
+    const isEmptyState = items.length === 0 && qs.length === 0;
+
+    return {
+      showSwitcher: this.props.showStateSwitcher !== false,
+      presetChips: PRESETS.map(p => ({
+        label: p.label, style: this.chip(p.key === s.preset),
+        onPick: () => this.reset(p.key, s.quotaCount)
+      })),
+      presetNote: (PRESETS.find(p => p.key === s.preset) || PRESETS[1]).note,
+      quotaSetChips: [1, 3, 5].map(n => ({
+        label: String(n), style: this.chip(n === s.quotaCount) + ";min-width:38px",
+        onPick: () => this.reset(s.preset, n)
+      })),
+
+      isCapture: s.screen === "capture",
+      isPool: s.screen === "pool",
+      isQuota: s.screen === "quota",
+      isCommitted: s.screen === "committed",
+      isEmpty: isEmptyState,
+      goCapture: () => this.setState({ screen: "capture" }, () => this.focus()),
+      tabs: [
+        { key: "capture", label: "Capture" },
+        { key: "pool", label: "Pool" },
+        { key: "quota", label: "Quota" },
+        { key: "committed", label: "Committed" }
+      ].map(t => ({
+        label: t.label,
+        style: "flex:1;height:58px;border:none;background:none;font-size:10.5px;letter-spacing:0.1em;text-transform:uppercase;padding:0 2px;color:" +
+          (s.screen === t.key ? "var(--color-primary-800)" : "var(--color-gray-400)") +
+          ";font-weight:" + (s.screen === t.key ? 600 : 400) +
+          ";box-shadow:" + (s.screen === t.key ? "inset 0 2px 0 0 var(--color-primary-800)" : "none"),
+        onPick: () => this.setState({ screen: t.key }, () => { if (t.key === "capture") this.focus(); })
+      })),
+
+      inputRef: this.inputRef,
+      draft: s.draft,
+      onDraft: e => this.setState({ draft: e.target.value }),
+      onDraftKey: e => { if (e.key === "Enter") { e.preventDefault(); this.submit(); } },
+      onSubmit: () => this.submit(),
+      captures,
+      hasOlder: bySeq.length > 14,
+      olderNote: (bySeq.length - 14) + " older captures, already sorted.",
+
+      newName: s.newName,
+      newHours: s.newHours,
+      onNewName: e => this.setState({ newName: e.target.value }),
+      onNewHours: e => this.setState({ newHours: e.target.value }),
+      hasWarning: !!match,
+      warningText: match
+        ? (match.kind === "exact"
+          ? "\u201c" + match.q.name + "\u201d already exists at " + match.q.target + " h a week. File it there instead of making a second one."
+          : "That reads a lot like \u201c" + match.q.name + "\u201d (" + match.q.target + " h a week). Same thing?")
+        : "",
+      useExistingLabel: match ? "Use " + match.q.name : "",
+      createLabel: blocked ? "Create quota" : (match ? "Create anyway" : "Create quota"),
+      createStyle: "height:44px;padding:0 12px;border:none;background:none;font-size:12.5px;font-weight:600;color:" +
+        (canCreate ? "var(--color-primary-500)" : "var(--color-gray-300)") +
+        ";cursor:" + (canCreate ? "pointer" : "not-allowed"),
+
+      hasPool: pool.length > 0,
+      poolEmpty: pool.length === 0,
+      poolMeta: pool.length === 0 ? "empty" : pool.length + " waiting",
+      hasTrips: trips.length > 0,
+      tripGroups,
+      hasLoose: loose.length > 0,
+      looseLabel: trips.length ? "Loose ends" : "Anywhere",
+      looseItems: loose.map(it => this.poolRow(it, true)),
+
+      hasQuota: !isEmptyState,
+      quotaMeta: qs.length === 0 ? "none yet" : qs.length === 1 ? "1 quota" : qs.length + " quotas",
+      quotaNote: qs.length === 0
+        ? "A quota is a weekly hour target you keep \u2014 practice, study, running. Define one below."
+        : "Hours against this week. Weeks vary.",
+      days: DAYS,
+      otherDay: s.otherDay,
+      otherMins: s.otherMins,
+      onOtherDay: e => this.setState({ otherDay: e.target.value }),
+      onOtherMins: e => this.setState({ otherMins: e.target.value }),
+      addOtherStyle: "height:44px;padding:0 12px;flex:none;border:none;background:none;font-size:12.5px;font-weight:600;color:" +
+        (otherMinsNum > 0 ? "var(--color-primary-500)" : "var(--color-gray-300)"),
+      menuNewOpen: s.newFor === "__menu",
+      menuNewClosed: s.newFor !== "__menu",
+      onOpenMenuNew: () => this.setState({ newFor: "__menu", newName: "", newHours: "" }),
+      onCancelNew: () => this.setState({ newFor: null, newName: "", newHours: "" }),
+      onCreateMenu: () => { if (canCreate) this.createQuota(null); },
+      quotas: quotaRows,
+      hasCommitted: committed.length > 0,
+      committedEmpty: committed.length === 0,
+      committedMeta: committed.length === 0 ? "nothing dated" : committed.length + " dated",
+      committed,
+      menuSummary: open + " open \u00b7 " + untriagedCount + " to sort"    };
+  }
+}
+
+</script>
+</body>
+</html>

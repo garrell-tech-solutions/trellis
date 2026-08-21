@@ -10,7 +10,7 @@
 # no browser-automation tooling in this environment.
 #
 # qa/one_screen.md's own "capture and triage are untouched" procedure is
-# NOT re-implemented here; it names the twelve QA suites scripts/qa/run.sh
+# NOT re-implemented here; it names the other QA suites scripts/qa/run.sh
 # already runs alongside this one in the same cycle, and restating their
 # assertions in a second script is how the two copies drift.
 set -euo pipefail
@@ -39,9 +39,29 @@ qa_status() {
   curl -s -o /dev/null -w '%{http_code}' "http://$ADDR$1"
 }
 
-# --- Procedure: every removed path is gone ---
-name="every-removed-path-is-gone"
+# --- Procedure: a route the product has answers; every removed route is gone ---
+# qa/one_screen.md's own prose still describes this feature under its old
+# title ("every removed path is gone") and still names a "no header
+# renders" procedure that #92 (pool-screen) superseded: the header came
+# back with two tabs, and features/one_screen.feature's own scenario was
+# renamed to "Trellis serves the routes it has, and only those" with / and
+# /pool added at 200 -- the header assertion moved to
+# scripts/qa/pool_screen.sh's "the tab bar" procedure. This block matches
+# the feature file and the current acceptance step module
+# (crates/acceptance-tests/src/steps/one_screen.rs), which is authoritative
+# over the doc's stale prose here.
+name="a-route-the-product-has-answers"
 if qa_start_server "$BIN" "$TMP_DIR/$name.sqlite" "$TMP_DIR/$name.log"; then
+  status="$(qa_status /)"
+  if [[ "$status" != "200" ]]; then
+    echo "FAIL: [$name] / returned $status, expected 200" >&2
+    FAILURES=1
+  fi
+  status="$(qa_status /pool)"
+  if [[ "$status" != "200" ]]; then
+    echo "FAIL: [$name] /pool returned $status, expected 200" >&2
+    FAILURES=1
+  fi
   for path in /stats /life-areas /free-time /capacity /schedule; do
     status="$(qa_status "$path")"
     if [[ "$status" != "404" ]]; then
@@ -49,25 +69,6 @@ if qa_start_server "$BIN" "$TMP_DIR/$name.sqlite" "$TMP_DIR/$name.log"; then
       FAILURES=1
     fi
   done
-else
-  FAILURES=1
-fi
-qa_stop_server
-
-# --- Procedure: no header renders ---
-name="no-header-renders"
-if qa_start_server "$BIN" "$TMP_DIR/$name.sqlite" "$TMP_DIR/$name.log"; then
-  page="$(qa_get /)"
-  if [[ "$page" == *"<header"* || "$page" == *"<nav"* ]]; then
-    echo "FAIL: [$name] expected no <header> or <nav> in the page, got:
-$page" >&2
-    FAILURES=1
-  fi
-  if [[ "$page" == *"<a "* ]]; then
-    echo "FAIL: [$name] expected no link to another page anywhere in the page, got:
-$page" >&2
-    FAILURES=1
-  fi
 else
   FAILURES=1
 fi

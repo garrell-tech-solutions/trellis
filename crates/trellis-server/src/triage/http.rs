@@ -262,6 +262,26 @@ fn fields_from_input(input: TriageInput) -> (TriageFields, Value, Option<String>
     }
 }
 
+/// The JSON-API-originated response: the existing contract, unchanged --
+/// `{}` on success, `rejected`'s body on refusal.
+async fn json_response(
+    pool: &SqlitePool,
+    capture_id: i64,
+    outcome: TriageOutcome,
+    kind_submitted: &Value,
+    created_at_ms: i64,
+) -> Result<Response, StatusCode> {
+    match outcome {
+        TriageOutcome::Accepted { kind } => {
+            write_task(pool, capture_id, &kind, created_at_ms).await?;
+            Ok((StatusCode::CREATED, Json(json!({}))).into_response())
+        }
+        TriageOutcome::Rejected(rejection) => {
+            Ok(rejected(&rejection, kind_submitted).into_response())
+        }
+    }
+}
+
 pub async fn create_triage(
     State(pool): State<SqlitePool>,
     State(clock): State<Clock>,
@@ -281,24 +301,16 @@ pub async fn create_triage(
     }
 
     if from_page {
-        return page_response(&pool, capture_id, &outcome, &kind_submitted, created_at_ms).await;
-    }
-
-    match outcome {
-        TriageOutcome::Accepted { kind } => {
-            write_task(&pool, capture_id, &kind, created_at_ms).await?;
-            Ok((StatusCode::CREATED, Json(json!({}))).into_response())
-        }
-        TriageOutcome::Rejected(rejection) => {
-            Ok(rejected(&rejection, &kind_submitted).into_response())
-        }
+        page_response(&pool, capture_id, &outcome, &kind_submitted, created_at_ms).await
+    } else {
+        json_response(&pool, capture_id, outcome, &kind_submitted, created_at_ms).await
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::platform::test_support::test_pool;
+    use crate::platform::test_support::{stored_context_tag, test_pool};
     use axum::body::Body;
     use axum::http::Request;
     use proptest::prelude::*;
@@ -427,13 +439,10 @@ mod tests {
         .await;
 
         assert_eq!(response.status(), StatusCode::CREATED);
-        let tag: Option<String> =
-            sqlx::query_scalar("SELECT context_tag FROM captures WHERE id = ?")
-                .bind(capture_id)
-                .fetch_one(&pool)
-                .await
-                .unwrap();
-        assert_eq!(tag.as_deref(), Some("@homedepot"));
+        assert_eq!(
+            stored_context_tag(&pool, capture_id).await.as_deref(),
+            Some("@homedepot")
+        );
     }
 
     #[tokio::test]
@@ -447,13 +456,10 @@ mod tests {
         let response = triage_response(&pool, capture_id, json!({ "kind": "pool" })).await;
 
         assert_eq!(response.status(), StatusCode::CREATED);
-        let tag: Option<String> =
-            sqlx::query_scalar("SELECT context_tag FROM captures WHERE id = ?")
-                .bind(capture_id)
-                .fetch_one(&pool)
-                .await
-                .unwrap();
-        assert_eq!(tag.as_deref(), Some("@homedepot"));
+        assert_eq!(
+            stored_context_tag(&pool, capture_id).await.as_deref(),
+            Some("@homedepot")
+        );
     }
 
     #[tokio::test]
@@ -465,13 +471,7 @@ mod tests {
             triage_response(&pool, capture_id, json!({ "context_tag": "@homedepot" })).await;
 
         assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
-        let tag: Option<String> =
-            sqlx::query_scalar("SELECT context_tag FROM captures WHERE id = ?")
-                .bind(capture_id)
-                .fetch_one(&pool)
-                .await
-                .unwrap();
-        assert_eq!(tag, None);
+        assert_eq!(stored_context_tag(&pool, capture_id).await, None);
     }
 
     #[tokio::test]
@@ -487,13 +487,10 @@ mod tests {
         .await;
 
         assert_eq!(response.status(), StatusCode::CREATED);
-        let tag: Option<String> =
-            sqlx::query_scalar("SELECT context_tag FROM captures WHERE id = ?")
-                .bind(capture_id)
-                .fetch_one(&pool)
-                .await
-                .unwrap();
-        assert_eq!(tag.as_deref(), Some("@homedepot"));
+        assert_eq!(
+            stored_context_tag(&pool, capture_id).await.as_deref(),
+            Some("@homedepot")
+        );
     }
 
     #[tokio::test]

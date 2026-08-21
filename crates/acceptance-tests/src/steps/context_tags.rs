@@ -296,6 +296,15 @@ fn then_status_is(
 mod tests {
     use super::*;
 
+    /// The lone capture's own tag -- every test in this module that reads it
+    /// back has exactly one row to read.
+    async fn only_capture_tag(world: &World) -> Option<String> {
+        sqlx::query_scalar("SELECT context_tag FROM captures")
+            .fetch_one(world.pool().unwrap())
+            .await
+            .unwrap()
+    }
+
     #[test]
     fn resolve_returns_a_literal_value_unchanged() {
         let example = BTreeMap::new();
@@ -342,12 +351,10 @@ mod tests {
             .await
             .unwrap();
 
-        let pool = world.pool().unwrap().clone();
-        let tag: Option<String> = sqlx::query_scalar("SELECT context_tag FROM captures")
-            .fetch_one(&pool)
-            .await
-            .unwrap();
-        assert_eq!(tag.as_deref(), Some("@homedepot"));
+        assert_eq!(
+            only_capture_tag(&world).await.as_deref(),
+            Some("@homedepot")
+        );
         assert!(world.last_capture_id.is_some());
     }
 
@@ -360,12 +367,10 @@ mod tests {
             .unwrap();
 
         assert_eq!(world.last_status, Some(201));
-        let pool = world.pool().unwrap().clone();
-        let tag: Option<String> = sqlx::query_scalar("SELECT context_tag FROM captures")
-            .fetch_one(&pool)
-            .await
-            .unwrap();
-        assert_eq!(tag.as_deref(), Some("@homedepot"));
+        assert_eq!(
+            only_capture_tag(&world).await.as_deref(),
+            Some("@homedepot")
+        );
     }
 
     #[tokio::test]
@@ -375,12 +380,7 @@ mod tests {
         quick_add(&mut world, "buy screws", None).await.unwrap();
 
         assert_eq!(world.last_status, Some(201));
-        let pool = world.pool().unwrap().clone();
-        let tag: Option<String> = sqlx::query_scalar("SELECT context_tag FROM captures")
-            .fetch_one(&pool)
-            .await
-            .unwrap();
-        assert_eq!(tag, None);
+        assert_eq!(only_capture_tag(&world).await, None);
     }
 
     #[tokio::test]
@@ -415,12 +415,10 @@ mod tests {
             .unwrap();
 
         assert_eq!(world.last_status, Some(201));
-        let pool = world.pool().unwrap().clone();
-        let tag: Option<String> = sqlx::query_scalar("SELECT context_tag FROM captures")
-            .fetch_one(&pool)
-            .await
-            .unwrap();
-        assert_eq!(tag.as_deref(), Some("@homedepot"));
+        assert_eq!(
+            only_capture_tag(&world).await.as_deref(),
+            Some("@homedepot")
+        );
     }
 
     fn world_with_captures_section(html: &str) -> World {

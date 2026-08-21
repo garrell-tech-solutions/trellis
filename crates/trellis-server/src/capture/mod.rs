@@ -89,7 +89,7 @@ pub(crate) async fn distinct_tags(pool: &SqlitePool) -> Result<Vec<String>, sqlx
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::platform::test_support::test_pool;
+    use crate::platform::test_support::{stored_context_tag, test_pool};
 
     #[tokio::test]
     async fn resolve_tag_reports_none_for_an_absent_tag() {
@@ -134,13 +134,10 @@ mod tests {
             .unwrap();
 
         assert_eq!(resolved.as_deref(), Some("@homedepot"));
-        let stored: Option<String> =
-            sqlx::query_scalar("SELECT context_tag FROM captures WHERE id = ?")
-                .bind(id)
-                .fetch_one(&pool)
-                .await
-                .unwrap();
-        assert_eq!(stored.as_deref(), Some("@homedepot"));
+        assert_eq!(
+            stored_context_tag(&pool, id).await.as_deref(),
+            Some("@homedepot")
+        );
     }
 
     #[tokio::test]
@@ -150,13 +147,7 @@ mod tests {
         let (id, resolved) = create(&pool, "buy screws", "web", None, 0).await.unwrap();
 
         assert_eq!(resolved, None);
-        let stored: Option<String> =
-            sqlx::query_scalar("SELECT context_tag FROM captures WHERE id = ?")
-                .bind(id)
-                .fetch_one(&pool)
-                .await
-                .unwrap();
-        assert_eq!(stored, None);
+        assert_eq!(stored_context_tag(&pool, id).await, None);
     }
 
     #[tokio::test]
@@ -166,13 +157,10 @@ mod tests {
 
         retag(&pool, id, Some("@homedepot")).await.unwrap();
 
-        let stored: Option<String> =
-            sqlx::query_scalar("SELECT context_tag FROM captures WHERE id = ?")
-                .bind(id)
-                .fetch_one(&pool)
-                .await
-                .unwrap();
-        assert_eq!(stored.as_deref(), Some("@homedepot"));
+        assert_eq!(
+            stored_context_tag(&pool, id).await.as_deref(),
+            Some("@homedepot")
+        );
     }
 
     #[tokio::test]
@@ -184,13 +172,10 @@ mod tests {
 
         retag(&pool, id, None).await.unwrap();
 
-        let stored: Option<String> =
-            sqlx::query_scalar("SELECT context_tag FROM captures WHERE id = ?")
-                .bind(id)
-                .fetch_one(&pool)
-                .await
-                .unwrap();
-        assert_eq!(stored.as_deref(), Some("@homedepot"));
+        assert_eq!(
+            stored_context_tag(&pool, id).await.as_deref(),
+            Some("@homedepot")
+        );
     }
 
     #[tokio::test]

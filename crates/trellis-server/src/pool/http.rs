@@ -93,6 +93,54 @@ mod tests {
         assert!(body.contains("buy screws"), "got:\n{body}");
     }
 
+    /// Three spellings of one tag are one trip, because the *write* path
+    /// made them one string before this screen ever saw them.
+    ///
+    /// **This is the only test on this path that goes through
+    /// `capture::create`.** Every other fixture here calls
+    /// `capture::store::insert` with a tag already in its final spelling,
+    /// which is convenient and skips the very step the screen depends on:
+    /// `scheduler_core::pool::group` buckets by plain string equality, and
+    /// that is correct *only* because `capture::resolve_tag` canonicalized
+    /// first. Those are two capabilities holding one invariant between
+    /// them, and until now a doc comment was the only thing tying them.
+    ///
+    /// The failure it guards against is not subtle-but-harmless. Three
+    /// items under one tag is exactly `TRIP_THRESHOLD`; split into two
+    /// spellings they are groups of 2 and 1, both under it, so **both fall
+    /// to loose ends and the trip vanishes from the screen entirely.**
+    #[tokio::test]
+    async fn case_variant_spellings_of_one_tag_make_one_trip_not_none() {
+        let (_dir, pool) = test_pool().await;
+        for (text, tag) in [
+            ("buy screws", "@homedepot"),
+            ("return the drill", "@HomeDepot"),
+            ("pick up trim", "@HOMEDEPOT"),
+        ] {
+            let (capture_id, _) = crate::capture::create(&pool, text, "web", Some(tag), 0)
+                .await
+                .unwrap();
+            crate::triage::store::insert_task(&pool, capture_id, &TaskKind::Pool, 0)
+                .await
+                .unwrap();
+        }
+
+        let (_, body) = get_pool(&pool).await;
+
+        assert!(
+            body.contains("3 things"),
+            "the three spellings should be one trip of three, got:\n{body}"
+        );
+        assert_eq!(
+            body.matches("@homedepot").count(),
+            1,
+            "the trip should be listed once, under the first spelling, got:\n{body}"
+        );
+        for text in ["buy screws", "return the drill", "pick up trim"] {
+            assert!(body.contains(text), "missing {text}, got:\n{body}");
+        }
+    }
+
     #[tokio::test]
     async fn the_pool_screen_marks_pool_as_the_current_tab() {
         let (_dir, pool) = test_pool().await;

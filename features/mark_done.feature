@@ -1,3 +1,8 @@
+# mutation-stamp: sha256=19c23a2da07800d2afeb47e84e12afcb8efbaeb8caa34ba74087a69e9a983218
+# acceptance-mutation-manifest-begin
+# {"version":1,"tested_at":"2026-08-21T23:40:02.318937095Z","feature_name":"A task you have done leaves the screen it lives on","feature_path":"features/mark_done.feature","background_hash":"304f93e93e2b217b49069c091950b87589f0c7e789e2d0dc3aaa8d845450cb64","implementation_hash":"sha256:26fc8b699cf0eb72110cd6f3ef06909d93b9a3c7798e3af4684142e54e6438c9","scenarios":[{"index":1,"name":"A trip that falls under three becomes loose ends, keeping its tag","scenario_hash":"9548203db7c809693f275f23283b050d656e7e451c95ea065140ab7fb65e34fb","mutation_count":2,"result":{"Total":2,"Killed":2,"Survived":0,"Errors":0},"tested_at":"2026-08-21T23:40:02.318937095Z"},{"index":2,"name":"A committed task marked done leaves the Committed screen","scenario_hash":"065ccca448a023f9e1f2011fc130e4b246bde4d6b4bc12f2d6ef29bbeadcfde6","mutation_count":1,"result":{"Total":1,"Killed":1,"Survived":0,"Errors":0},"tested_at":"2026-08-21T23:40:02.318937095Z"},{"index":3,"name":"A done task is in no count any screen shows","scenario_hash":"b2c0ac4bc1f73d3a638ab3c8f394db9e4dbb71f1b69662e9526a3910770673df","mutation_count":2,"result":{"Total":2,"Killed":2,"Survived":0,"Errors":0},"tested_at":"2026-08-21T23:40:02.318937095Z"}]}
+# acceptance-mutation-manifest-end
+
 # mark-done-leaves-pool-01: a pool task marked done leaves the Pool screen
 # mark-done-trip-drops-below-three-02: a trip that falls under three becomes loose ends, keeping its tag
 # mark-done-leaves-committed-03: a committed task marked done leaves the Committed screen

@@ -211,6 +211,19 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn marking_a_task_done_still_renders_a_different_remaining_task() {
+        let (_dir, pool) = test_pool().await;
+        let done_capture_id = given_a_pool_task(&pool, "buy screws", Some("@homedepot")).await;
+        let done_task_id = task_id_for_capture(&pool, done_capture_id).await;
+        given_a_pool_task(&pool, "call the dentist", None).await;
+
+        let (status, body) = post_mark_done(&pool, done_task_id).await;
+
+        assert_eq!(status, StatusCode::OK);
+        assert!(body.contains("call the dentist"), "got:\n{body}");
+    }
+
+    #[tokio::test]
     async fn marking_a_task_done_stamps_the_row_rather_than_deleting_it() {
         let (_dir, pool) = test_pool().await;
         let capture_id = given_a_pool_task(&pool, "buy screws", Some("@homedepot")).await;

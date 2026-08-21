@@ -37,8 +37,12 @@ a project API.
    reloading, **no confirmation dialog appears** (`D-three-strike`: friction is
    a feature in exactly one place in this system, and this is not it), and no
    task appears in the task list.
-5. Confirm the inbox now reads `Nothing to triage. Add a capture above to get
-   started.` — the ordinary empty state, not a dismissal-specific variant.
+5. Confirm the inbox now shows its **ordinary** empty state, not a
+   dismissal-specific variant. As of PR #87 that reads `Nothing to triage.
+   Start with the thing you keep half-remembering.` — **read the current
+   wording out of the page rather than trusting this line**; what is under
+   test is that dismissing everything produces the same message as never
+   having captured anything.
 6. Capture `buy milk`, pick a life area, click **Pool**.
 7. Restart the server and reload. Confirm the inbox is empty, `buy milk` is
    still in the task list, and `asdfgh` has not come back.
@@ -161,8 +165,11 @@ a project API.
 3. `GET /` and read the inbox region.
 
 ### Expected Observable Outcomes
-- The inbox reads `Nothing to triage. Add a capture above to get started.` —
-  **the existing message, unchanged.** It is still true, and a
+- The inbox shows **the existing empty-state message, unchanged** — the same
+  one an inbox that was never filled shows. As of PR #87 that is `Nothing to
+  triage. Start with the thing you keep half-remembering.`, and it has
+  changed once already, which is why what this asserts is **sameness with the
+  ordinary empty state** rather than a literal string. It is still true, and a
   dismissal-specific variant ("nothing left, you dismissed it all") would be
   the first step toward the browsable archive `D-kill-means-archive` refuses:
   it invites the user to reflect on what they threw away.

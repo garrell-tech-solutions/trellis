@@ -58,7 +58,34 @@ crates/acceptance-tests   APS runtime + step handlers; entrypoints generated fro
 deleted `trellis-server/src/schedule/`. Kept deliberately, and said out loud
 in `trellis-server/src/lib.rs` so it is not mistaken for an oversight: M3 is
 paused rather than cancelled, and 775 subtle lines carrying 1000-case
-property tests are expensive to rebuild. `::ratio` went with `stats` on the
+property tests are expensive to rebuild.
+
+> **GAP — un-pausing M3 is not just re-attaching a caller. `ScheduleTask`
+> requires two fields the domain has stopped producing.**
+>
+> | field | required by | last written |
+> |---|---|---|
+> | `life_area_id: i64` | `ScheduleTask`, and `LifeAreaWindow` is keyed by it | #88 deleted life areas; triage writes `NULL` |
+> | `deadline_type: DeadlineType` | `ScheduleTask`, and `T-hard-refuses-soft-slips` branches on it | #94 retired it; triage writes `NULL` |
+>
+> `triage::store::insert_task`'s `INSERT` binds a literal `NULL` for both,
+> and a test pins the `deadline_type` one. So every task triaged since #94
+> carries neither, while the code that would place it needs both — and
+> `LifeAreaWindow`, the shape the whole placement search is organised
+> around, names a concept with no table behind it.
+>
+> **`#94`'s own note that "schedule.rs carries its own independent copy of
+> that field" is exactly right about the code and is what creates this:**
+> independence means the field has no source. Nothing is broken today
+> because nothing runs. What it costs is that reviving M3 needs *decisions*
+> first — does at/by map onto hard/soft, or does the backward pass branch on
+> commitment instead; does the scheduler get life areas back, or group by
+> context tag now that tags are the taxonomy (`D-context-tags-are-the-
+> taxonomy`) — and those are the specifier's, not a re-attachment.
+>
+> Worth stating because the cost of keeping those 775 lines was recorded as
+> "expensive to rebuild", which is still true, and reads as though the only
+> thing standing between them and use is a caller. `::ratio` went with `stats` on the
 opposite reasoning — 223 lines whose settled numbers live in
 `docs/decisions.md`, so deleting the code destroyed nothing.
 
@@ -97,6 +124,7 @@ dependency rule itself is unchanged.
 crates/trellis-server/src/
   capture/    mod.rs  http.rs  store.rs
   dismiss/    mod.rs  http.rs
+  committed/  mod.rs  http.rs  store.rs  view.rs
   inbox/      mod.rs  http.rs  lists.rs  store.rs  view.rs
   pool/       mod.rs  http.rs  store.rs  view.rs
   settings/   mod.rs  http.rs  store.rs
@@ -105,12 +133,13 @@ crates/trellis-server/src/
               mod.rs  nav.rs  request.rs  response.rs  test_support.rs
 ```
 
-**Six capabilities and one bucket.** #88 took it from ten to five —
+**Seven capabilities and one bucket.** #88 took it from ten to five —
 `capacity`, `exceptions`, `free_time`, `life_areas` and `stats` are gone —
-and `#92` added `pool`, the first Menu tab.
+then `#92` added `pool` and `#94` added `committed`, the Menu's first two
+tabs.
 
-**`platform/nav.rs` is back**, deleted by #88 and rebuilt for `#92`. Two
-pages, not the four the design draws: `ALL` names only what `app::build_app`
+**`platform/nav.rs` is back**, deleted by #88 and rebuilt for `#92`, now
+three pages of the design's four: `ALL` names only what `app::build_app`
 can actually route to, because a dead link is worse than no link. The guard
 that makes the nav and the route table agree came back with it —
 `app::every_header_link_reaches_the_page_it_names` walks `ALL`, fetches each
@@ -354,17 +383,31 @@ Source of truth: `crates/scheduler-core/src/task.rs`.
 ```rust
 pub enum TaskKind {
     Pool,
-    Committed { deadline: i64, deadline_type: DeadlineType, priority: Priority },
+    Committed { deadline: i64, commitment: Commitment, priority: Priority,
+                estimated_minutes: i64 },
     Quota     { target_count: i64, target_minutes_each: i64, period: Period },
 }
 
-pub enum DeadlineType { Hard, Soft }
+pub enum Commitment   { At, By }          // #94, replaces DeadlineType
+pub enum DeadlineType { Hard, Soft }      // retired from the domain; see below
 pub enum Priority     { P1, P2, P3, P4 }
 pub enum Period       { Week, Month }
 ```
 
 `deadline` is **UTC epoch milliseconds** (`T-jiff-epoch-millis`), parsed with
 `jiff` at the boundary. Never a string, in the type or the column.
+
+**`commitment` (at | by) replaced `deadline_type` (hard | soft) at `#94`**
+(`D-committed-is-at-or-by`), retired from the domain outright after the owner
+was asked: `TaskKind::Committed`, `TriageFields` and `TaskAttributes` all drop
+it, and `Field::DeadlineType` leaves the rejection vocabulary. The *column*
+stays (`T-migrations-append-only`) holding what was already typed, and every
+new row writes `NULL` — the same shape `life_area_id` took at #88. A leftover
+`deadline_type` in a submission is tolerated and unread, which a test pins.
+
+> They are not the same axis. *At* and *by* say **what kind of appointment
+> this is**; hard and soft said **whether it may slip**. Nothing maps one to
+> the other, and nothing needs to yet.
 
 **Committed tasks carry a `splittable` flag, unticked by default**
 (`T-splitting-is-opt-in`). Unticked, the task is one block or it does not fit —
@@ -377,6 +420,51 @@ Each variant carries exactly the fields that kind means, so "a pool task has no
 deadline" is a fact about the type rather than a claim about one payload.
 `TaskAttributes` is the nullable row-shaped projection; at most one attribute
 group is ever populated.
+
+## The committed screen — built (`#94`, `D-committed-is-at-or-by`)
+
+**What has a date on it**, listed chronologically — the Menu's second tab.
+
+```
+scheduler_core::committed_screen::order(Vec<CommittedTask>, now_ms) -> Vec<CommittedRow>
+trellis_server::committed/  store.rs · view.rs · http.rs
+```
+
+**A past deadline still shows, marked, first**, and that falls out of
+chronological order with no special case: past items sort earliest. The one
+failure this screen must not have is a missed deadline that silently
+vanishes.
+
+**One 66px cell does both jobs.** An *at* renders `"TUE 8:30"`, a *by*
+renders `"BY THU"` — a *by* carrying a time still renders as a *by* rather
+than silently becoming an *at*.
+
+> **Two capabilities answer "where does presentation text live" differently,
+> and both are defensible.** `pool` keeps its labels (`"3 things"`,
+> `"Show 2 more"`) in `pool/view.rs` and its core module returns domain
+> shapes; `committed` formats its date cell inside `scheduler_core::
+> committed_screen`. The core version buys pure, hand-verifiable
+> epoch-and-weekday math, which is worth having; the cost is a core module
+> named after a screen. Recorded so the third tab's author chooses rather
+> than copies whichever they read last.
+
+> **GAP — the date cell is always UTC, and the owner's zone is data nothing
+> reads.** `date_cell` resolves the deadline against `TimeZone::UTC` on a
+> comment saying the product "has no per-user timezone applied to display
+> yet". That is true of the code and contradicts `T-timezone-is-a-setting`,
+> which settled the owner's zone as a stored row they edit from the running
+> app. The row still exists and `settings::store::get_timezone` still reads
+> it; what #88 deleted was the front door, and `POST /timezone` has had no
+> UI path since.
+>
+> **Correct by default, wrong once set.** The column defaults to `UTC`, so a
+> fresh database renders right. An owner whose zone is stored as anything
+> else sees a weekday and an hour they never typed — and #88's own brief
+> records the owner's value as `America/New_York`. The fix is the shape the
+> deleted `free_time` already used: pass the zone in, as
+> `free_intervals(guardrail, range)` did, rather than have the core assume
+> one. Not done here because it changes what the screen displays, which is
+> the specifier's call and not a tidy-up.
 
 ## The pool screen — built (`#92`, `D-menu-is-a-worklist`)
 
@@ -490,7 +578,7 @@ database to check.
 
 ```sql
 captures(id, raw_text, source, created_at_ms, left_inbox_at, context_tag)
-tasks(id, capture_id, kind, deadline, deadline_type, priority,
+tasks(id, capture_id, kind, deadline, deadline_type, commitment, priority,
       target_count, target_minutes_each, period, life_area_id,
       archived_at, created_at_ms)
 ```
@@ -1082,5 +1170,7 @@ schemas are still there. A revival inherits the gap along with the tables.
 | ~~Which five domains, and one concept or two~~ | ~~M1 S4, M9~~ | **closed** — `T-life-areas-are-data`, #47 |
 | ~~Per-life-area capacity vs `allowed_windows`~~ | ~~M2~~ | **closed** — `T-capacity-two-axes` + `D-life-area-owns-its-time`, #6 |
 | `Block::missed` unreachable under silence-means-done | M6 | #4 — the `block` table survives #88; nothing writes it |
+| `ScheduleTask` needs `life_area_id` and `deadline_type`; triage writes `NULL` for both | M3 revival | #88 · #94 — needs a decision, not a re-attachment |
+| The committed screen's date cell is always UTC; `T-timezone-is-a-setting` says the zone is stored data | correct on a fresh database, wrong once the zone is set | #94 · #85 (which brings the control back) |
 | U3 — backward-pass input | M3 | #7 · ~~U2~~ `T-hard-refuses-soft-slips` · ~~U4~~ `T-blocks-do-not-cross-guardrail-seams` |
 | ~~Crate layout ratification~~ | ~~nothing; cost grows~~ | **closed** — `T-package-by-business-domain`, #44 |

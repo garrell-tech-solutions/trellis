@@ -22,8 +22,9 @@ the parametrized procedures after it are `curl`-only.
 4. Click **Pool**. Confirm it leaves the inbox and appears in a task list on
    the same page, without the page visibly reloading.
 5. Capture `call the dentist`. Click **Committed**. Confirm the form offers
-   deadline type as a fixed choice between `hard` and `soft` (not a free-text
-   box), and priority as a fixed choice among `P1`–`P4`.
+   **at or by** as a fixed choice (not a free-text box), and priority as a
+   fixed choice among `P1`–`P4`. **It no longer asks hard or soft** — #94
+   replaced that field with `commitment`.
 6. Submit the committed form with one field left blank. Confirm the rejection
    names the blank field, nothing is created, and the capture is still in the
    inbox.
@@ -89,7 +90,7 @@ the parametrized procedures after it are `curl`-only.
 2. `GET /` and read the committed form's markup for that capture.
 
 ### Expected Observable Outcomes
-- The deadline type control offers exactly `hard` and `soft` — no other
+- The commitment control offers exactly `at` and `by` — no other
   value, and no free-text input that could carry an arbitrary string.
 - The priority control offers exactly `P1`, `P2`, `P3` and `P4`.
 - The API already rejects a value outside these domains

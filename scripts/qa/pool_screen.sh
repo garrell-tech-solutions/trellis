@@ -92,21 +92,6 @@ for m in re.finditer(r"<div class=\"trip-tag\">([^<]*)</div>", sys.argv[1]):
 ' "$page"
 }
 
-qa_between() {
-  local text="$1" start="$2" end="$3"
-  python3 -c '
-import sys
-text, start, end = sys.argv[1], sys.argv[2], sys.argv[3]
-i = text.find(start)
-if i == -1:
-    print("")
-    sys.exit()
-i += len(start)
-j = text.find(end, i)
-print(text[i:j] if j != -1 else "")
-' "$text" "$start" "$end"
-}
-
 qa_loose_section() {
   qa_between "$1" '<ul class="loose">' '</ul>'
 }
@@ -123,10 +108,6 @@ for m in re.finditer(r"<li class=\"loose-item\">(.*?)</li>", section, re.S):
         print(m.group(1))
         sys.exit()
 ' "$loose_section" "$needle"
-}
-
-qa_header_section() {
-  qa_between "$1" '<header>' '</header>'
 }
 
 # --- Procedure: trips, strays, and the threshold ---
@@ -251,7 +232,7 @@ name="only-pool-work-appears"
 if qa_start_server "$BIN" "$TMP_DIR/$name.sqlite" "$TMP_DIR/$name.log"; then
   qa_pool_task "buy screws" "@homedepot"
   committed_id="$(qa_submit_capture "return the drill")"
-  qa_triage "$committed_id" '{"kind":"committed","deadline":"2026-08-28T17:00:00Z","deadline_type":"hard","priority":"P1","estimated_minutes":60,"context_tag":"@homedepot"}'
+  qa_triage "$committed_id" '{"kind":"committed","deadline":"2026-08-28T17:00:00Z","commitment":"at","priority":"P1","estimated_minutes":60,"context_tag":"@homedepot"}'
   if [[ "$STATUS" != "201" ]]; then
     echo "FAIL: [$name] setup committed triage returned status $STATUS" >&2
     FAILURES=1
@@ -382,37 +363,15 @@ else
 fi
 qa_stop_server
 
-# --- Procedure: the tab bar ---
-name="the-tab-bar"
-if qa_start_server "$BIN" "$TMP_DIR/$name.sqlite" "$TMP_DIR/$name.log"; then
-  qa_assert_tab_bar() {
-    local label="$1" header="$2" current="$3" labels current_needle current_count
-    labels="$(python3 -c '
-import re, sys
-print(",".join(re.findall(r"<a href=\"[^\"]*\"[^>]*>([^<]*)</a>", sys.argv[1])))
-' "$header")"
-    if [[ "$labels" != "Capture,Pool" ]]; then
-      echo "FAIL: [$name] expected exactly the tabs Capture,Pool in that order on the $label screen, got: $labels" >&2
-      FAILURES=1
-    fi
-    current_needle="aria-current=\"page\">$current</a>"
-    if [[ "$header" != *"$current_needle"* ]]; then
-      echo "FAIL: [$name] expected $current marked current on the $label screen, got: $header" >&2
-      FAILURES=1
-    fi
-    current_count="$(printf '%s' "$header" | grep -o 'aria-current="page"' | grep -c .)"
-    if [[ "$current_count" != "1" ]]; then
-      echo "FAIL: [$name] expected exactly one current tab on the $label screen, found $current_count" >&2
-      FAILURES=1
-    fi
-  }
-
-  qa_assert_tab_bar capture "$(qa_header_section "$(curl -s "http://$ADDR/")")" Capture
-  qa_assert_tab_bar pool "$(qa_header_section "$(qa_get_pool)")" Pool
-else
-  FAILURES=1
-fi
-qa_stop_server
+# The tab-bar procedure this file used to own (two tabs, Capture and Pool)
+# was removed from features/pool_screen.feature under #94: it was only
+# ever true while Pool was the last tab, and committed-screen-tabs-06 now
+# asserts all three screens over all three tabs in one place. That check
+# lives in scripts/qa/committed_screen.sh; restating a narrower version
+# here is exactly the two-copies-drift qa/pool_screen.md's own "nothing
+# else changed" section warns about (qa/pool_screen.md's prose itself is
+# stale here and still describes the old two-tab scenario -- flagged to
+# the specifier).
 
 # --- Procedure: hostile text stays escaped ---
 name="hostile-text-in-a-trip-heading"

@@ -36,6 +36,12 @@
       "why": "Gherkin step dispatcher; regex chain, one-line delegation per arm. 14 -> 11 (#88): the response-time-budget arm was deleted along with then_response_within_budget -- T-latency-is-a-qa-assertion moved that assertion to qa/capture_endpoint.md and qa/one_screen.md, and this dispatcher lost the step that drove it, not logic."
     },
     {
+      "file": "crates/acceptance-tests/src/steps/committed_screen.rs",
+      "function": "dispatch",
+      "cyclomatic_complexity": 18,
+      "why": "Gherkin step dispatcher; regex chain, one-line delegation per arm. New module for features/committed_screen.feature (#94). Reviewed arm by arm: every branch is `if let Some(caps) = REGEX.captures(text) { return Some(handler(..)) }` with no conditional of its own, which is the shape T-complexity-8 says has nothing to extract."
+    },
+    {
       "file": "crates/acceptance-tests/src/steps/context_tags.rs",
       "function": "dispatch",
       "cyclomatic_complexity": 10,
@@ -56,8 +62,8 @@
     {
       "file": "crates/acceptance-tests/src/steps/mod.rs",
       "function": "dispatch",
-      "cyclomatic_complexity": 15,
-      "why": "Top-level step dispatcher; delegates to one step module per arm. 20 -> 13 (#88): seven arms deleted along with the seven step modules the demolition removed (app_shell, capacity, exceptions, free_time, guardrails, life_areas, schedule, stats_ratio -- eight names, one module covered two features), and one arm added for the new one_screen module that replaces app_shell. 13 -> 14: one new arm for the new context_tags module (context-tags brief, #82) -- a new step, not new logic. 14 -> 15: one new arm for the new pool_screen module (pool-screen brief, #92) -- same reason."
+      "cyclomatic_complexity": 16,
+      "why": "Top-level step dispatcher; delegates to one step module per arm. 15 -> 16 for the new committed_screen module's arm (#94): a new step, not new logic."
     },
     {
       "file": "crates/acceptance-tests/src/steps/one_screen.rs",
@@ -68,14 +74,14 @@
     {
       "file": "crates/acceptance-tests/src/steps/pool_screen.rs",
       "function": "dispatch",
-      "cyclomatic_complexity": 27,
-      "why": "Gherkin step dispatcher; regex chain, one-line delegation per arm. New module for features/pool_screen.feature (pool-screen brief, #92) -- the largest dispatcher here because the feature specifies nine scenarios' worth of distinct assertions (trip order, trip membership, loose-end order, truncation, the tab bar, escaping) with no shared step text to fold arms together. Every helper it delegates to was itself kept under threshold: trip_visible_items, resolved_count and header_labels each factor out logic that would otherwise have sat inline in more than one arm (dispatch_trip_lists_exactly and dispatch_trip_lists_n_items shared the former; dispatch_given_n_pool_tasks and dispatch_trip_lists_n_items shared the latter)."
+      "cyclomatic_complexity": 28,
+      "why": "Gherkin step dispatcher; regex chain, one-line delegation per arm. 27 -> 28 (#94): then_does_not_mention moved to steps::mod as a shared helper taking `body` directly, and the tab-path lookup gained a \"committed\" arm. Both are new arms, not conditionals in the match."
     },
     {
       "file": "crates/acceptance-tests/src/steps/triage.rs",
       "function": "dispatch",
-      "cyclomatic_complexity": 17,
-      "why": "Gherkin step dispatcher; regex chain, one-line delegation per arm."
+      "cyclomatic_complexity": 18,
+      "why": "Gherkin step dispatcher; regex chain, one-line delegation per arm. 17 -> 18 for the GIVEN_SERVER_BELIEVES_IT_IS clock-pinning Background step (#94) -- a new step, not new logic."
     },
     {
       "file": "crates/acceptance-tests/src/steps/triage_from_page.rs",

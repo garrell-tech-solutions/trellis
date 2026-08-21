@@ -19,6 +19,7 @@ mod build;
 mod capture;
 mod committed_empty_fields;
 mod committed_field_domains;
+mod committed_screen;
 mod context_tags;
 mod dismiss;
 mod html;
@@ -105,6 +106,17 @@ pub(super) fn then_html_body_contains(
         Err(format!(
             "expected {expected:?} in the response, got:\n{body}"
         ))
+    }
+}
+
+/// The negation of [`then_html_body_contains`], taking `body` directly
+/// rather than `World`: every caller already has its own screen-scoped
+/// `html_body(world)` to resolve it through first.
+pub(super) fn then_does_not_mention(body: &str, text: &str) -> Result<(), String> {
+    if body.contains(text) {
+        Err(format!("expected no mention of {text:?}, got:\n{body}"))
+    } else {
+        Ok(())
     }
 }
 
@@ -235,6 +247,9 @@ pub async fn dispatch(
         return outcome;
     }
     if let Some(outcome) = pool_screen::dispatch(world, text, example).await {
+        return outcome;
+    }
+    if let Some(outcome) = committed_screen::dispatch(world, text, example).await {
         return outcome;
     }
 

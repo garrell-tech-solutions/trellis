@@ -121,7 +121,9 @@ pub async fn dispatch(
         return Some(dispatch_meta(world, example, &caps));
     }
     if let Some(caps) = THEN_DOES_NOT_MENTION.captures(text) {
-        return Some(then_does_not_mention(world, &caps[1]));
+        return Some(
+            html_body(world).and_then(|body| super::then_does_not_mention(body, &caps[1])),
+        );
     }
     if let Some(caps) = THEN_TRIP_LISTS_EXACTLY.captures(text) {
         return Some(dispatch_trip_lists_exactly(world, example, &caps));
@@ -238,6 +240,7 @@ async fn dispatch_screen_viewed(
     let path = match screen.as_str() {
         "capture" => "/",
         "pool" => "/pool",
+        "committed" => "/committed",
         other => return Err(format!("unknown screen {other:?}")),
     };
     view_screen(world, path).await
@@ -379,15 +382,6 @@ fn dispatch_meta(
             "expected the pool screen to report {expected:?}, got {:?}",
             meta.trim()
         ))
-    }
-}
-
-fn then_does_not_mention(world: &mut World, text: &str) -> Result<(), String> {
-    let body = html_body(world)?;
-    if body.contains(text) {
-        Err(format!("expected no mention of {text:?}, got:\n{body}"))
-    } else {
-        Ok(())
     }
 }
 

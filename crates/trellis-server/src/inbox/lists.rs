@@ -156,14 +156,17 @@ mod tests {
         assert_eq!(lists.context_tag_suggestions, Vec::<String>::new());
     }
 
-    #[tokio::test]
-    async fn context_tag_suggestions_reflects_tags_in_use() {
-        let (_dir, pool) = test_pool().await;
-        crate::capture::create(&pool, "buy screws", "web", Some("@homedepot"), 0)
+    async fn lists_after_a_tagged_capture(tag: &str) -> (tempfile::TempDir, ListsTemplate) {
+        let (dir, pool) = test_pool().await;
+        crate::capture::create(&pool, "buy screws", "web", Some(tag), 0)
             .await
             .unwrap();
+        (dir, build_lists(&pool, None).await.unwrap())
+    }
 
-        let lists = build_lists(&pool, None).await.unwrap();
+    #[tokio::test]
+    async fn context_tag_suggestions_reflects_tags_in_use() {
+        let (_dir, lists) = lists_after_a_tagged_capture("@homedepot").await;
 
         assert_eq!(
             lists.context_tag_suggestions,
@@ -173,12 +176,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_capture_row_carries_its_context_tag() {
-        let (_dir, pool) = test_pool().await;
-        crate::capture::create(&pool, "buy screws", "web", Some("@homedepot"), 0)
-            .await
-            .unwrap();
-
-        let lists = build_lists(&pool, None).await.unwrap();
+        let (_dir, lists) = lists_after_a_tagged_capture("@homedepot").await;
 
         assert_eq!(lists.captures[0].context_tag.as_deref(), Some("@homedepot"));
     }

@@ -42,8 +42,8 @@ static WHEN_TRIAGED_AS_QUOTA_THROUGH_PAGE_OMITTING: LazyLock<Regex> = LazyLock::
     )
     .unwrap()
 });
-static THEN_OFFERS_DEADLINE_TYPE_CHOICES: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r#"^the committed form offers exactly the deadline type choices "hard" and "soft"$"#)
+static THEN_OFFERS_COMMITMENT_CHOICES: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r#"^the committed form offers exactly the commitment choices "at" and "by"$"#)
         .unwrap()
 });
 static THEN_OFFERS_PRIORITY_CHOICES: LazyLock<Regex> = LazyLock::new(|| {
@@ -96,11 +96,11 @@ pub async fn dispatch(
     if let Some(caps) = WHEN_TRIAGED_AS_QUOTA_THROUGH_PAGE_OMITTING.captures(text) {
         return Some(dispatch_quota_omitting(world, &caps).await);
     }
-    if THEN_OFFERS_DEADLINE_TYPE_CHOICES.is_match(text) {
+    if THEN_OFFERS_COMMITMENT_CHOICES.is_match(text) {
         return Some(then_select_offers_exactly(
             world,
-            "deadline_type",
-            &["hard", "soft"],
+            "commitment",
+            &["at", "by"],
         ));
     }
     if THEN_OFFERS_PRIORITY_CHOICES.is_match(text) {
@@ -157,7 +157,7 @@ pub(super) fn committed_form_fields() -> [(&'static str, &'static str); 6] {
     [
         ("kind", "committed"),
         ("deadline", payloads::VALID_DEADLINE),
-        ("deadline_type", "hard"),
+        ("commitment", "at"),
         ("priority", "P1"),
         ("estimated_minutes", "180"),
         ("life_area", payloads::VALID_LIFE_AREA),
@@ -415,10 +415,10 @@ mod tests {
 
     #[test]
     fn select_option_values_reads_the_options_in_order() {
-        let section = r#"<select name="deadline_type"><option value="hard">hard</option><option value="soft">soft</option></select>"#;
+        let section = r#"<select name="commitment"><option value="at">at</option><option value="by">by</option></select>"#;
         assert_eq!(
-            select_option_values(section, "deadline_type").unwrap(),
-            vec!["hard", "soft"]
+            select_option_values(section, "commitment").unwrap(),
+            vec!["at", "by"]
         );
     }
 
@@ -443,19 +443,17 @@ mod tests {
 
     #[test]
     fn then_select_offers_exactly_passes_when_the_options_match_in_order() {
-        let mut world = world_with_select("deadline_type", &["hard", "soft"]);
+        let mut world = world_with_select("commitment", &["at", "by"]);
         assert_eq!(
-            then_select_offers_exactly(&mut world, "deadline_type", &["hard", "soft"]),
+            then_select_offers_exactly(&mut world, "commitment", &["at", "by"]),
             Ok(())
         );
     }
 
     #[test]
     fn then_select_offers_exactly_errors_when_an_option_is_missing() {
-        let mut world = world_with_select("deadline_type", &["hard"]);
-        assert!(
-            then_select_offers_exactly(&mut world, "deadline_type", &["hard", "soft"]).is_err()
-        );
+        let mut world = world_with_select("commitment", &["at"]);
+        assert!(then_select_offers_exactly(&mut world, "commitment", &["at", "by"]).is_err());
     }
 
     #[test]
@@ -476,7 +474,7 @@ mod tests {
             r#"<details><summary>Committed</summary>"#,
             r#"<form><input type="hidden" name="kind" value="committed">"#,
             r#"<input type="text" name="deadline">"#,
-            r#"<select name="deadline_type"></select>"#,
+            r#"<select name="commitment"></select>"#,
             r#"<select name="priority"></select></form></details>"#,
             r#"<details><summary>Quota</summary>"#,
             r#"<form><input type="hidden" name="kind" value="quota">"#,

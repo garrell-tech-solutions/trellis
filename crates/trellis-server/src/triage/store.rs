@@ -49,17 +49,8 @@ pub async fn insert_task(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::platform::test_support::test_pool;
+    use crate::platform::test_support::{insert_capture, test_pool};
     use scheduler_core::task::{Commitment, Period, Priority};
-
-    /// Setting up "a capture exists" by calling the capture domain's own
-    /// writer rather than retyping its `INSERT` here: a fixture that spells
-    /// out another module's SQL is a second copy of that schema.
-    async fn given_a_capture(pool: &SqlitePool, raw_text: &str) -> i64 {
-        crate::capture::store::insert(pool, raw_text, "web", None, 0)
-            .await
-            .unwrap()
-    }
 
     type StoredTask = (
         String,
@@ -102,7 +93,7 @@ mod tests {
     #[tokio::test]
     async fn a_pool_task_stores_its_kind_and_leaves_every_other_attribute_null() {
         let (_dir, pool) = test_pool().await;
-        let capture_id = given_a_capture(&pool, "buy milk").await;
+        let capture_id = insert_capture(&pool, "buy milk", None).await;
 
         insert_task(&pool, capture_id, &TaskKind::Pool, 7)
             .await
@@ -117,7 +108,7 @@ mod tests {
     #[tokio::test]
     async fn a_committed_task_stores_its_scheduling_metadata_and_no_quota_target() {
         let (_dir, pool) = test_pool().await;
-        let capture_id = given_a_capture(&pool, "buy milk").await;
+        let capture_id = insert_capture(&pool, "buy milk", None).await;
 
         insert_task(&pool, capture_id, &committed(), 7)
             .await
@@ -141,7 +132,7 @@ mod tests {
     #[tokio::test]
     async fn a_committed_task_leaves_the_retired_deadline_type_column_null() {
         let (_dir, pool) = test_pool().await;
-        let capture_id = given_a_capture(&pool, "buy milk").await;
+        let capture_id = insert_capture(&pool, "buy milk", None).await;
 
         insert_task(&pool, capture_id, &committed(), 7)
             .await
@@ -157,7 +148,7 @@ mod tests {
     #[tokio::test]
     async fn a_quota_task_stores_its_target_and_no_deadline() {
         let (_dir, pool) = test_pool().await;
-        let capture_id = given_a_capture(&pool, "buy milk").await;
+        let capture_id = insert_capture(&pool, "buy milk", None).await;
 
         insert_task(&pool, capture_id, &quota(), 7).await.unwrap();
 
@@ -179,7 +170,7 @@ mod tests {
     #[tokio::test]
     async fn the_task_records_the_capture_it_came_from_and_when_it_was_created() {
         let (_dir, pool) = test_pool().await;
-        let capture_id = given_a_capture(&pool, "buy milk").await;
+        let capture_id = insert_capture(&pool, "buy milk", None).await;
 
         insert_task(&pool, capture_id, &TaskKind::Pool, 4242)
             .await

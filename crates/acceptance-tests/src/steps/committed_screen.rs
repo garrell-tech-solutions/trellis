@@ -106,7 +106,9 @@ pub async fn dispatch(
         return Some(dispatch_meta(world, example, &caps));
     }
     if let Some(caps) = THEN_DOES_NOT_MENTION.captures(text) {
-        return Some(then_does_not_mention(world, &caps[1]));
+        return Some(
+            html_body(world).and_then(|body| super::then_does_not_mention(body, &caps[1])),
+        );
     }
     if let Some(caps) = THEN_SHOWS_MESSAGE.captures(text) {
         return Some(dispatch_shows_message(world, example, &caps));
@@ -357,15 +359,6 @@ fn dispatch_meta(
             "expected the committed screen to report {expected:?}, got {:?}",
             meta.trim()
         ))
-    }
-}
-
-fn then_does_not_mention(world: &mut World, text: &str) -> Result<(), String> {
-    let body = html_body(world)?;
-    if body.contains(text) {
-        Err(format!("expected no mention of {text:?}, got:\n{body}"))
-    } else {
-        Ok(())
     }
 }
 

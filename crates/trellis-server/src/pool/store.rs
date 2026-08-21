@@ -32,13 +32,24 @@ pub async fn list_pool_tasks(pool: &SqlitePool) -> Result<Vec<PoolTaskRow>, sqlx
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::platform::test_support::test_pool;
+    use crate::platform::test_support::{insert_capture, test_pool};
     use scheduler_core::task::TaskKind;
 
-    async fn given_a_capture(pool: &SqlitePool, raw_text: &str, tag: Option<&str>) -> i64 {
-        crate::capture::store::insert(pool, raw_text, "web", tag, 0)
-            .await
-            .unwrap()
+    fn committed_task_kind() -> TaskKind {
+        TaskKind::Committed {
+            deadline: 1787245200000,
+            commitment: scheduler_core::task::Commitment::At,
+            priority: scheduler_core::task::Priority::P1,
+            estimated_minutes: 30,
+        }
+    }
+
+    fn quota_task_kind() -> TaskKind {
+        TaskKind::Quota {
+            target_count: 3,
+            target_minutes_each: 20,
+            period: scheduler_core::task::Period::Week,
+        }
     }
 
     async fn given_a_pool_task(
@@ -46,7 +57,7 @@ mod tests {
         raw_text: &str,
         tag: Option<&str>,
     ) -> Vec<PoolTaskRow> {
-        let capture_id = given_a_capture(pool, raw_text, tag).await;
+        let capture_id = insert_capture(pool, raw_text, tag).await;
         crate::triage::store::insert_task(pool, capture_id, &TaskKind::Pool, 0)
             .await
             .unwrap();
@@ -83,37 +94,18 @@ mod tests {
     #[tokio::test]
     async fn list_pool_tasks_excludes_committed_and_quota_tasks() {
         let (_dir, pool) = test_pool().await;
-        let pool_capture = given_a_capture(&pool, "buy screws", Some("@homedepot")).await;
-        let committed_capture = given_a_capture(&pool, "file the return", Some("@homedepot")).await;
-        let quota_capture = given_a_capture(&pool, "practise piano", Some("@homedepot")).await;
+        let pool_capture = insert_capture(&pool, "buy screws", Some("@homedepot")).await;
+        let committed_capture = insert_capture(&pool, "file the return", Some("@homedepot")).await;
+        let quota_capture = insert_capture(&pool, "practise piano", Some("@homedepot")).await;
         crate::triage::store::insert_task(&pool, pool_capture, &TaskKind::Pool, 0)
             .await
             .unwrap();
-        crate::triage::store::insert_task(
-            &pool,
-            committed_capture,
-            &TaskKind::Committed {
-                deadline: 1787245200000,
-                commitment: scheduler_core::task::Commitment::At,
-                priority: scheduler_core::task::Priority::P1,
-                estimated_minutes: 30,
-            },
-            0,
-        )
-        .await
-        .unwrap();
-        crate::triage::store::insert_task(
-            &pool,
-            quota_capture,
-            &TaskKind::Quota {
-                target_count: 3,
-                target_minutes_each: 20,
-                period: scheduler_core::task::Period::Week,
-            },
-            0,
-        )
-        .await
-        .unwrap();
+        crate::triage::store::insert_task(&pool, committed_capture, &committed_task_kind(), 0)
+            .await
+            .unwrap();
+        crate::triage::store::insert_task(&pool, quota_capture, &quota_task_kind(), 0)
+            .await
+            .unwrap();
 
         let tasks = list_pool_tasks(&pool).await.unwrap();
 
@@ -124,7 +116,7 @@ mod tests {
     #[tokio::test]
     async fn list_pool_tasks_excludes_an_untriaged_capture() {
         let (_dir, pool) = test_pool().await;
-        given_a_capture(&pool, "buy screws", Some("@homedepot")).await;
+        insert_capture(&pool, "buy screws", Some("@homedepot")).await;
 
         assert_eq!(list_pool_tasks(&pool).await.unwrap(), Vec::new());
     }

@@ -109,6 +109,17 @@ pub(super) fn then_html_body_contains(
     }
 }
 
+/// The negation of [`then_html_body_contains`], taking `body` directly
+/// rather than `World`: every caller already has its own screen-scoped
+/// `html_body(world)` to resolve it through first.
+pub(super) fn then_does_not_mention(body: &str, text: &str) -> Result<(), String> {
+    if body.contains(text) {
+        Err(format!("expected no mention of {text:?}, got:\n{body}"))
+    } else {
+        Ok(())
+    }
+}
+
 /// [`then_html_body_contains`]'s counterpart for a forbidden substring.
 pub(super) fn then_html_body_excludes(
     world: &mut World,

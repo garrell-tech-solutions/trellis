@@ -74,6 +74,22 @@ pub async fn dispatch(
 /// the capture it came from and routes to whichever screen's own front
 /// door owns it (`T-one-front-door-per-capability`: `pool` and `committed`
 /// each own their own mark-done route).
+/// Which screen owns the mark-done route for a task of this kind.
+///
+/// Extracted from [`mark_done`] rather than baselined: that function was
+/// over `T-complexity-8`'s cap, and it is not a step dispatcher, so the
+/// rule's own answer applies -- "a function over 8 is carrying logic that
+/// is not the match; extract that". This mapping is the logic, it is the
+/// part that grows when the fourth screen lands, and naming it is what
+/// makes that growth one obvious line rather than a longer function.
+fn done_route(kind: &str, task_id: i64) -> Result<String, String> {
+    match kind {
+        "pool" => Ok(format!("/pool/tasks/{task_id}/done")),
+        "committed" => Ok(format!("/committed/tasks/{task_id}/done")),
+        other => Err(format!("mark-done has no route for kind {other:?}")),
+    }
+}
+
 async fn mark_done(world: &mut World, raw_text: &str) -> Result<(), String> {
     let pool = world.pool()?.clone();
     let (task_id, kind): (i64, String) = sqlx::query_as(
@@ -86,11 +102,7 @@ async fn mark_done(world: &mut World, raw_text: &str) -> Result<(), String> {
     .await
     .map_err(|e| format!("find the task triaged from {raw_text:?}: {e}"))?;
 
-    let path = match kind.as_str() {
-        "pool" => format!("/pool/tasks/{task_id}/done"),
-        "committed" => format!("/committed/tasks/{task_id}/done"),
-        other => return Err(format!("mark-done has no route for kind {other:?}")),
-    };
+    let path = done_route(&kind, task_id)?;
     let request = Request::builder()
         .method("POST")
         .uri(path)

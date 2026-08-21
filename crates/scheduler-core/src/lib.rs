@@ -7,6 +7,7 @@
 
 pub mod context_tag;
 pub mod interval;
+pub mod pool;
 pub mod schedule;
 pub mod task;
 pub mod timezone;

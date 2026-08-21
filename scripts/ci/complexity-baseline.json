@@ -56,14 +56,20 @@
     {
       "file": "crates/acceptance-tests/src/steps/mod.rs",
       "function": "dispatch",
-      "cyclomatic_complexity": 14,
-      "why": "Top-level step dispatcher; delegates to one step module per arm. 20 -> 13 (#88): seven arms deleted along with the seven step modules the demolition removed (app_shell, capacity, exceptions, free_time, guardrails, life_areas, schedule, stats_ratio -- eight names, one module covered two features), and one arm added for the new one_screen module that replaces app_shell. 13 -> 14: one new arm for the new context_tags module (context-tags brief, #82) -- a new step, not new logic."
+      "cyclomatic_complexity": 15,
+      "why": "Top-level step dispatcher; delegates to one step module per arm. 20 -> 13 (#88): seven arms deleted along with the seven step modules the demolition removed (app_shell, capacity, exceptions, free_time, guardrails, life_areas, schedule, stats_ratio -- eight names, one module covered two features), and one arm added for the new one_screen module that replaces app_shell. 13 -> 14: one new arm for the new context_tags module (context-tags brief, #82) -- a new step, not new logic. 14 -> 15: one new arm for the new pool_screen module (pool-screen brief, #92) -- same reason."
     },
     {
       "file": "crates/acceptance-tests/src/steps/one_screen.rs",
       "function": "dispatch",
-      "cyclomatic_complexity": 11,
-      "why": "Gherkin step dispatcher; regex chain, one-line delegation per arm. New module for features/one_screen.feature, which replaces app_shell.feature (#88)."
+      "cyclomatic_complexity": 9,
+      "why": "Gherkin step dispatcher; regex chain, one-line delegation per arm. New module for features/one_screen.feature, which replaces app_shell.feature (#88). 11 -> 9 (#92): the then_no_header/then_no_link arms and their two regexes were deleted along with the scenario that used them -- pool-screen-tabs-08 asserts what the header now holds, in pool_screen.rs, so the guarantee moved rather than the logic shrinking."
+    },
+    {
+      "file": "crates/acceptance-tests/src/steps/pool_screen.rs",
+      "function": "dispatch",
+      "cyclomatic_complexity": 27,
+      "why": "Gherkin step dispatcher; regex chain, one-line delegation per arm. New module for features/pool_screen.feature (pool-screen brief, #92) -- the largest dispatcher here because the feature specifies nine scenarios' worth of distinct assertions (trip order, trip membership, loose-end order, truncation, the tab bar, escaping) with no shared step text to fold arms together. Every helper it delegates to was itself kept under threshold: trip_visible_items, resolved_count and header_labels each factor out logic that would otherwise have sat inline in more than one arm (dispatch_trip_lists_exactly and dispatch_trip_lists_n_items shared the former; dispatch_given_n_pool_tasks and dispatch_trip_lists_n_items shared the latter)."
     },
     {
       "file": "crates/acceptance-tests/src/steps/triage.rs",

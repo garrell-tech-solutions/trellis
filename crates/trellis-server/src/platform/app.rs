@@ -21,6 +21,7 @@ use crate::dismiss::http::dismiss_capture;
 use crate::inbox::http::show_inbox;
 use crate::platform::assets::{htmx_js, space_grotesk_woff2, trellis_css};
 use crate::platform::clock::Clock;
+use crate::pool::http::show_pool;
 use crate::settings::http::set_timezone;
 use crate::triage::http::create_triage;
 
@@ -58,17 +59,84 @@ pub fn build_app(pool: SqlitePool, clock: Clock) -> Router {
         .route("/captures/{id}/triage", post(create_triage))
         .route("/captures/{id}/dismiss", post(dismiss_capture))
         .route("/timezone", post(set_timezone))
+        .route("/pool", get(show_pool))
         .with_state(AppState { pool, clock })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::platform::nav;
     use crate::platform::test_support::test_pool;
     use axum::body::Body;
     use axum::http::{Request, StatusCode};
     use proptest::prelude::*;
     use tower::ServiceExt;
+
+    /// **Every header link is a real route, and the page it reaches agrees
+    /// about which one it is.**
+    ///
+    /// `build_app` above and `nav::Page::path` are two statements of the same
+    /// two paths, and nothing in the type system makes them agree: rename a
+    /// route here and the header keeps offering the old one, which 404s.
+    /// Walking `nav::ALL` covers whatever pages exist rather than a
+    /// hand-maintained Examples table listing today's two by hand.
+    #[tokio::test]
+    async fn every_header_link_reaches_the_page_it_names() {
+        let (_dir, pool) = test_pool().await;
+
+        for page in nav::ALL {
+            let link = nav::links(page)
+                .into_iter()
+                .find(|link| link.current)
+                .expect("a page's own link is in the header it renders");
+
+            let response = build_app(pool.clone(), Clock::system())
+                .oneshot(
+                    Request::builder()
+                        .uri(link.path)
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+
+            assert_eq!(
+                response.status(),
+                StatusCode::OK,
+                "the header offers {} but GET {} is not a page",
+                link.label,
+                link.path
+            );
+            let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+                .await
+                .unwrap();
+            let body = String::from_utf8(body.to_vec()).unwrap();
+            let header = header_of(&body);
+
+            assert!(
+                header.contains(&format!(r#"aria-current="page">{}</a>"#, link.label)),
+                "GET {} does not mark {} as the current page",
+                link.path,
+                link.label
+            );
+            assert_eq!(
+                header.matches("aria-current").count(),
+                1,
+                "GET {} marks more than one link current",
+                link.path
+            );
+        }
+    }
+
+    /// The header's own markup. Scoped rather than searching the whole page,
+    /// so "exactly one link is current" stays a claim about the nav even
+    /// after some page's content grows an `aria-current` of its own.
+    fn header_of(body: &str) -> &str {
+        let start = body.find("<header>").expect("every page carries a header");
+        let end = body.find("</header>").expect("the header is closed");
+        &body[start..end]
+    }
 
     /// The 50 ms budget itself moved to `qa/capture_endpoint.md` and
     /// `qa/one_screen.md` in #88 (`T-latency-is-a-qa-assertion`): a reading

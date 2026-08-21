@@ -3,6 +3,7 @@
 
 use super::lists::build_lists;
 use crate::inbox::view::{CaptureRow, TaskRow};
+use crate::platform::nav::{self, NavLink, Page};
 use crate::platform::response::{render_template, write_failed};
 use askama::Template;
 use axum::extract::State;
@@ -16,6 +17,7 @@ struct InboxTemplate {
     captures: Vec<CaptureRow>,
     tasks: Vec<TaskRow>,
     context_tag_suggestions: Vec<String>,
+    nav: Vec<NavLink>,
 }
 
 /// The full page is the only thing that is not the `#lists` fragment, so it
@@ -24,9 +26,8 @@ struct InboxTemplate {
 /// `lists.html`, and an Askama include renders in its parent's context, so
 /// the page template has to carry the same three fields by the same names.
 ///
-/// No header, no nav (#88, `one-screen-no-header-02`): with `/` the only
-/// route, there is nothing to navigate between until #85 brings a second
-/// screen back.
+/// The header returned in #92: `base.html` renders `nav` regardless of
+/// which page extends it, so every page template carries it now.
 pub async fn show_inbox(State(pool): State<SqlitePool>) -> Result<Response, StatusCode> {
     let lists = build_lists(&pool, None).await.map_err(write_failed)?;
     Ok(render_template(
@@ -35,6 +36,7 @@ pub async fn show_inbox(State(pool): State<SqlitePool>) -> Result<Response, Stat
             captures: lists.captures,
             tasks: lists.tasks,
             context_tag_suggestions: lists.context_tag_suggestions,
+            nav: nav::links(Page::Capture),
         },
     ))
 }

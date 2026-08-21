@@ -58,17 +58,18 @@ pub async fn mark_committed_task_done(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::platform::test_support::test_pool;
+    use crate::platform::test_support::{archived_at, test_pool};
     use axum::body::{to_bytes, Body};
     use axum::http::Request;
     use tower::ServiceExt;
 
-    async fn get_committed(pool: &SqlitePool) -> (StatusCode, String) {
+    async fn request(pool: &SqlitePool, method: &str, uri: &str) -> (StatusCode, String) {
         let app = crate::platform::app::build_app(pool.clone(), Clock::pinned_at(1787562000000));
         let response = app
             .oneshot(
                 Request::builder()
-                    .uri("/committed")
+                    .method(method)
+                    .uri(uri)
                     .body(Body::empty())
                     .unwrap(),
             )
@@ -77,6 +78,10 @@ mod tests {
         let status = response.status();
         let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
         (status, String::from_utf8(bytes.to_vec()).unwrap())
+    }
+
+    async fn get_committed(pool: &SqlitePool) -> (StatusCode, String) {
+        request(pool, "GET", "/committed").await
     }
 
     #[tokio::test]
@@ -107,22 +112,7 @@ mod tests {
     #[tokio::test]
     async fn the_committed_screen_shows_a_row_for_a_committed_task() {
         let (_dir, pool) = test_pool().await;
-        let (capture_id, _) = crate::capture::create(&pool, "book the dentist", "web", None, 0)
-            .await
-            .unwrap();
-        crate::triage::store::insert_task(
-            &pool,
-            capture_id,
-            &scheduler_core::task::TaskKind::Committed {
-                deadline: 1787646600000,
-                commitment: scheduler_core::task::Commitment::At,
-                priority: scheduler_core::task::Priority::P1,
-                estimated_minutes: 30,
-            },
-            0,
-        )
-        .await
-        .unwrap();
+        given_a_committed_task(&pool, "book the dentist").await;
 
         let (_, body) = get_committed(&pool).await;
 
@@ -154,20 +144,7 @@ mod tests {
     }
 
     async fn post_mark_done(pool: &SqlitePool, task_id: i64) -> (StatusCode, String) {
-        let app = crate::platform::app::build_app(pool.clone(), Clock::pinned_at(1787562000000));
-        let response = app
-            .oneshot(
-                Request::builder()
-                    .method("POST")
-                    .uri(format!("/committed/tasks/{task_id}/done"))
-                    .body(Body::empty())
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-        let status = response.status();
-        let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
-        (status, String::from_utf8(bytes.to_vec()).unwrap())
+        request(pool, "POST", &format!("/committed/tasks/{task_id}/done")).await
     }
 
     #[tokio::test]
@@ -188,14 +165,8 @@ mod tests {
 
         post_mark_done(&pool, task_id).await;
 
-        let archived_at: Option<i64> =
-            sqlx::query_scalar("SELECT archived_at FROM tasks WHERE id = ?")
-                .bind(task_id)
-                .fetch_one(&pool)
-                .await
-                .unwrap();
         assert!(
-            archived_at.is_some(),
+            archived_at(&pool, task_id).await.is_some(),
             "expected archived_at to be stamped, got None"
         );
     }

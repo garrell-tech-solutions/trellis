@@ -63,7 +63,7 @@ pub async fn mark_pool_task_done(
 mod tests {
     use super::*;
     use crate::platform::clock::Clock;
-    use crate::platform::test_support::test_pool;
+    use crate::platform::test_support::{archived_at, test_pool};
     use axum::body::{to_bytes, Body};
     use axum::http::Request;
     use scheduler_core::task::TaskKind;
@@ -218,14 +218,8 @@ mod tests {
 
         post_mark_done(&pool, task_id).await;
 
-        let archived_at: Option<i64> =
-            sqlx::query_scalar("SELECT archived_at FROM tasks WHERE id = ?")
-                .bind(task_id)
-                .fetch_one(&pool)
-                .await
-                .unwrap();
         assert!(
-            archived_at.is_some(),
+            archived_at(&pool, task_id).await.is_some(),
             "expected archived_at to be stamped, got None"
         );
     }

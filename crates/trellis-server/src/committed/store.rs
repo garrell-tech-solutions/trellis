@@ -64,6 +64,18 @@ mod tests {
         }
     }
 
+    async fn given_a_committed_task(pool: &SqlitePool, raw_text: &str, tag: Option<&str>) {
+        let capture_id = insert_capture(pool, raw_text, tag).await;
+        crate::triage::store::insert_task(
+            pool,
+            capture_id,
+            &committed(1787646600000, Commitment::At),
+            0,
+        )
+        .await
+        .unwrap();
+    }
+
     #[tokio::test]
     async fn list_committed_tasks_is_empty_against_a_fresh_database() {
         let (_dir, pool) = test_pool().await;
@@ -74,15 +86,7 @@ mod tests {
     #[tokio::test]
     async fn list_committed_tasks_reports_a_committed_tasks_text_tag_deadline_and_commitment() {
         let (_dir, pool) = test_pool().await;
-        let capture_id = insert_capture(&pool, "book the dentist", Some("@phone")).await;
-        crate::triage::store::insert_task(
-            &pool,
-            capture_id,
-            &committed(1787646600000, Commitment::At),
-            0,
-        )
-        .await
-        .unwrap();
+        given_a_committed_task(&pool, "book the dentist", Some("@phone")).await;
 
         let tasks = list_committed_tasks(&pool).await.unwrap();
 
@@ -149,15 +153,7 @@ mod tests {
     #[tokio::test]
     async fn list_committed_tasks_reports_the_tasks_own_id() {
         let (_dir, pool) = test_pool().await;
-        let capture_id = insert_capture(&pool, "book the dentist", Some("@phone")).await;
-        crate::triage::store::insert_task(
-            &pool,
-            capture_id,
-            &committed(1787646600000, Commitment::At),
-            0,
-        )
-        .await
-        .unwrap();
+        given_a_committed_task(&pool, "book the dentist", Some("@phone")).await;
 
         let tasks = list_committed_tasks(&pool).await.unwrap();
 
@@ -171,15 +167,7 @@ mod tests {
     #[tokio::test]
     async fn list_committed_tasks_excludes_a_task_marked_done() {
         let (_dir, pool) = test_pool().await;
-        let capture_id = insert_capture(&pool, "book the dentist", Some("@phone")).await;
-        crate::triage::store::insert_task(
-            &pool,
-            capture_id,
-            &committed(1787646600000, Commitment::At),
-            0,
-        )
-        .await
-        .unwrap();
+        given_a_committed_task(&pool, "book the dentist", Some("@phone")).await;
         sqlx::query("UPDATE tasks SET archived_at = 1")
             .execute(&pool)
             .await

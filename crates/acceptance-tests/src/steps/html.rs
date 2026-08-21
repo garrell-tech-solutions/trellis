@@ -35,6 +35,13 @@ pub fn tasks_section(body: &str) -> Result<&str, String> {
     between(body, r#"<ul id="tasks">"#, "</ul>")
 }
 
+/// The shared header's own section — everything `pool_screen.feature`'s
+/// "the tab bar ..." steps mean. Returned in #92 alongside the header
+/// itself, which #88 had deleted along with the pages it linked between.
+pub fn header_section(body: &str) -> Result<&str, String> {
+    between(body, "<header>", "</header>")
+}
+
 /// The markup of the one row (an `<li` element, open or self-contained) in
 /// `section` whose text contains `needle` — for asserting a second fact (a
 /// tag, say) about specifically the row a first fact (raw capture text)
@@ -120,5 +127,13 @@ mod tests {
     fn row_containing_errors_when_the_needle_is_absent() {
         let section = "<li>buy milk</li>";
         assert!(row_containing(section, "call the dentist").is_err());
+    }
+
+    #[test]
+    fn header_section_is_scoped_to_the_header_only() {
+        let body = r#"<header><nav>Pool</nav></header><ul id="captures"><li>buy milk</li></ul>"#;
+        let section = header_section(body).unwrap();
+        assert!(section.contains("Pool"));
+        assert!(!section.contains("buy milk"));
     }
 }

@@ -6,12 +6,15 @@
 //! - [`triage`] — a capture becomes a typed task.
 //! - [`dismiss`] — the inbox's other exit: a capture leaves with no task.
 //! - [`inbox`] — what is still waiting, and what has already become a task.
+//! - [`pool`] — the first Menu tab: pool tasks grouped by where they can be
+//!   done (#92).
 //! - [`settings`] — the owner's timezone, one value for the whole product.
 //!   Its only reader (`free_time`) is gone (#88); kept because #85 needs it.
 //! - [`platform`] — deliberately *not* a capability: the route table, the
-//!   database, the clock, the vendored static assets. It is named so that a
-//!   reader can tell at a glance which directories are the product and which
-//!   one is the machinery.
+//!   database, the clock, the vendored static assets, and the shared header
+//!   every page carries (`nav`). It is named so that a reader can tell at a
+//!   glance which directories are the product and which one is the
+//!   machinery.
 //!
 //! `scheduler_core::schedule` and `::interval` survive with no caller here:
 //! M3 (the scheduler) is paused, not cancelled, by #88's demolition, and
@@ -47,5 +50,6 @@ pub mod capture;
 pub mod dismiss;
 pub mod inbox;
 pub mod platform;
+pub mod pool;
 pub mod settings;
 pub mod triage;

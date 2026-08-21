@@ -1,4 +1,4 @@
-# QA Procedure: Trellis is one screen until the Menu returns
+# QA Procedure: Trellis serves the routes it has, and only those
 
 Covers: `features/one_screen.feature`
 
@@ -49,7 +49,8 @@ again, it is recomputable from the same rows. Confirm the task rows survive.
 
 1. `cargo run -p trellis-server -- serve --db <fresh path>`.
 2. Open `http://localhost:8080`. Confirm the capture box and the inbox are
-   there and **there is no header** — no nav, no links to anywhere.
+   there, and that the tab bar offers **Capture and Pool** — two tabs, not
+   four.
 3. Quick-add a capture. Triage it. Dismiss another. Confirm all three still
    work exactly as before.
 4. Type `http://localhost:8080/stats` by hand. Confirm a 404.
@@ -59,30 +60,42 @@ again, it is recomputable from the same rows. Confirm the task rows survive.
 - All five steps hold literally.
 - **Step 3 is the point of the slice and the thing most at risk.** A
   demolition that breaks capture has failed however clean the deletion was.
-- Step 2's absence of a header is a real check, not a formality: a header
-  rendering an empty list is a different outcome from no header, and only one
-  of them is correct.
+- **Step 2 changed in #92.** This procedure asserted the *absence* of a header
+  while one screen existed; the Pool tab restored it. What the tab bar holds
+  is `qa/pool_screen.md`'s, checked on both screens — here it is only
+  confirmed that navigation exists at all, so the two documents do not both
+  own the same assertion.
 
-## Procedure — every removed path is gone
+## Procedure — the routes the product has, and the ones it does not
 
-1. Request each of `/stats`, `/life-areas`, `/free-time`, `/capacity` and
+1. Request `/` and `/pool`.
+2. Request each of `/stats`, `/life-areas`, `/free-time`, `/capacity` and
    `/schedule`.
 
 ### Expected Observable Outcomes
-- **404 on all five.** Not 200 with an empty page, not a redirect to `/`, not
-  500.
+- **200 on the two that exist**, 404 on the five that do not. Not 200 with an
+  empty page, not a redirect to `/`, not 500.
+- **Checking the 200s is the point, not padding.** While every row expected a
+  404 this procedure could not fail on a wrong path — `/statX` 404s exactly
+  like `/stats`, and nine mutants survived the matching scenario on precisely
+  that. A route that answers is what makes a wrong path detectable.
 - A redirect would be the failure worth naming: it looks tidy and it means the
   route still exists. The brief's word is *gone*.
 
-## Procedure — no header renders
+## Procedure — navigation exists, and is not this document's to detail
 
 1. `GET /` and read the raw HTML.
 
 ### Expected Observable Outcomes
-- **No `<header>` and no `<nav>`**, and no anchor pointing at another page of
-  this product.
-- `T-nav-is-the-site-map` is not superseded by this — with one route the site
-  map is empty, and an empty site map renders nothing. The rule did the work.
+- A navigation region is present, and it links `/pool`.
+- **What the tab bar contains, and which tab is marked, is
+  `qa/pool_screen.md`'s** — it checks both screens. This procedure only
+  confirms navigation returned when the second screen did, so that a future
+  route removal cannot leave the product unreachable without something
+  failing.
+- `T-nav-is-the-site-map` did the work here rather than being amended: the
+  header is the route table, so it emptied itself when there was one route
+  and refilled itself when there were two.
 
 ## Procedure — capture and triage are untouched
 

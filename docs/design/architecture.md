@@ -98,23 +98,33 @@ crates/trellis-server/src/
   capture/    mod.rs  http.rs  store.rs
   dismiss/    mod.rs  http.rs
   inbox/      mod.rs  http.rs  lists.rs  store.rs  view.rs
+  pool/       mod.rs  http.rs  store.rs  view.rs
   settings/   mod.rs  http.rs  store.rs
   triage/     mod.rs  http.rs  store.rs
   platform/   app.rs  assets.rs  boundary.rs  clock.rs  db.rs
-              mod.rs  request.rs  response.rs  test_support.rs
+              mod.rs  nav.rs  request.rs  response.rs  test_support.rs
 ```
 
-**Five capabilities and one bucket** since #88. It was ten: `capacity`,
-`exceptions`, `free_time`, `life_areas` and `stats` are gone, and
-`platform/nav.rs` with them.
+**Six capabilities and one bucket.** #88 took it from ten to five —
+`capacity`, `exceptions`, `free_time`, `life_areas` and `stats` are gone —
+and `#92` added `pool`, the first Menu tab.
+
+**`platform/nav.rs` is back**, deleted by #88 and rebuilt for `#92`. Two
+pages, not the four the design draws: `ALL` names only what `app::build_app`
+can actually route to, because a dead link is worse than no link. The guard
+that makes the nav and the route table agree came back with it —
+`app::every_header_link_reaches_the_page_it_names` walks `ALL`, fetches each
+page over the real router, and asserts it resolves and marks exactly itself
+current. It walks the list rather than restating it, which is what makes it
+cover the third and fourth tabs when they arrive.
 
 > **`settings` is now reachable from nowhere.** Its only reader was
 > `free_time`, so `POST /timezone` has no UI path to it. Stated in the
 > demolition rather than left to be discovered — a one-way door held open
 > until `#85`, not an oversight.
 
-> **The `capabilities.len() >= 5` floor in `platform/boundary.rs` is now
-> exactly met.** That check asserts a minimum so a walk that stops covering
+> **The `capabilities.len() >= 5` floor in `platform/boundary.rs` had no
+> slack at all after #88 and has one capability's worth again after `#92`.** That check asserts a minimum so a walk that stops covering
 > the tree fails loudly instead of passing vacuously; with ten capabilities
 > it had slack, and with five it has none. The next legitimate deletion trips
 > it and forces someone to lower it consciously, which is the forcing
@@ -367,6 +377,48 @@ Each variant carries exactly the fields that kind means, so "a pool task has no
 deadline" is a fact about the type rather than a claim about one payload.
 `TaskAttributes` is the nullable row-shaped projection; at most one attribute
 group is ever populated.
+
+## The pool screen — built (`#92`, `D-menu-is-a-worklist`)
+
+**The first consumer of context tags, and the first Menu tab.** Pool work
+grouped by where it can be done. `D-no-pool-on-calendar` makes this the only
+place pool work is offered, which is why `pool::store`'s one query carries
+`WHERE tasks.kind = 'pool'` and nothing else has to.
+
+```
+scheduler_core::pool::group(Vec<PoolTask>) -> PoolGroups   trips + loose ends
+                     TRIP_THRESHOLD                        3
+                     VISIBLE_TRIP_ITEMS                    what shows unexpanded
+
+trellis_server::pool/  store.rs  the one query · view.rs  the rendered shape
+```
+
+**A tag becomes a trip only once three things wait under it.** Fewer, and
+they are strays that share a place rather than a reason to leave the house,
+so they fall to loose ends still showing their tag. An untagged task always
+falls to loose ends — there is no threshold for having nothing to group by.
+
+**Nothing here writes.** No reorder, no solver, no pins. When a manual
+reorder arrives it belongs to loose ends alone, never to a trip, whose rank
+is derived from how many things it clears and must stay derived.
+
+> **Two capabilities hold one invariant between them, and a test is what
+> ties them.** `scheduler_core::pool::group` buckets by **plain string
+> equality**, which is correct *only* because `capture::resolve_tag`
+> canonicalized the spelling on the way in. Nothing in the type system says
+> so, and every fixture on the pool path seeds tags through
+> `capture::store::insert` with the spelling already final — convenient, and
+> it skips the exact step the screen depends on.
+>
+> **The failure is not subtle-but-harmless.** Three items under one tag is
+> exactly `TRIP_THRESHOLD`; split across two spellings they are groups of 2
+> and 1, both under it, so both fall to loose ends and **the trip disappears
+> from the screen entirely**. `pool::http::case_variant_spellings_of_one_tag
+> _make_one_trip_not_none` is the one test on this path that goes through
+> `capture::create`, and it fails exactly this way when canonicalization is
+> removed. Same shape as `removing_a_band_removes_exactly_the_rows_that_band
+> _displayed` before #88: two independent statements of one rule, held
+> together by the only thing that can hold them.
 
 ## Context tags — built (`D-context-tags-are-the-taxonomy`, #82)
 

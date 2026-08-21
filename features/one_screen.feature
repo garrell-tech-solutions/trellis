@@ -1,12 +1,25 @@
 # acceptance-mutation-manifest-begin
-# {"version":1,"tested_at":"2026-08-21T00:04:28.365546651Z","feature_name":"Trellis is one screen until the Menu returns","feature_path":"features/one_screen.feature","background_hash":"304f93e93e2b217b49069c091950b87589f0c7e789e2d0dc3aaa8d845450cb64","implementation_hash":"sha256:02c1891a283a6864d735106fede1e4b2804093516cb75878c182196d2873b1aa","scenarios":[]}
+# {"version":1,"tested_at":"2026-08-21T18:37:04.074780662Z","feature_name":"Trellis serves the routes it has, and only those","feature_path":"features/one_screen.feature","background_hash":"304f93e93e2b217b49069c091950b87589f0c7e789e2d0dc3aaa8d845450cb64","implementation_hash":"sha256:02c1891a283a6864d735106fede1e4b2804093516cb75878c182196d2873b1aa","scenarios":[]}
 # acceptance-mutation-manifest-end
 
-# one-screen-removed-routes-404-01: every route the demolition removed is gone, not merely unlinked
-# one-screen-no-header-02: no navigation header renders while there is one screen
+# one-screen-routes-01: a route the product has answers; every route the demolition removed is gone
 #
-# #88 removed five routes and the six modules behind them. What is left is one
-# screen -- capture and triage -- until #85 brings the Menu back.
+# THE NO-HEADER SCENARIO IS GONE, not inverted. It asserted that no navigation
+# renders while one screen exists, and #92 restores the tab bar with two. Its
+# replacement is pool-screen-tabs-09, which asserts what the header now holds
+# on both screens rather than that it is absent -- so the guarantee moved
+# rather than lapsed. #70's inversion still applies: if this feature had NOT
+# needed changing, the second screen shipped with no way to reach it.
+#
+# #88 removed five routes and the six modules behind them; #92 added /pool,
+# the first Menu tab.
+#
+# THE `path` COLUMN IS FALSIFIABLE NOW, and it was not before. When every row
+# expected 404, mutating /stats to /statX still 404d -- nine mutants survived
+# this scenario on exactly that, the trap that says IF A SCENARIO'S POINT IS
+# THAT NOTHING HAPPENS, ITS PARAMETERS ARE NOT UNDER TEST. #90 deferred the
+# fix to the slice that would add a 200 route, and this is it: mutate / or
+# /pool now and the expected status is wrong.
 #
 # THIS FEATURE REPLACES app_shell.feature, which is deleted. That feature's
 # subject was "every page carries the same navigation header", and eight of
@@ -28,25 +41,21 @@
 # committed_field_domains, unknown_kind_rejection, dismiss_capture and
 # context_tags between them. Restating a guarantee in a second place is how
 # the two copies drift.
-Feature: Trellis is one screen until the Menu returns
+Feature: Trellis serves the routes it has, and only those
 
   Background:
     Given the trellis server is running with an empty task list
 
-  Scenario: Every route the demolition removed is gone, not merely unlinked
+  Scenario: A route the product has answers; every route the demolition removed is gone
     When the path "<path>" is requested
     Then the response status is "<status>"
 
     Examples:
       | path        | status |
+      | /           | 200    |
+      | /pool       | 200    |
       | /stats      | 404    |
       | /life-areas | 404    |
-      | /free-time  | 404    |
       | /capacity   | 404    |
       | /schedule   | 404    |
-
-  # one-screen-no-header-02: no navigation header renders while there is one screen
-  Scenario: No navigation header renders while there is one screen
-    When the inbox is viewed
-    Then the page renders no navigation header
-    And the page contains no link to another page
+      | /free-time  | 404    |

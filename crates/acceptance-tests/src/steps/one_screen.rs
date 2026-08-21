@@ -1,11 +1,14 @@
-//! Step handlers for `features/one_screen.feature`: with #88's demolition
-//! done, `/` is the only route, and there is nothing left to navigate
-//! between (`one-screen-removed-routes-404-01`, `one-screen-no-header-02`).
+//! Step handlers for `features/one_screen.feature`: Trellis serves the
+//! routes it has, and only those (`one-screen-routes-01`).
 //!
 //! The Background ("the trellis server is running with an empty task list")
-//! and "the inbox is viewed" steps this feature also uses are already
-//! matched generically by [`super::triage::dispatch`] and
-//! [`super::inbox_view::dispatch`], tried before this module.
+//! is already matched generically by [`super::triage::dispatch`], tried
+//! before this module.
+//!
+//! **The no-header scenario this module once served is gone, not moved
+//! here again.** #92 restored the tab bar; its own
+//! `pool-screen-tabs-08` now asserts what the header holds, in
+//! `pool_screen.rs`.
 
 use super::inbox_view::html_response;
 use super::*;
@@ -16,10 +19,6 @@ static WHEN_PATH_REQUESTED: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r#"^the path "<(\w+)>" is requested$"#).unwrap());
 static THEN_STATUS_IS: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r#"^the response status is "<(\w+)>"$"#).unwrap());
-static THEN_NO_HEADER: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"^the page renders no navigation header$").unwrap());
-static THEN_NO_LINK: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"^the page contains no link to another page$").unwrap());
 
 pub async fn dispatch(
     world: &mut World,
@@ -44,12 +43,6 @@ pub async fn dispatch(
         };
         return Some(then_status_is(world, expected));
     }
-    if THEN_NO_HEADER.is_match(text) {
-        return Some(then_no_header(world));
-    }
-    if THEN_NO_LINK.is_match(text) {
-        return Some(then_no_link(world));
-    }
     None
 }
 
@@ -63,35 +56,6 @@ async fn when_path_requested(world: &mut World, path: &str) -> Result<(), String
 
 fn then_status_is(world: &mut World, expected: u16) -> Result<(), String> {
     super::then_status_is(world, expected, "no response recorded")
-}
-
-fn html_body(world: &World) -> Result<&str, String> {
-    super::html_body(world, "no page response recorded")
-}
-
-/// **No `<header>` and no `<nav>`** (qa/one_screen.md's own wording): the
-/// two elements `base.html` used to always render and now never does.
-fn then_no_header(world: &mut World) -> Result<(), String> {
-    let body = html_body(world)?;
-    if body.contains("<header") || body.contains("<nav") {
-        Err(format!(
-            "expected no header or nav in the page, got:\n{body}"
-        ))
-    } else {
-        Ok(())
-    }
-}
-
-/// Every page in this product used to reach another one only through the
-/// header's own links, which are gone; nothing left renders an `<a>` at
-/// all, so this checks the whole body rather than a scoped section.
-fn then_no_link(world: &mut World) -> Result<(), String> {
-    let body = html_body(world)?;
-    if body.contains("<a ") {
-        Err(format!("expected no link in the page, got:\n{body}"))
-    } else {
-        Ok(())
-    }
 }
 
 #[cfg(test)]
@@ -128,40 +92,5 @@ mod tests {
         let mut world = World::new();
         world.last_status = Some(200);
         assert!(then_status_is(&mut world, 404).is_err());
-    }
-
-    #[test]
-    fn then_no_header_passes_when_neither_element_is_present() {
-        let mut world = World::new();
-        world.last_html_body = Some("<main><h1>Trellis</h1></main>".to_string());
-        assert_eq!(then_no_header(&mut world), Ok(()));
-    }
-
-    #[test]
-    fn then_no_header_errors_when_a_header_is_present() {
-        let mut world = World::new();
-        world.last_html_body = Some("<header></header><main></main>".to_string());
-        assert!(then_no_header(&mut world).is_err());
-    }
-
-    #[test]
-    fn then_no_header_errors_when_a_nav_is_present_without_a_header() {
-        let mut world = World::new();
-        world.last_html_body = Some("<nav></nav><main></main>".to_string());
-        assert!(then_no_header(&mut world).is_err());
-    }
-
-    #[test]
-    fn then_no_link_passes_when_the_body_carries_no_anchor() {
-        let mut world = World::new();
-        world.last_html_body = Some("<main><h1>Trellis</h1></main>".to_string());
-        assert_eq!(then_no_link(&mut world), Ok(()));
-    }
-
-    #[test]
-    fn then_no_link_errors_when_an_anchor_is_present() {
-        let mut world = World::new();
-        world.last_html_body = Some(r#"<a href="/stats">Stats</a>"#.to_string());
-        assert!(then_no_link(&mut world).is_err());
     }
 }

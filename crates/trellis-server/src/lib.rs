@@ -23,6 +23,14 @@
 //! rebuilding 775 subtle lines with 1000-case properties is not cheap the
 //! way the five deleted server capabilities were.
 //!
+//! **A caller is not all they are missing.** `ScheduleTask` requires
+//! `life_area_id` and `deadline_type`, and [`triage::store::insert_task`]
+//! now binds a literal `NULL` for both — life areas went at #88, the
+//! hard/soft axis at #94. Reviving M3 needs those answered first (does
+//! at/by drive the backward pass instead; does the scheduler group by
+//! context tag now that tags are the taxonomy), which is a decision, not a
+//! re-attachment. Recorded in `docs/design/architecture.md`'s gaps index.
+//!
 //! `T-module-boundary`'s dependency rule is unchanged by the packaging; only
 //! its directory shape is. Dependencies still point inward:
 //!

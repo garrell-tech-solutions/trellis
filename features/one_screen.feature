@@ -1,3 +1,7 @@
+# acceptance-mutation-manifest-begin
+# {"version":1,"tested_at":"2026-08-21T00:04:28.365546651Z","feature_name":"Trellis is one screen until the Menu returns","feature_path":"features/one_screen.feature","background_hash":"304f93e93e2b217b49069c091950b87589f0c7e789e2d0dc3aaa8d845450cb64","implementation_hash":"sha256:02c1891a283a6864d735106fede1e4b2804093516cb75878c182196d2873b1aa","scenarios":[]}
+# acceptance-mutation-manifest-end
+
 # one-screen-removed-routes-404-01: every route the demolition removed is gone, not merely unlinked
 # one-screen-no-header-02: no navigation header renders while there is one screen
 #

@@ -176,8 +176,9 @@ report it as missing.**
 1. View the capture screen, then the pool screen.
 
 ### Expected Observable Outcomes
-- **Exactly two tabs**, Capture and Pool. **Not four** — Quota and Committed
-  arrive with their own slices and a dead link is worse than no link.
+- **Exactly three tabs**, Capture, Pool and Committed — the third arrived
+  with #94. **Not four**: Quota arrives with its own slice, and a dead link
+  is worse than no link.
 - Each screen marks itself current, and only itself.
 - The marking is in the markup, not by colour alone.
 - **`one_screen`'s route list is the other half of this**, and it changed in

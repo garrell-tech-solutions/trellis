@@ -28,7 +28,7 @@ Each procedure starts from an empty task list, matching the feature's
 
 ## Procedure — pool
 
-1. Triage the capture as kind `pool`, supplying no deadline, no deadline type,
+1. Triage the capture as kind `pool`, supplying no deadline, no commitment,
    no priority, and no quota fields.
 2. Observe the response status.
 3. Query the tasks table for the resulting task.
@@ -42,20 +42,20 @@ Each procedure starts from an empty task list, matching the feature's
 
 ## Procedure — committed — repeat once per example row
 
-| deadline             | deadline_type | priority |
-|----------------------|---------------|----------|
-| 2026-08-20T17:00:00Z | hard          | P1       |
-| 2026-08-31T09:00:00Z | soft          | P3       |
+| deadline             | commitment | priority |
+|----------------------|------------|----------|
+| 2026-08-20T17:00:00Z | at         | P1       |
+| 2026-08-31T09:00:00Z | by         | P3       |
 
 1. Triage the capture as kind `committed`, supplying the row's deadline,
-   deadline type and priority.
+   commitment and priority.
 2. Observe the response status.
 3. Query the tasks table for the resulting task.
 
 ### Expected Observable Outcomes
 - Triage is accepted.
 - Exactly one task exists, with kind `committed`.
-- Its deadline, deadline type and priority match the submitted row exactly.
+- Its deadline, commitment and priority match the submitted row exactly.
 - Its quota target fields are all empty.
 
 ## Procedure — quota — repeat once per example row

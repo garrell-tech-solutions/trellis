@@ -69,7 +69,8 @@ run_invalid_deadline "'); DROP TABLE tasks;--"
 
 # --- Procedure: invalid commitment ---
 # commitment (at | by) replaced deadline_type (hard | soft) in #94's
-# required set.
+# required set; the domain check moved with it (qa/committed_field_domains.md's
+# corrected #94 note -- deadline_type itself is unread and unvalidated now).
 run_invalid_commitment() {
   local bad_commitment="$1"
   local name="invalid-commitment-$bad_commitment"
@@ -80,8 +81,8 @@ run_invalid_commitment() {
   qa_assert_rejected_naming "$name" invalid_field commitment
   qa_stop_server
 }
-run_invalid_commitment "hard"
-run_invalid_commitment "AT"
+run_invalid_commitment "squishy"
+run_invalid_commitment "HARD"
 
 # --- Procedure: invalid priority ---
 run_invalid_priority() {

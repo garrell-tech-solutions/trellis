@@ -53,6 +53,10 @@ command -v gh >/dev/null || {
   echo "gh (GitHub CLI) is required and not on PATH" >&2
   exit 1
 }
+command -v jq >/dev/null || {
+  echo "jq is required and not on PATH" >&2
+  exit 1
+}
 
 REPO_OWNER="${REPO%%/*}"
 
@@ -83,6 +87,12 @@ fi
 # `--limit 1` on the branch name -- a second, differently-owned PR sharing
 # this branch name would otherwise be indistinguishable from this one by
 # `--branch` alone, fork or not.
+#
+# Piped to the standalone `jq`, not `gh run list --jq`: `--jq` takes exactly
+# one expression argument, with no way to hand it a separate `--arg` --
+# `--jq --arg sha "$HEAD_SHA" '...'` parses as the expression `--arg`
+# followed by two stray positional arguments, which gh rejects. `jq` itself
+# has no such limit.
 RUN_ID="$(gh run list \
   --repo "$REPO" \
   --workflow "$WORKFLOW" \
@@ -90,7 +100,7 @@ RUN_ID="$(gh run list \
   --event pull_request \
   --status success \
   --json databaseId,headSha \
-  --jq --arg sha "$HEAD_SHA" '[.[] | select(.headSha == $sha)][0].databaseId // empty')"
+  | jq -r --arg sha "$HEAD_SHA" '[.[] | select(.headSha == $sha)][0].databaseId // empty')"
 
 if [[ -z "$RUN_ID" ]]; then
   echo "no successful $WORKFLOW run found for $BRANCH at $HEAD_SHA (pull request #$PR_NUMBER)" >&2

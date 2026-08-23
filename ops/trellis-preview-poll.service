@@ -1,0 +1,44 @@
+# Asks GitHub which branch the preview should be showing, and puts it there if
+# it is not showing it already (issue #114). Timer-activated only --
+# ops/trellis-preview-poll.timer is what starts this; there is no [Install]
+# section here, so nothing else can pull it in and enabling the timer is the
+# single switch.
+#
+# A systemd --user unit, same as trellis.service and trellis-preview.service,
+# kept alive with nobody logged in by the `loginctl enable-linger` that
+# ops/install.sh already ran on this host.
+#
+# Type=oneshot is doing real work here beyond describing the script. A oneshot
+# unit is "activating" for as long as it runs, and systemd merges a start job
+# for a unit that is already starting -- so a run that takes longer than the
+# timer's two minutes (a first preview downloads an artifact, migrates, waits
+# up to 30s for the port and then reseeds) cannot be overtaken by the next
+# tick. There is no lock file here because systemd is the lock.
+[Unit]
+Description=Trellis preview trigger: poll GitHub for the pull request labelled `preview`
+Documentation=https://github.com/garrell-tech-solutions/trellis/issues/114
+After=network-online.target
+
+[Service]
+Type=oneshot
+
+# The path ops/preview-poll.sh is served from. It runs out of the repository
+# checkout on purpose, not from a copy in ~/.local/bin: this script and
+# ops/preview.sh are a pair that must agree, and preview.sh in turn reaches
+# for ops/preview-seed.sh and ops/trellis-preview.service beside it. One
+# checkout means one version of the four of them. ops/preview-poll-install.sh
+# writes a drop-in overriding this line if the checkout it is run from is
+# somewhere other than the path below.
+ExecStart=%h/workspace/trellis/ops/preview-poll.sh
+
+# The other half of #114's named gotcha, after gh's credentials: a user unit
+# does not get an interactive shell's PATH. Without this, PATH is systemd's
+# own bare default and `gh`, `jq`, `curl`, `file` and `tailscale` are all
+# findable, but the failure if one were not would be a script exiting before
+# it explained itself -- so the list is stated rather than inherited.
+Environment=PATH=%h/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+# Generous, and deliberately finite. A real run is seconds to a couple of
+# minutes; anything approaching this has wedged, and a wedged oneshot would
+# otherwise block every subsequent tick forever (see Type=oneshot above).
+TimeoutStartSec=15min

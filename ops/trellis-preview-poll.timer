@@ -1,0 +1,31 @@
+# Two minutes, which is the interval #114 costed: an authenticated gh gets
+# 5000 requests an hour and this makes one or two per tick, about 720 a day.
+# There is no caching layer here because there is no budget problem to solve
+# with one.
+#
+# What two minutes buys is the acceptance criterion -- label a pull request
+# from the phone, and it is on :8443 without anyone touching the box -- with a
+# wait short enough that the owner does not go looking for what went wrong.
+[Unit]
+Description=Poll GitHub every two minutes for the pull request labelled `preview`
+
+[Timer]
+# OnUnitActiveSec measures from the end of the last run, so a slow preview
+# does not immediately queue the next poll behind itself. It only re-arms once
+# the service has run at least once, which is what OnBootSec is for.
+OnBootSec=2min
+OnUnitActiveSec=2min
+
+# systemd's default AccuracySec of one minute would let a two-minute timer
+# drift by half its own period, which makes both the behaviour and any attempt
+# to observe it needlessly vague.
+AccuracySec=10s
+
+# Deliberately NOT Persistent=true. Persistent replays a run that was missed
+# while the machine was off, which is right for a daily sweep and pointless
+# for a poll: the next tick reads the current state of GitHub anyway, and a
+# missed poll has nothing to catch up on.
+Persistent=false
+
+[Install]
+WantedBy=timers.target

@@ -273,7 +273,7 @@ if qa_start_server "$BIN" "$TMP_DIR/$name.sqlite" "$TMP_DIR/$name.log"; then
   page="$(qa_get_pool)"
   trip="$(qa_trip_section "$page" "@homedepot")"
   items="$(qa_between "$trip" '<ul class="trip-items">' '</ul>')"
-  item_order="$(python3 -c 'import re,sys; print(",".join(re.findall(r"<li>([^<]*)</li>", sys.argv[1])))' "$items")"
+  item_order="$(python3 -c 'import re,sys; print(",".join(re.findall(r"<span class=\"trip-item-text\">([^<]*)</span>", sys.argv[1])))' "$items")"
   if [[ "$item_order" != "third homedepot,second homedepot,first homedepot" ]]; then
     echo "FAIL: [$name] expected trip items newest first, got: $item_order" >&2
     FAILURES=1
@@ -286,7 +286,11 @@ if qa_start_server "$BIN" "$TMP_DIR/$name.sqlite" "$TMP_DIR/$name.log"; then
     FAILURES=1
   fi
 
-  for needle in "Raise priority" "Lower priority" "&#9650;" "&#9660;" "hx-post" "hx-put" "hx-delete"; do
+  # #97's own done checkbox legitimately carries hx-post now, so the
+  # reorder check is scoped to the exact markers
+  # pool_screen.rs's own then_no_reorder step checks -- not a blanket
+  # hx-post/hx-put/hx-delete absence, which the checkbox would fail.
+  for needle in "Raise priority" "Lower priority" "&#9650;" "&#9660;"; do
     if [[ "$page" == *"$needle"* ]]; then
       echo "FAIL: [$name] expected no reorder control anywhere on the page, found \"$needle\"" >&2
       FAILURES=1

@@ -7,6 +7,7 @@ use scheduler_core::committed_screen::{self, CommittedTask};
 use scheduler_core::task::Commitment;
 
 pub struct CommittedRowView {
+    pub id: i64,
     pub text: String,
     pub context_tag: Option<String>,
     pub date_cell: String,
@@ -30,6 +31,7 @@ pub(super) fn build(rows: Vec<CommittedTaskRow>, now_ms: i64) -> CommittedView {
     let tasks = rows
         .into_iter()
         .map(|row| CommittedTask {
+            id: row.task_id,
             text: row.raw_text,
             context_tag: row.context_tag,
             deadline_ms: row.deadline,
@@ -42,6 +44,7 @@ pub(super) fn build(rows: Vec<CommittedTaskRow>, now_ms: i64) -> CommittedView {
     let rows = ordered
         .into_iter()
         .map(|row| CommittedRowView {
+            id: row.id,
             text: row.text,
             context_tag: row.context_tag,
             date_cell: row.date_cell,
@@ -66,6 +69,7 @@ mod tests {
 
     fn row(text: &str, tag: Option<&str>, deadline: i64, commitment: &str) -> CommittedTaskRow {
         CommittedTaskRow {
+            task_id: 1,
             raw_text: text.to_string(),
             context_tag: tag.map(str::to_string),
             deadline,
@@ -145,5 +149,13 @@ mod tests {
             NOW_MS,
         );
         assert_eq!(view.rows[0].date_cell, "BY THU");
+    }
+
+    #[test]
+    fn a_rows_id_is_its_tasks_id() {
+        let mut with_id = row("book the dentist", None, 1787646600000, "at");
+        with_id.task_id = 42;
+        let view = build(vec![with_id], NOW_MS);
+        assert_eq!(view.rows[0].id, 42);
     }
 }

@@ -1,9 +1,16 @@
-# QA Procedure: Committed triage validates the values of deadline, deadline type and priority
+# QA Procedure: Committed triage validates the values of deadline, commitment and priority
 
-> **#94 note.** `deadline_type` left the committed *form* and is no longer
-> required, but it is **still domain-validated when a submission carries it**
-> — which is what the deadline-type procedure below exercises. Send it
-> explicitly; the form will not.
+> **#94 note, corrected.** `commitment` (at | by) replaced `deadline_type`
+> (hard | soft) in the required set, and **the domain check moved with it** —
+> the feature now validates `commitment`, and **nothing validates
+> `deadline_type` any more.** The column survives in the schema, unread and
+> unchecked, on #88's ground that dropping one throws away what the owner
+> already typed.
+>
+> An earlier version of this note claimed `deadline_type` was still
+> domain-validated when sent, and told you to send it explicitly. **That was
+> wrong** and QA caught it: it would have had you testing a rejection that no
+> longer exists.
 
 Covers: `features/committed_field_domains.feature`
 
@@ -79,11 +86,11 @@ For each row:
 - The tasks table is still empty and the capture is still present, untriaged,
   in the queue, for every row.
 
-## Procedure — invalid deadline type — repeat once per example row
+## Procedure — invalid commitment — repeat once per example row
 
 Example rows:
 
-| bad_deadline_type |
+| bad_commitment    |
 |--------------------|
 | squishy            |
 | HARD               |
@@ -91,12 +98,12 @@ Example rows:
 For each row:
 
 1. Triage the capture as kind `committed`, supplying a valid `deadline` and
-   `priority`, and the row's `bad_deadline_type`.
+   `priority`, and the row's `bad_commitment`.
 2. Observe the response status and body.
 3. Query the tasks table and count its rows.
 
 ### Expected Observable Outcomes
-- Triage is rejected, and the response body identifies `deadline_type` as the
+- Triage is rejected, and the response body identifies `commitment` as the
   invalid field.
 - The second row confirms the domain check is case-sensitive: `HARD` is not
   accepted in place of `hard`.
@@ -114,7 +121,7 @@ Example rows:
 For each row:
 
 1. Triage the capture as kind `committed`, supplying a valid `deadline` and
-   `deadline_type`, and the row's `bad_priority`.
+   `commitment`, and the row's `bad_priority`.
 2. Observe the response status and body.
 3. Query the tasks table and count its rows.
 
@@ -130,5 +137,5 @@ For each row:
 This procedure depends only on the triage endpoint's rejection contract, the
 stored representation of an accepted deadline as epoch milliseconds, and
 durable state remaining unchanged on rejection. It does not depend on which
-date/time library performs the parse, or how `deadline_type`/`priority` are
+date/time library performs the parse, or how `commitment`/`priority` are
 represented internally.

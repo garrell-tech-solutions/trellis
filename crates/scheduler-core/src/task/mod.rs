@@ -575,6 +575,16 @@ mod tests {
     }
 
     #[test]
+    fn an_empty_deadline_date_is_rejected_the_same_as_absent() {
+        let mut fields = committed_fields_via_local_date();
+        fields.deadline_date = Some(String::new());
+        assert_eq!(
+            TaskKind::from_fields(&fields),
+            Err(TriageRejection::MissingField(Field::Deadline))
+        );
+    }
+
+    #[test]
     fn an_unparseable_local_date_is_rejected_as_invalid_deadline() {
         let mut fields = committed_fields_via_local_date();
         fields.deadline_date = Some("banana".to_string());

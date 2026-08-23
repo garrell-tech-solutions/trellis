@@ -343,4 +343,17 @@ mod tests {
             "BY 17 SEP"
         );
     }
+
+    /// The boundary itself: "within the next six days" reads the weekday, so
+    /// exactly seven days out must already read the date. The two tests
+    /// above (three days, twenty-four days) are both well clear of this
+    /// boundary and cannot distinguish `<` from `<=`.
+    #[test]
+    fn a_by_exactly_seven_days_out_reads_the_date_not_the_weekday() {
+        const SEVEN_DAYS_OUT_MS: i64 = NOW_MS + 7 * 24 * 3_600_000; // 2026-08-31T09:00:00Z
+        assert_eq!(
+            date_cell(SEVEN_DAYS_OUT_MS, Commitment::By, NOW_MS, &zone("UTC")),
+            "BY 31 AUG"
+        );
+    }
 }

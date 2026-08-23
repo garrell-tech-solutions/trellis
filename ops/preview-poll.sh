@@ -134,6 +134,7 @@ command -v jq >/dev/null || {
 # The labels on the pull request objects themselves are not indexed, they are
 # the record, and this repo has a handful of open pull requests, so filtering
 # them here costs one request either way.
+#
 # The named gotcha (#114): a systemd --user unit has $HOME, so gh finds
 # ~/.config/gh, but it is not a login shell and its environment is the user
 # manager's rather than an interactive one's. On this host the token is not in

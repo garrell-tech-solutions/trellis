@@ -9,6 +9,12 @@
 // (T-qa-binds-tolerantly-to-markup applies to a browser check as much as
 // an HTTP one).
 //
+// On Committed, a fourth assertion: no `.committed-date` cell clips or
+// wraps (#110's own "the cell does not clip, on a phone" procedure). The
+// cell has no ARIA role of its own to bind to -- the same ground every
+// other QA script's content extraction already stands on (`.trip-tag`,
+// `.loose-text`, ...) -- so this one is a QA-owned class, not a landmark.
+//
 // Fails loudly, never skips: an uncaught error here exits non-zero, the
 // same as an assertion failure -- a check that silently skips when Chrome
 // or playwright-core is missing reproduces the exact blind spot #101
@@ -108,6 +114,34 @@ async function main() {
             `[${screen.label}] tab bar bottom edge is ${bottom}px, expected ` +
               `~${VIEWPORT.height}px (delta ${delta}px)`,
           );
+        }
+      }
+
+      // Assertion 4 (Committed only): no date cell clips or wraps. The
+      // 66px cell is fixed-width and single-line by design; either
+      // scrollWidth or scrollHeight exceeding the client box is a clip or
+      // a wrap qa/committed_date.md names as the thing to check for.
+      if (screen.path === '/committed') {
+        const cellMetrics = await page.evaluate(() =>
+          Array.from(document.querySelectorAll('.committed-date')).map((el) => ({
+            text: el.textContent,
+            scrollWidth: el.scrollWidth,
+            clientWidth: el.clientWidth,
+            scrollHeight: el.scrollHeight,
+            clientHeight: el.clientHeight,
+          })),
+        );
+        if (cellMetrics.length === 0) {
+          fail(`[${screen.label}] no .committed-date cells found (seed a committed task?)`);
+        }
+        for (const cell of cellMetrics) {
+          if (cell.scrollWidth > cell.clientWidth || cell.scrollHeight > cell.clientHeight) {
+            fail(
+              `[${screen.label}] date cell ${JSON.stringify(cell.text)} clips or wraps: ` +
+                `scrollWidth=${cell.scrollWidth} clientWidth=${cell.clientWidth} ` +
+                `scrollHeight=${cell.scrollHeight} clientHeight=${cell.clientHeight}`,
+            );
+          }
         }
       }
     }

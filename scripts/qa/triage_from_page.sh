@@ -185,16 +185,78 @@ fi
 qa_stop_server
 
 # --- Procedure: the committed form's closed choices ---
+# #110 replaced commitment's <select> with two nested <details> disclosures
+# ("At a time" / "By a day") -- the choice is which one the owner opens and
+# submits, not a value picked from a dropdown
+# (T-commitment-is-chosen-not-derived). Bound to the hidden commitment
+# input each disclosure's own form carries, in document order -- the same
+# thing crates/acceptance-tests/src/steps/triage_from_page.rs's
+# hidden_input_values checks.
 name="committed-closed-choices"
 if qa_start_server "$BIN" "$TMP_DIR/$name.sqlite" "$TMP_DIR/$name.log"; then
   capture_id="$(qa_submit_capture "call the dentist")"
-  controls="$(qa_extract_controls "$(qa_get_inbox)" "$capture_id")"
-  commitments="$(python3 -c 'import json,sys; print(",".join(json.loads(sys.argv[1]).get("commitment_options", [])))' "$controls")"
-  priorities="$(python3 -c 'import json,sys; print(",".join(json.loads(sys.argv[1]).get("priority_options", [])))' "$controls")"
-  if [[ "$commitments" != "at,by" ]]; then
-    echo "FAIL: [$name] expected the commitment choices to be exactly at,by, got \"$commitments\"" >&2
+  block="$(qa_capture_row_block "$(qa_get_inbox)" "$capture_id")"
+  committed_section="$(python3 -c '
+import re, sys
+block = sys.argv[1]
+start_m = re.search(r"<summary>Committed</summary>", block)
+if not start_m:
+    print("")
+    sys.exit()
+pos = start_m.end()
+depth = 1  # the outer <details> that already opened before this <summary>
+i = pos
+while i < len(block) and depth > 0:
+    open_m = re.compile(r"<details\b").search(block, i)
+    close_m = re.compile(r"</details>").search(block, i)
+    if close_m and (not open_m or close_m.start() < open_m.start()):
+        depth -= 1
+        i = close_m.end()
+        end = i
+    elif open_m:
+        depth += 1
+        i = open_m.end()
+    else:
+        break
+print(block[pos:end] if depth == 0 else "")
+' "$block")"
+
+  commitment_choices="$(python3 -c '
+import re, sys
+section = sys.argv[1]
+print(",".join(re.findall(r"<summary>([^<]*)</summary>", section)))
+' "$committed_section")"
+  if [[ "$commitment_choices" != "At a time,By a day" ]]; then
+    echo "FAIL: [$name] expected the commitment choices \"At a time\" and \"By a day\" in that order, got \"$commitment_choices\"" >&2
     FAILURES=1
   fi
+
+  commitment_values="$(python3 -c '
+import re, sys
+section = sys.argv[1]
+print(",".join(re.findall(r"<input type=\"hidden\" name=\"commitment\" value=\"([^\"]*)\">", section)))
+' "$committed_section")"
+  if [[ "$commitment_values" != "at,by" ]]; then
+    echo "FAIL: [$name] expected the two forms' own hidden commitment values to be exactly at,by, got \"$commitment_values\"" >&2
+    FAILURES=1
+  fi
+
+  no_deadline_text_input="$(python3 -c '
+import sys
+print("yes" if "type=\"text\" name=\"deadline\"" in sys.argv[1] else "no")
+' "$committed_section")"
+  if [[ "$no_deadline_text_input" != "no" ]]; then
+    echo "FAIL: [$name] expected no free-text deadline input anywhere in the committed section" >&2
+    FAILURES=1
+  fi
+
+  priorities="$(python3 -c '
+import re, sys
+section = sys.argv[1]
+selects = re.findall(r"<select name=\"priority\">(.*?)</select>", section, re.S)
+options = [re.findall(r"<option value=\"([^\"]+)\"", s) for s in selects]
+print(",".join(options[0]) if options else "")
+' "$committed_section")"
   if [[ "$priorities" != "P1,P2,P3,P4" ]]; then
     echo "FAIL: [$name] expected the priority choices to be exactly P1,P2,P3,P4, got \"$priorities\"" >&2
     FAILURES=1

@@ -387,6 +387,68 @@ print(text[i:j] if j != -1 else "")
 ' "$text" "$start" "$end"
 }
 
+# The <ul class="committed-rows">...</ul> content of a committed-screen
+# page, or the whole page if the marker is absent -- shared by every
+# script that reads the Committed screen (committed_screen.sh,
+# committed_date.sh).
+qa_committed_rows_scope() {
+  qa_between "$1" '<ul class="committed-rows">' '</ul>'
+}
+
+# The <li class="committed-row...">...</li> block whose text contains
+# needle, scoped to the committed-rows list, or "" if none matches.
+# Creates one pool task, tagged if a second argument is given, and returns
+# nothing -- callers that need the id use qa_submit_capture themselves.
+# Shared by mark_done.sh and pool_screen.sh.
+qa_pool_task() {
+  local raw_text="$1" tag="${2:-}" capture_id body
+  capture_id="$(qa_submit_capture "$raw_text")"
+  if [[ -n "$tag" ]]; then
+    body="$(python3 -c 'import json,sys; print(json.dumps({"kind":"pool","context_tag":sys.argv[1]}))' "$tag")"
+  else
+    body='{"kind":"pool"}'
+  fi
+  qa_triage "$capture_id" "$body"
+  if [[ "$STATUS" != "201" ]]; then
+    echo "FAIL: setup -- triaging \"$raw_text\" as pool returned status $STATUS" >&2
+    FAILURES=1
+  fi
+}
+
+# The <ul class="loose">...</ul> content of a Pool-screen page. Shared by
+# mark_done.sh and pool_screen.sh.
+qa_loose_section() {
+  qa_between "$1" '<ul class="loose">' '</ul>'
+}
+
+# The <li class="loose-item">...</li> block containing needle, within the
+# loose section already extracted by qa_loose_section. Shared by
+# mark_done.sh and pool_screen.sh.
+qa_loose_row_containing() {
+  local loose_section="$1" needle="$2"
+  python3 -c '
+import re, sys
+section, needle = sys.argv[1], sys.argv[2]
+for m in re.finditer(r"<li class=\"loose-item\">(.*?)</li>", section, re.S):
+    if needle in m.group(1):
+        print(m.group(1))
+        sys.exit()
+' "$loose_section" "$needle"
+}
+
+qa_committed_row_for() {
+  local page="$1" needle="$2" scope
+  scope="$(qa_committed_rows_scope "$page")"
+  python3 -c '
+import re, sys
+scope, needle = sys.argv[1], sys.argv[2]
+for m in re.finditer(r"<li class=\"committed-row[^\"]*\">(.*?)</li>", scope, re.S):
+    if needle in m.group(1):
+        print(m.group(1))
+        sys.exit()
+' "$scope" "$needle"
+}
+
 # True (exit 0) if capture_id is still present and untriaged. Migration 0005
 # renamed captures.triaged_at to left_inbox_at (it now means "left the
 # inbox", by either triage or dismissal, not just triage) -- this still

@@ -54,7 +54,7 @@ if [[ -z "$NODE_MODULES_DIR" || ! -d "$NODE_MODULES_DIR/playwright-core" ]]; the
   exit 1
 fi
 
-if qa_start_server "$BIN" "$TMP_DIR/phone-layout.sqlite" "$TMP_DIR/phone-layout.log"; then
+if qa_start_server "$BIN" "$TMP_DIR/phone-layout.sqlite" "$TMP_DIR/phone-layout.log" "2026-08-24T09:00:00Z"; then
   # Seed enough captures that Capture overflows 844px, rather than assuming
   # which screen is long -- qa/phone_layout.md's own instruction.
   for i in $(seq 1 40); do
@@ -62,6 +62,18 @@ if qa_start_server "$BIN" "$TMP_DIR/phone-layout.sqlite" "$TMP_DIR/phone-layout.
       -H 'content-type: application/json' \
       -d "$(python3 -c 'import json,sys; print(json.dumps({"raw_text": f"errand number {sys.argv[1]}", "source": "web"}))' "$i")"
   done
+
+  # qa/committed_date.md's own "the cell does not clip, on a phone"
+  # procedure: seed a committed task dated far enough out that
+  # committed_screen::date_cell uses its long form ("BY 17 SEP" rather than
+  # "BY THU"), the longest thing the 66px date cell must hold, and let
+  # phone_layout.cjs assert none of the rendered date cells overflow.
+  far_capture_id="$(qa_submit_capture "Renew the passport")"
+  qa_triage "$far_capture_id" '{"kind":"committed","deadline":"2026-09-17T17:00:00Z","commitment":"by","priority":"P1","estimated_minutes":30}'
+  if [[ "$STATUS" != "201" ]]; then
+    echo "FAIL: setup -- triaging the far-out committed task returned status $STATUS" >&2
+    FAILURES=1
+  fi
 
   if ! NODE_PATH="$NODE_MODULES_DIR" node "$SCRIPT_DIR/phone_layout.cjs" "http://$ADDR"; then
     FAILURES=1

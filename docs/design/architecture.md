@@ -426,6 +426,25 @@ a proof. The front door's *own* enforcement is stronger than the lint:
 `inbox::lists` are `pub(super)` or private, so reaching past the door does
 not compile.
 
+## Set operations — where they are decided and where they run (`T-set-operations-execute-in-the-store`)
+
+**Adopted from the company standard at `https://www.garrellts.com/docs/agent-architecture`, which binds every Garrell Tech Solutions repository.** Three layers, and the split is between *intention* and *execution*:
+
+| | Owns | Must not |
+|---|---|---|
+| `scheduler-core` | The rules: what the order is, what the boundaries are, what the limits are | Know anything about storage — `scheduler_core_purity.sh` forbids `sqlx` and `tokio` in its dependency tree |
+| A capability's `http` / `mod.rs` | Assembling the rule and calling across the front door | Re-sort, re-filter or paginate what comes back |
+| A capability's `store.rs` | Translating the rule into SQL | Leak storage concepts back across the front door |
+
+**A list query carries its own `ORDER BY`, `WHERE`, `GROUP BY` and `LIMIT`.** The store does not hand back an unbounded unordered set for a pure function to sort.
+
+**Where Trellis stands today**, verified 2026-08-23:
+
+- **Compliant, and it predates the standard:** `inbox/store.rs:22` and `:88` order in SQL; `capture/store.rs:82` is `ORDER BY id ASC LIMIT 1`; `:97` is `GROUP BY` with `MIN(id)`.
+- **Not compliant:** `committed/store.rs:34` has no `ORDER BY` and `committed_screen.rs:46` sorts in memory (**#107**). `pool/store.rs:29` fetches every row and `pool.rs` sorts at `:96`, buckets at `:119`, orders groups by count at `:130` and truncates at `:145` — **that last one is pagination in memory** (**#108**).
+
+**The tension, stated so nobody rediscovers it:** these rules are the most-tested code in the crate, and SQL is where `cargo-mutants` cannot reach. The standard's answer is the **specification value object** — the core keeps owning the rule, the store executes it. **A slice that moves a rule into a query must say what still proves it.**
+
 ## Three things are called "domain". They are unrelated.
 
 The same problem as "layer", one word over, and it cost a full round trip

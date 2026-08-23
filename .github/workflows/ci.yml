@@ -281,6 +281,76 @@ jobs:
         if: ${{ !cancelled() }}
         run: ./scripts/qa/scheduler_core_purity.sh
 
+      # issue #101 / qa/phone_layout.md. The only check in this repo that can
+      # observe a computed style, a scroll height or a rendered box: it drives
+      # a real headless Chrome at a 390x844 phone viewport against a running
+      # server and asserts geometry. Every other gate in this workflow, and
+      # every Gherkin scenario in `quality`, asserts over HTTP against markup,
+      # and none of them could see the bug this closes -- it shipped in #92,
+      # #94 and #96, was named in all three pull-request bodies, and CI was
+      # green through every one of them.
+      #
+      # In `gate` rather than a job of its own, following the two
+      # scripts/qa/*.sh this job already invokes by name. The script builds
+      # the debug binary, which this job has already built and cached, and the
+      # browser work itself is seconds; a separate job would pay for a second
+      # checkout, a second rustup install and a second cargo build to run one
+      # script.
+      #
+      # The three setup steps below exist so the dependency is declared rather
+      # than hoped for. The script itself fails closed when node or
+      # playwright-core is missing -- its own header says so -- and this
+      # wiring must not undo that: no continue-on-error, no `if:`, nothing
+      # that turns an absent browser into a silent pass. A check that skips
+      # when its own dependency is missing reproduces the exact blind spot it
+      # exists to close, one layer down.
+      - name: Node for the phone-layout browser check
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      # Globally, not into the checkout: scripts/qa/phone_layout.sh resolves
+      # the module through `npm root -g` and this repo has no package.json to
+      # install into. playwright-core rather than playwright on purpose -- it
+      # is the driver without the browser bundle it would otherwise download,
+      # and the step below points it at the runner's own Chrome instead.
+      - name: Install playwright-core
+        run: |
+          npm install -g playwright-core
+          # Resolve from the GLOBAL root, the way phone_layout.sh itself does
+          # (`npm root -g`). A bare `node -e "require('playwright-core/...')"`
+          # cannot see a global install -- it resolves from the working
+          # directory -- so the first CI run failed here on a package that had
+          # installed correctly one line above.
+          NODE_MODULES_DIR="$(npm root -g)"
+          test -d "$NODE_MODULES_DIR/playwright-core" \
+            || { echo "::error::playwright-core not in $NODE_MODULES_DIR after install"; exit 1; }
+          node -e "console.log('playwright-core', require('$NODE_MODULES_DIR/playwright-core/package.json').version)"
+
+      # ubuntu-latest is widely believed to preinstall Google Chrome. This
+      # step does not take that on faith: it resolves an actual binary and
+      # fails the job with a readable error if it finds none, rather than
+      # letting the check die inside playwright with a launch failure about a
+      # path nobody chose. The result is exported as PHONE_LAYOUT_CHROME,
+      # which is the override scripts/qa/phone_layout.cjs already reads (its
+      # default is a bare /usr/bin/google-chrome).
+      - name: Locate Chrome for the phone-layout check
+        run: |
+          for candidate in google-chrome google-chrome-stable chromium chromium-browser; do
+            if chrome_path="$(command -v "$candidate")"; then
+              echo "PHONE_LAYOUT_CHROME=$chrome_path" >> "$GITHUB_ENV"
+              echo "using $candidate at $chrome_path"
+              "$chrome_path" --version \
+                || echo "::warning::$candidate did not report a version"
+              exit 0
+            fi
+          done
+          echo "::error::no Chrome or Chromium binary on PATH -- the phone-layout check cannot run, and it is not allowed to skip"
+          exit 1
+
+      - name: Phone layout (real browser, 390x844)
+        run: ./scripts/qa/phone_layout.sh
+
       # Runs `cargo build --release --target x86_64-unknown-linux-musl` and
       # then asserts via ldd that the produced binary is actually static --
       # a release build that exits 0 but links dynamically is not a pass.
@@ -294,13 +364,32 @@ jobs:
       # letting the runner discard it, so what gets installed is
       # byte-identical to what this gate proved green.
       #
-      # trunk only, and only on push: a PR's build is unmerged code, and
-      # shipping it to the one real host this project runs on would make
-      # "green on trunk" stop meaning what ops/update.sh assumes it means.
-      # pull_request runs of this same job still build and test the binary --
-      # they just do not upload it.
-      - name: Upload release binary (trunk only)
-        if: ${{ github.ref == 'refs/heads/trunk' && github.event_name == 'push' }}
+      # Two conditions, not one, since issue #102 widened this from "trunk
+      # only":
+      #
+      #   push to trunk    unchanged from #98. ops/update.sh's whole premise
+      #                     is that "green on trunk" means safe to run on the
+      #                     one real host this project's live instance runs
+      #                     on, and that premise still needs push+trunk
+      #                     specifically -- a PR run's `github.ref` is a
+      #                     merge ref, not trunk, so this arm alone was
+      #                     always trunk-exclusive by construction.
+      #
+      #   pull_request      new for #102. ops/preview.sh fetches a branch's
+      #                     own most recent successful run so a branch can be
+      #                     looked at on the phone before it merges, and
+      #                     ci.yml's push trigger only fires for `trunk` (see
+      #                     the `on:` block above) -- a feature branch is
+      #                     built at all only via its pull_request run, so
+      #                     that is the one this arm has to allow. The
+      #                     artifact this uploads is still just the build two
+      #                     steps up, still proven static, still never
+      #                     installed anywhere but the SEPARATE preview unit
+      #                     ops/preview.sh manages -- it never reaches
+      #                     trellis.service, which only ever runs what
+      #                     ops/update.sh fetched from trunk.
+      - name: Upload release binary
+        if: ${{ (github.event_name == 'push' && github.ref == 'refs/heads/trunk') || github.event_name == 'pull_request' }}
         uses: actions/upload-artifact@v4
         with:
           name: trellis-linux-musl

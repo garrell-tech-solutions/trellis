@@ -13,15 +13,18 @@
 # gate in this repo could see it; a check that silently skips when its own
 # dependency is missing reproduces that exact blind spot one layer down.
 #
-# NOT WIRED INTO GITHUB ACTIONS CI. .github/workflows/ci.yml invokes two
-# scripts/qa/*.sh scripts by explicit name (scheduler_core_purity.sh,
-# release_binary.sh); it does not glob this directory, and this script was
-# not added to it. It runs locally via this file and via
-# scripts/qa/run.sh, which is what a QA cycle runs -- but nothing gates a
-# GitHub Actions run on it today. Whoever owns .github/workflows/ci.yml
-# should decide whether a browser dependency belongs in that job; this is
-# reported rather than decided here, per the brief's own instruction to
-# say plainly when a check is not CI-gated rather than pretend otherwise.
+# GATED IN GITHUB ACTIONS as of #101: `.github/workflows/ci.yml` runs this
+# script in the `gate` job, after the core-purity check and before the musl
+# release build. The job resolves a Chrome binary into PHONE_LAYOUT_CHROME
+# and fails with one clear ::error:: line if it finds none -- it does not
+# skip, which is the whole point.
+#
+# This file previously said the opposite, correctly, for the length of one
+# commit: the check shipped working but ungated, and the wiring was added at
+# the owner's direction rather than by the pipeline. Recorded because a
+# comment that describes CI is a comment that goes stale the moment CI
+# changes, and this one already has once.
+
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"

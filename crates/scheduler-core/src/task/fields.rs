@@ -62,13 +62,6 @@ impl DeadlineType {
             _ => None,
         }
     }
-
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Hard => "hard",
-            Self::Soft => "soft",
-        }
-    }
 }
 
 /// `commitment`'s closed domain (`D-committed-is-at-or-by`, #94): an **at**
@@ -173,6 +166,49 @@ pub(super) fn parse_deadline_ms(value: &str) -> Option<i64> {
         .map(|ts| ts.as_millisecond())
 }
 
+/// The instant of a specific local time on `date` in `zone` -- an *at*'s
+/// own half of [`local_deadline_ms`].
+fn at_instant(date: jiff::civil::Date, time: &str, zone: &str) -> Result<jiff::Zoned, String> {
+    let time: jiff::civil::Time = time
+        .parse()
+        .map_err(|e| format!("bad time {time:?}: {e}"))?;
+    date.at(time.hour(), time.minute(), 0, 0)
+        .in_tz(zone)
+        .map_err(|e| format!("bad zone {zone:?}: {e}"))
+}
+
+/// The last millisecond of `date` in `zone` -- the start of the next day,
+/// minus one millisecond -- a *by* with no time on the page: "by Thursday"
+/// means before Thursday is over, not midnight at its start. The other half
+/// of [`local_deadline_ms`].
+fn end_of_day_instant(date: jiff::civil::Date, zone: &str) -> Result<jiff::Zoned, String> {
+    use jiff::ToSpan;
+
+    let next = date
+        .tomorrow()
+        .map_err(|e| format!("date {date} has no tomorrow: {e}"))?;
+    let start_of_next = next
+        .at(0, 0, 0, 0)
+        .in_tz(zone)
+        .map_err(|e| format!("bad zone {zone:?}: {e}"))?;
+    Ok(start_of_next - 1.millisecond())
+}
+
+/// Converts a local civil date -- and, for an *at*, a local time -- in
+/// `zone` to the instant it names (#110, T-jiff-epoch-millis: a
+/// local-date-plus-zone conversion is a business rule, not a handler's or a
+/// browser's). `time` absent means a *by* with no time on the page.
+pub(super) fn local_deadline_ms(date: &str, time: Option<&str>, zone: &str) -> Result<i64, String> {
+    let date: jiff::civil::Date = date
+        .parse()
+        .map_err(|e| format!("bad date {date:?}: {e}"))?;
+    let zoned = match time {
+        Some(time) => at_instant(date, time, zone)?,
+        None => end_of_day_instant(date, zone)?,
+    };
+    Ok(zoned.timestamp().as_millisecond())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -207,6 +243,66 @@ mod tests {
     #[test]
     fn parse_deadline_ms_rejects_a_sql_injection_shaped_string() {
         assert_eq!(parse_deadline_ms("'); DROP TABLE tasks;--"), None);
+    }
+
+    // --- local_deadline_ms -----------------------------------------------
+
+    #[test]
+    fn a_local_date_and_time_convert_to_the_instant_they_name_in_the_zone() {
+        assert_eq!(
+            local_deadline_ms("2026-08-25", Some("08:30"), "America/New_York"),
+            Ok(1787661000000)
+        );
+    }
+
+    #[test]
+    fn a_local_date_with_no_time_is_the_last_millisecond_of_that_day_in_the_zone() {
+        assert_eq!(
+            local_deadline_ms("2026-08-27", None, "America/New_York"),
+            Ok(1787889599999)
+        );
+    }
+
+    #[test]
+    fn near_midnight_local_times_land_on_the_day_named_not_its_neighbour() {
+        assert_eq!(
+            local_deadline_ms("2026-08-25", Some("23:30"), "America/New_York"),
+            Ok(1787715000000)
+        );
+        assert_eq!(
+            local_deadline_ms("2026-08-25", Some("00:30"), "America/New_York"),
+            Ok(1787632200000)
+        );
+    }
+
+    #[test]
+    fn the_same_local_date_and_time_differs_by_zone() {
+        let ny = local_deadline_ms("2026-08-25", Some("08:30"), "America/New_York").unwrap();
+        let utc = local_deadline_ms("2026-08-25", Some("08:30"), "UTC").unwrap();
+        assert_ne!(ny, utc);
+    }
+
+    #[test]
+    fn a_no_time_deadline_far_out_still_lands_at_the_end_of_that_day() {
+        assert_eq!(
+            local_deadline_ms("2026-09-17", None, "America/New_York"),
+            Ok(1789703999999)
+        );
+    }
+
+    #[test]
+    fn local_deadline_ms_rejects_an_unparseable_date() {
+        assert!(local_deadline_ms("banana", Some("08:30"), "America/New_York").is_err());
+    }
+
+    #[test]
+    fn local_deadline_ms_rejects_an_unparseable_time() {
+        assert!(local_deadline_ms("2026-08-25", Some("banana"), "America/New_York").is_err());
+    }
+
+    #[test]
+    fn local_deadline_ms_rejects_an_unknown_zone() {
+        assert!(local_deadline_ms("2026-08-25", Some("08:30"), "Nowhere/Imaginary").is_err());
     }
 
     // --- DeadlineType --------------------------------------------------------

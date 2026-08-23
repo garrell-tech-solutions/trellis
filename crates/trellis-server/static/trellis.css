@@ -474,6 +474,38 @@ main > h1 {
   flex: none;
 }
 
+/* Committed's own at/by choice (#110): which of these two disclosures the
+   owner opens and submits IS the choice
+   (T-commitment-is-chosen-not-derived) -- a `by` never gets a time field in
+   the DOM at all, rather than one hidden by script. */
+.commitment-choice {
+  margin-top: 8px;
+}
+
+.commitment-choice > summary {
+  display: flex;
+  align-items: center;
+  height: var(--tap);
+  padding: 0 10px;
+  border: 1px solid var(--color-gray-300);
+  background: #fff;
+  color: var(--color-gray-700);
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  list-style: none;
+  cursor: pointer;
+}
+
+.commitment-choice > summary::-webkit-details-marker {
+  display: none;
+}
+
+.commitment-choice[open] > summary {
+  border-color: var(--color-primary-800);
+  background: var(--color-primary-800);
+  color: #fff;
+}
+
 .fields {
   margin-top: 8px;
   padding: 10px;

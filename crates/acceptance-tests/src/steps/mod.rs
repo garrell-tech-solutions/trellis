@@ -17,6 +17,7 @@ use std::sync::LazyLock;
 mod app_client;
 mod build;
 mod capture;
+mod committed_date;
 mod committed_empty_fields;
 mod committed_field_domains;
 mod committed_screen;
@@ -254,6 +255,9 @@ pub async fn dispatch(
         return outcome;
     }
     if let Some(outcome) = mark_done::dispatch(world, text, example).await {
+        return outcome;
+    }
+    if let Some(outcome) = committed_date::dispatch(world, text, example).await {
         return outcome;
     }
 

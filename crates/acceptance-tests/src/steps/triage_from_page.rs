@@ -97,9 +97,8 @@ pub async fn dispatch(
         return Some(dispatch_quota_omitting(world, &caps).await);
     }
     if THEN_OFFERS_COMMITMENT_CHOICES.is_match(text) {
-        return Some(then_select_offers_exactly(
+        return Some(then_commitment_choices_offered_exactly(
             world,
-            "commitment",
             &["at", "by"],
         ));
     }
@@ -303,13 +302,38 @@ fn pool_form_section(section: &str) -> Result<&str, String> {
     Ok(&section[..end])
 }
 
+/// Committed's own section spans two nested `<details>` disclosures --
+/// "At a time" and "By a day" (#110, `committed-date-still-explicit-04`) --
+/// so it needs [`html::details_section_after`]'s nesting-aware scoping
+/// rather than [`html::between`]'s first-`</details>`-wins scan, which
+/// would stop at the inner "At a time" block's own close.
+fn committed_form_section(section: &str) -> Result<&str, String> {
+    html::details_section_after(section, "<summary>Committed</summary>")
+}
+
 pub(super) fn form_section<'a>(section: &'a str, kind: &str) -> Result<&'a str, String> {
     match kind {
         "pool" => pool_form_section(section),
-        "committed" => html::between(section, "<summary>Committed</summary>", "</details>"),
+        "committed" => committed_form_section(section),
         "quota" => html::between(section, "<summary>Quota</summary>", "</details>"),
         other => Err(format!("unknown triage kind {other:?}")),
     }
+}
+
+/// The values every `<input type="hidden" name="{field_name}" value="...">`
+/// carries, in document order -- [`select_option_values`]'s counterpart for
+/// a choice made by which of several forms is submitted rather than by a
+/// `<select>` (committed's at/by choice, #110:
+/// `T-commitment-is-chosen-not-derived` -- the choice is which disclosure
+/// the owner opens and fills in, not a value a script infers).
+pub(super) fn hidden_input_values(section: &str, field_name: &str) -> Vec<String> {
+    let start_tag = format!(r#"<input type="hidden" name="{field_name}" value=""#);
+    section
+        .split(&start_tag)
+        .skip(1)
+        .filter_map(|chunk| chunk.split('"').next())
+        .map(str::to_string)
+        .collect()
 }
 
 /// How many form fields (`<input>` and `<select>` elements) a form asks for
@@ -349,6 +373,25 @@ fn then_pool_fewer_inputs(world: &mut World, other_kind: &str) -> Result<(), Str
         Err(format!(
             "expected pool ({pool_count} fields) to ask for fewer inputs than \
              {other_kind} ({other_count} fields)"
+        ))
+    }
+}
+
+/// [`then_select_offers_exactly`]'s counterpart for committed's at/by
+/// choice, which is which of two nested `<details>` disclosures the owner
+/// opens and submits (#110) rather than a `<select>`.
+fn then_commitment_choices_offered_exactly(
+    world: &mut World,
+    expected: &[&str],
+) -> Result<(), String> {
+    let section = captures_list_section(world)?;
+    let committed = form_section(section, "committed")?;
+    let actual = hidden_input_values(committed, "commitment");
+    if actual == expected {
+        Ok(())
+    } else {
+        Err(format!(
+            "expected the commitment choices {expected:?}, got {actual:?}"
         ))
     }
 }
@@ -464,18 +507,27 @@ mod tests {
         );
     }
 
-    /// A capture row with two form fields on the pool form and four on each
-    /// of committed and quota, standing in for the real template's shape
-    /// without depending on it.
+    /// A capture row with two form fields on the pool form and committed's
+    /// own nested at/by disclosures, standing in for the real template's
+    /// shape without depending on it (#110: committed no longer offers its
+    /// commitment choice through a `<select>`).
     fn row_with_forms() -> String {
         concat!(
             r#"<li id="capture-row-1">buy milk"#,
             r#"<form><input type="hidden" name="kind" value="pool"><select name="life_area"></select></form>"#,
             r#"<details><summary>Committed</summary>"#,
+            r#"<details><summary>At a time</summary>"#,
             r#"<form><input type="hidden" name="kind" value="committed">"#,
-            r#"<input type="text" name="deadline">"#,
-            r#"<select name="commitment"></select>"#,
+            r#"<input type="hidden" name="commitment" value="at">"#,
+            r#"<input type="date" name="deadline_date">"#,
+            r#"<input type="time" name="deadline_time">"#,
             r#"<select name="priority"></select></form></details>"#,
+            r#"<details><summary>By a day</summary>"#,
+            r#"<form><input type="hidden" name="kind" value="committed">"#,
+            r#"<input type="hidden" name="commitment" value="by">"#,
+            r#"<input type="date" name="deadline_date">"#,
+            r#"<select name="priority"></select></form></details>"#,
+            r#"</details>"#,
             r#"<details><summary>Quota</summary>"#,
             r#"<form><input type="hidden" name="kind" value="quota">"#,
             r#"<input type="number" name="target_count">"#,
@@ -499,6 +551,43 @@ mod tests {
         let section = form_section(&row, "committed").unwrap();
         assert!(section.contains(r#"value="committed""#));
         assert!(!section.contains(r#"value="quota""#));
+    }
+
+    #[test]
+    fn form_section_scopes_committed_past_its_own_nested_at_and_by_disclosures() {
+        let row = row_with_forms();
+        let section = form_section(&row, "committed").unwrap();
+        assert!(section.contains("At a time"));
+        assert!(section.contains("By a day"));
+    }
+
+    #[test]
+    fn hidden_input_values_reads_every_matching_hidden_input_in_order() {
+        let section = concat!(
+            r#"<input type="hidden" name="commitment" value="at">"#,
+            r#"<input type="hidden" name="commitment" value="by">"#,
+        );
+        assert_eq!(hidden_input_values(section, "commitment"), vec!["at", "by"]);
+    }
+
+    #[test]
+    fn hidden_input_values_is_empty_when_the_field_is_absent() {
+        assert_eq!(
+            hidden_input_values(
+                r#"<input type="hidden" name="kind" value="committed">"#,
+                "commitment"
+            ),
+            Vec::<String>::new()
+        );
+    }
+
+    #[test]
+    fn then_commitment_choices_offered_exactly_passes_for_the_templates_at_and_by_shape() {
+        let mut world = world_with_row(&row_with_forms());
+        assert_eq!(
+            then_commitment_choices_offered_exactly(&mut world, &["at", "by"]),
+            Ok(())
+        );
     }
 
     #[test]

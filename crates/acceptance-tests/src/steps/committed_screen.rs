@@ -248,19 +248,13 @@ fn dispatch_lists(
     example: &BTreeMap<String, String>,
     caps: &regex::Captures<'_>,
 ) -> Result<(), String> {
-    let expected: Vec<String> = resolve(example, &caps[1])?
-        .split(", ")
-        .map(str::to_string)
-        .collect();
+    let expected = resolve(example, &caps[1])?;
     let body = html_body(world)?;
-    let actual = committed_texts_in_order(body);
-    if actual == expected {
-        Ok(())
-    } else {
-        Err(format!(
-            "expected the committed screen to list {expected:?}, got {actual:?}"
-        ))
-    }
+    html::listed_in_order(
+        &expected,
+        committed_texts_in_order(body),
+        "the committed screen to list",
+    )
 }
 
 fn committed_row<'a>(body: &'a str, raw_text: &str) -> Result<&'a str, String> {

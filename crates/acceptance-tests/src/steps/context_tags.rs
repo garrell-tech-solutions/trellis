@@ -203,18 +203,9 @@ fn dispatch_suggestions_exactly(
     example: &BTreeMap<String, String>,
     caps: &regex::Captures<'_>,
 ) -> Result<(), String> {
-    let expected: Vec<String> = resolve(example, &caps[1])?
-        .split(", ")
-        .map(str::to_string)
-        .collect();
+    let expected = resolve(example, &caps[1])?;
     let actual = suggested_tags(html_body(world)?)?;
-    if actual == expected {
-        Ok(())
-    } else {
-        Err(format!(
-            "expected context tag suggestions {expected:?}, got {actual:?}"
-        ))
-    }
+    html::listed_in_order(&expected, actual, "context tag suggestions")
 }
 
 /// **Cannot be a bare substring check.** Every capture row's triage forms

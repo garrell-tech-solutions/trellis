@@ -79,32 +79,12 @@ print(json.dumps({
   fi
 }
 
-qa_committed_rows_scope() {
-  qa_between "$1" '<ul class="committed-rows">' '</ul>'
-}
-
 qa_committed_texts_in_order() {
   python3 -c '
 import re, sys
 for m in re.finditer(r"<div class=\"committed-text\">([^<]*)</div>", sys.argv[1]):
     print(m.group(1))
 ' "$1"
-}
-
-# The <li class="committed-row...">...</li> block whose committed-text
-# contains needle, scoped to <ul class="committed-rows">, or "" if none
-# matches.
-qa_committed_row_for() {
-  local page="$1" needle="$2" scope
-  scope="$(qa_committed_rows_scope "$page")"
-  python3 -c '
-import re, sys
-scope, needle = sys.argv[1], sys.argv[2]
-for m in re.finditer(r"<li class=\"committed-row[^\"]*\">(.*?)</li>", scope, re.S):
-    if needle in m.group(1):
-        print(m.group(1))
-        sys.exit()
-' "$scope" "$needle"
 }
 
 qa_header_section() {

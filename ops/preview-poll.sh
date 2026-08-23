@@ -226,3 +226,6 @@ fi
 # nothing, forever, with :8443 still serving whatever it served before.
 printf '%s' "$SHA" >"$SHA_FILE"
 info "preview is now pull request #$NUMBER ($BRANCH) at $SHA"
+
+# Throwaway branch: exists only to put a SECOND pull request in front of the
+# poller so its refusal can be observed (issue #114). Not for merge.

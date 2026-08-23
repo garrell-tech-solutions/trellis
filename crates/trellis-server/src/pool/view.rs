@@ -5,22 +5,30 @@
 use crate::pool::store::PoolTaskRow;
 use scheduler_core::pool::{self, PoolTask};
 
+/// One item's own id and text, wherever the template needs to act on a
+/// specific one rather than just list it (#97: marking it done).
+pub struct PoolItemView {
+    pub id: i64,
+    pub text: String,
+}
+
 pub struct TripView {
     pub tag: String,
     /// `"3 things"` — `pool-screen-trips-and-loose-01`'s own wording.
     pub count_label: String,
     /// Newest-first, always shown.
-    pub items: Vec<String>,
+    pub items: Vec<PoolItemView>,
     /// Newest-first, hidden behind `more_label` until revealed — a native
     /// `<details>` disclosure, so revealing them costs no request and no
     /// server-held state.
-    pub hidden: Vec<String>,
+    pub hidden: Vec<PoolItemView>,
     /// `Some("Show 2 more")` when `hidden` is non-empty; `None` exactly when
     /// nothing is hidden (`pool-screen-truncation-06`).
     pub more_label: Option<String>,
 }
 
 pub struct LooseItemView {
+    pub id: i64,
     pub text: String,
     pub context_tag: Option<String>,
 }
@@ -55,15 +63,16 @@ pub(super) fn build(rows: Vec<PoolTaskRow>) -> PoolView {
         .map(|trip| TripView {
             tag: trip.tag,
             count_label: format!("{} things", trip.count),
-            items: trip.visible,
+            items: trip.visible.into_iter().map(pool_item_view).collect(),
             more_label: (trip.more > 0).then(|| format!("Show {} more", trip.more)),
-            hidden: trip.hidden,
+            hidden: trip.hidden.into_iter().map(pool_item_view).collect(),
         })
         .collect();
     let loose = groups
         .loose
         .into_iter()
         .map(|task| LooseItemView {
+            id: task.id,
             text: task.text,
             context_tag: task.context_tag,
         })
@@ -78,6 +87,13 @@ pub(super) fn build(rows: Vec<PoolTaskRow>) -> PoolView {
         empty: total == 0,
         trips,
         loose,
+    }
+}
+
+fn pool_item_view(item: pool::PoolItem) -> PoolItemView {
+    PoolItemView {
+        id: item.id,
+        text: item.text,
     }
 }
 
@@ -147,7 +163,12 @@ mod tests {
         ]);
         assert_eq!(view.trips[0].more_label.as_deref(), Some("Show 2 more"));
         assert_eq!(view.trips[0].items.len(), 3);
-        assert_eq!(view.trips[0].hidden, vec!["b".to_string(), "a".to_string()]);
+        let hidden: Vec<&str> = view.trips[0]
+            .hidden
+            .iter()
+            .map(|item| item.text.as_str())
+            .collect();
+        assert_eq!(hidden, vec!["b", "a"]);
     }
 
     #[test]
@@ -160,5 +181,17 @@ mod tests {
     fn a_loose_item_with_no_tag_carries_none() {
         let view = build(vec![row(1, "fix the door latch", None)]);
         assert_eq!(view.loose[0].context_tag, None);
+    }
+
+    #[test]
+    fn a_loose_items_id_is_its_task_id() {
+        let view = build(vec![row(42, "fix the door latch", None)]);
+        assert_eq!(view.loose[0].id, 42);
+    }
+
+    #[test]
+    fn a_trip_items_id_is_its_task_id() {
+        let view = build(three_task_trip());
+        assert_eq!(view.trips[0].items[0].id, 3);
     }
 }

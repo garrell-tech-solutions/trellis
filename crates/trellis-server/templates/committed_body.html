@@ -1,0 +1,29 @@
+<div id="committed-body">
+<div class="committed-header">
+<h1>Committed</h1>
+<div class="committed-meta">{{ meta }}</div>
+</div>
+
+{% if empty %}
+<div class="committed-empty">
+<p>Nothing with a time on it. That is allowed.</p>
+<a href="/" class="committed-go-capture">Go to Capture &rarr;</a>
+</div>
+{% endif %}
+
+<ul class="committed-rows">
+{% for row in rows %}
+<li class="committed-row{% if row.past %} past{% endif %}">
+<label class="done-check"><input type="checkbox" aria-label="Mark done" hx-post="/committed/tasks/{{ row.id }}/done" hx-target="#committed-body" hx-swap="outerHTML"></label>
+<div class="committed-date">{{ row.date_cell }}</div>
+<div class="committed-text">{{ row.text }}</div>
+<div class="committed-trailing">
+{% if row.past %}<span class="committed-past-badge">Past</span>{% endif %}
+{% if let Some(tag) = row.context_tag %}
+<div class="committed-tag">{{ tag }}</div>
+{% endif %}
+</div>
+</li>
+{% endfor %}
+</ul>
+</div>

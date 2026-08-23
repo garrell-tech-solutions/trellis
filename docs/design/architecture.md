@@ -124,19 +124,43 @@ dependency rule itself is unchanged.
 crates/trellis-server/src/
   capture/    mod.rs  http.rs  store.rs
   dismiss/    mod.rs  http.rs
-  committed/  mod.rs  http.rs  store.rs  view.rs
+  committed/  mod.rs  body.rs  http.rs  store.rs  view.rs
   inbox/      mod.rs  http.rs  lists.rs  store.rs  view.rs
-  pool/       mod.rs  http.rs  store.rs  view.rs
+  mark_done/  mod.rs  store.rs
+  pool/       mod.rs  body.rs  http.rs  store.rs  view.rs
   settings/   mod.rs  http.rs  store.rs
   triage/     mod.rs  http.rs  store.rs
   platform/   app.rs  assets.rs  boundary.rs  clock.rs  db.rs
               mod.rs  nav.rs  request.rs  response.rs  test_support.rs
 ```
 
-**Seven capabilities and one bucket.** #88 took it from ten to five —
+**Eight capabilities and one bucket.** #88 took it from ten to five —
 `capacity`, `exceptions`, `free_time`, `life_areas` and `stats` are gone —
-then `#92` added `pool` and `#94` added `committed`, the Menu's first two
-tabs.
+then `#92` added `pool`, `#94` added `committed`, and `#97` added
+`mark_done`.
+
+**A `body.rs` is a fragment a screen can swap on its own**, and two
+capabilities grew one at `#97` for the same reason `inbox::lists` has one:
+the response to a mark-done `POST` is not a page. A capability earns one
+when something other than a full page render needs its content — the same
+"only when its page shape is its own" test that decides whether it gets a
+`view`.
+
+**`mark_done` is a capability rather than a function on either screen**
+because both screens need the write and the write has nothing to do with
+either screen's shape — `T-inbox-owns-membership`'s reasoning, one exit
+over. `pool::http` and `committed::http` keep their own routes and re-render
+their own fragments, because only they know what "done" removed a row from.
+
+> **`mark_done` declares `mod store;` — private — and it is the only
+> capability that does.** Every other one is `pub mod store`, which today
+> buys nothing: no capability names another's store in production, and the
+> only external caller of any of them is `platform::test_support`'s shared
+> `insert_capture` fixture. `platform/boundary.rs` enforces the rule as a
+> substring lint that architecture.md itself calls "a lint, not a proof";
+> a private module is the proof. `inbox` and `capture` have taken the same
+> step function-by-function (`pub(super)` on the writes that matter).
+> **`mark_done` is the shape to copy, not the exception.**
 
 **`platform/nav.rs` is back**, deleted by #88 and rebuilt for `#92`, now
 three pages of the design's four: `ALL` names only what `app::build_app`
@@ -603,7 +627,9 @@ tasks(id, capture_id, kind, deadline, deadline_type, commitment, priority,
 non-HTTP write path can still store a string there. Tracked in #33.
 
 `archived_at` is the single archive signal; there is no `status` column
-(`T-archived-at-only`). Nothing writes it yet — every archive route arrives at
+(`T-archived-at-only`). **`#97` gave it its first writer** — marking a task
+done stamps it, and both Menu screens filter `archived_at IS NULL`. The rest
+of the archive routes still arrive at
 M8.
 
 A capture row is never deleted. It leaves the inbox by one of **two exits**,

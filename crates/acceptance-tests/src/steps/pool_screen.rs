@@ -451,14 +451,17 @@ fn dispatch_trip_offers(
     }
 }
 
-/// Every `<li>...</li>` in `section`, trimmed, in document order.
+/// Every `.trip-item-text` span's content in `section`, trimmed, in
+/// document order — scoped past the row's own leading mark-done checkbox
+/// (#97), which a bare `<li>...</li>` extraction would otherwise swallow
+/// whole.
 fn list_items(section: &str) -> Vec<String> {
     section
-        .split("<li>")
+        .split(r#"<span class="trip-item-text">"#)
         .skip(1)
         .filter_map(|chunk| {
             chunk
-                .split_once("</li>")
+                .split_once("</span>")
                 .map(|(text, _)| text.trim().to_string())
         })
         .collect()
@@ -669,8 +672,23 @@ mod tests {
         );
     }
 
+    fn item_li(text: &str) -> String {
+        format!(
+            r##"<li><label class="done-check"><input type="checkbox" aria-label="Mark done" hx-post="/pool/tasks/1/done" hx-target="#pool-body" hx-swap="outerHTML"></label><span class="trip-item-text">{text}</span></li>"##
+        )
+    }
+
     fn two_trip_body() -> String {
-        r#"<div class="trip panel"><div class="trip-header"><div class="trip-tag">@attic</div><div class="trip-count">3 things</div></div><ul class="trip-items"><li>b3</li><li>b2</li><li>b1</li></ul></div><div class="trip panel"><div class="trip-header"><div class="trip-tag">@bakery</div><div class="trip-count">4 things</div></div><ul class="trip-items"><li>a3</li><li>a2</li><li>a1</li></ul><details class="trip-more"><summary>Show 1 more</summary><ul class="trip-items"><li>a0</li></ul></details></div>"#.to_string()
+        format!(
+            r#"<div class="trip panel"><div class="trip-header"><div class="trip-tag">@attic</div><div class="trip-count">3 things</div></div><ul class="trip-items">{}{}{}</ul></div><div class="trip panel"><div class="trip-header"><div class="trip-tag">@bakery</div><div class="trip-count">4 things</div></div><ul class="trip-items">{}{}{}</ul><details class="trip-more"><summary>Show 1 more</summary><ul class="trip-items">{}</ul></details></div>"#,
+            item_li("b3"),
+            item_li("b2"),
+            item_li("b1"),
+            item_li("a3"),
+            item_li("a2"),
+            item_li("a1"),
+            item_li("a0"),
+        )
     }
 
     #[test]
@@ -700,12 +718,18 @@ mod tests {
     }
 
     #[test]
-    fn list_items_reads_every_li_in_order() {
-        let section = "<li>c</li><li>b</li><li>a</li>";
+    fn list_items_reads_every_item_text_span_in_order() {
+        let section = r#"<li><span class="trip-item-text">c</span></li><li><span class="trip-item-text">b</span></li><li><span class="trip-item-text">a</span></li>"#;
         assert_eq!(
             list_items(section),
             vec!["c".to_string(), "b".to_string(), "a".to_string()]
         );
+    }
+
+    #[test]
+    fn list_items_ignores_the_leading_mark_done_checkbox() {
+        let section = r#"<li><label class="done-check"><input type="checkbox" hx-post="/pool/tasks/1/done"></label><span class="trip-item-text">buy screws</span></li>"#;
+        assert_eq!(list_items(section), vec!["buy screws".to_string()]);
     }
 
     #[test]

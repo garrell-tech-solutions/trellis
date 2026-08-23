@@ -62,8 +62,8 @@
     {
       "file": "crates/acceptance-tests/src/steps/mod.rs",
       "function": "dispatch",
-      "cyclomatic_complexity": 16,
-      "why": "Top-level step dispatcher; delegates to one step module per arm. 15 -> 16 for the new committed_screen module's arm (#94): a new step, not new logic."
+      "cyclomatic_complexity": 17,
+      "why": "Top-level step dispatcher; delegates to one step module per arm. 16 -> 17 for the new mark_done module's arm (#97): a new step, not new logic."
     },
     {
       "file": "crates/acceptance-tests/src/steps/one_screen.rs",

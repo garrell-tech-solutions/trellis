@@ -4,6 +4,9 @@
 //! `committed-screen-only-committed-04`: this query's `WHERE tasks.kind =
 //! 'committed'` is the whole of what keeps pool and quota work off this
 //! screen, the same shape `pool::store`'s own `WHERE` clause takes.
+//!
+//! `AND tasks.archived_at IS NULL` keeps a task you marked done off this
+//! screen and out of its count (`mark-done-counts-exclude-04`).
 
 use sqlx::SqlitePool;
 
@@ -15,6 +18,7 @@ use sqlx::SqlitePool;
 /// bug to surface as a decode error, not a `None` to paper over).
 #[derive(Debug, Clone, PartialEq, Eq, sqlx::FromRow)]
 pub struct CommittedTaskRow {
+    pub task_id: i64,
     pub raw_text: String,
     pub context_tag: Option<String>,
     pub deadline: i64,
@@ -27,10 +31,11 @@ pub struct CommittedTaskRow {
 /// itself rather than trusting a caller to have sorted already.
 pub async fn list_committed_tasks(pool: &SqlitePool) -> Result<Vec<CommittedTaskRow>, sqlx::Error> {
     sqlx::query_as(
-        "SELECT captures.raw_text, captures.context_tag, tasks.deadline, tasks.commitment \
+        "SELECT tasks.id AS task_id, captures.raw_text, captures.context_tag, tasks.deadline, \
+         tasks.commitment \
          FROM tasks \
          JOIN captures ON captures.id = tasks.capture_id \
-         WHERE tasks.kind = 'committed'",
+         WHERE tasks.kind = 'committed' AND tasks.archived_at IS NULL",
     )
     .fetch_all(pool)
     .await
@@ -59,6 +64,18 @@ mod tests {
         }
     }
 
+    async fn given_a_committed_task(pool: &SqlitePool, raw_text: &str, tag: Option<&str>) {
+        let capture_id = insert_capture(pool, raw_text, tag).await;
+        crate::triage::store::insert_task(
+            pool,
+            capture_id,
+            &committed(1787646600000, Commitment::At),
+            0,
+        )
+        .await
+        .unwrap();
+    }
+
     #[tokio::test]
     async fn list_committed_tasks_is_empty_against_a_fresh_database() {
         let (_dir, pool) = test_pool().await;
@@ -69,15 +86,7 @@ mod tests {
     #[tokio::test]
     async fn list_committed_tasks_reports_a_committed_tasks_text_tag_deadline_and_commitment() {
         let (_dir, pool) = test_pool().await;
-        let capture_id = insert_capture(&pool, "book the dentist", Some("@phone")).await;
-        crate::triage::store::insert_task(
-            &pool,
-            capture_id,
-            &committed(1787646600000, Commitment::At),
-            0,
-        )
-        .await
-        .unwrap();
+        given_a_committed_task(&pool, "book the dentist", Some("@phone")).await;
 
         let tasks = list_committed_tasks(&pool).await.unwrap();
 
@@ -137,6 +146,32 @@ mod tests {
     async fn list_committed_tasks_excludes_an_untriaged_capture() {
         let (_dir, pool) = test_pool().await;
         insert_capture(&pool, "book the dentist", Some("@phone")).await;
+
+        assert_eq!(list_committed_tasks(&pool).await.unwrap(), Vec::new());
+    }
+
+    #[tokio::test]
+    async fn list_committed_tasks_reports_the_tasks_own_id() {
+        let (_dir, pool) = test_pool().await;
+        given_a_committed_task(&pool, "book the dentist", Some("@phone")).await;
+
+        let tasks = list_committed_tasks(&pool).await.unwrap();
+
+        let task_id: i64 = sqlx::query_scalar("SELECT id FROM tasks")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(tasks[0].task_id, task_id);
+    }
+
+    #[tokio::test]
+    async fn list_committed_tasks_excludes_a_task_marked_done() {
+        let (_dir, pool) = test_pool().await;
+        given_a_committed_task(&pool, "book the dentist", Some("@phone")).await;
+        sqlx::query("UPDATE tasks SET archived_at = 1")
+            .execute(&pool)
+            .await
+            .unwrap();
 
         assert_eq!(list_committed_tasks(&pool).await.unwrap(), Vec::new());
     }

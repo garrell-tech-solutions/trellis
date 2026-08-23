@@ -4,6 +4,11 @@
 //! `D-no-pool-on-calendar`: this is the *only* place pool work is offered,
 //! so this query's `WHERE tasks.kind = 'pool'` is the whole of what keeps
 //! committed and quota work off this screen (`pool-screen-only-pool-04`).
+//!
+//! `AND tasks.archived_at IS NULL` keeps a task you marked done off this
+//! screen and out of its count (`mark-done-counts-exclude-04`) -- #97's
+//! whole point, since `T-trips-are-derived-not-ranked` means a done task
+//! left in would still count toward the trip threshold.
 
 use sqlx::SqlitePool;
 
@@ -23,7 +28,7 @@ pub async fn list_pool_tasks(pool: &SqlitePool) -> Result<Vec<PoolTaskRow>, sqlx
     sqlx::query_as(
         "SELECT tasks.id AS task_id, captures.raw_text, captures.context_tag FROM tasks \
          JOIN captures ON captures.id = tasks.capture_id \
-         WHERE tasks.kind = 'pool'",
+         WHERE tasks.kind = 'pool' AND tasks.archived_at IS NULL",
     )
     .fetch_all(pool)
     .await
@@ -117,6 +122,20 @@ mod tests {
     async fn list_pool_tasks_excludes_an_untriaged_capture() {
         let (_dir, pool) = test_pool().await;
         insert_capture(&pool, "buy screws", Some("@homedepot")).await;
+
+        assert_eq!(list_pool_tasks(&pool).await.unwrap(), Vec::new());
+    }
+
+    #[tokio::test]
+    async fn list_pool_tasks_excludes_a_task_marked_done() {
+        let (_dir, pool) = test_pool().await;
+        let tasks = given_a_pool_task(&pool, "buy screws", Some("@homedepot")).await;
+        let task_id = tasks[0].task_id;
+        sqlx::query("UPDATE tasks SET archived_at = 1 WHERE id = ?")
+            .bind(task_id)
+            .execute(&pool)
+            .await
+            .unwrap();
 
         assert_eq!(list_pool_tasks(&pool).await.unwrap(), Vec::new());
     }

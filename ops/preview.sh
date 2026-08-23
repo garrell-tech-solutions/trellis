@@ -54,18 +54,46 @@ command -v gh >/dev/null || {
   exit 1
 }
 
+REPO_OWNER="${REPO%%/*}"
+
+# Resolve the branch through its own pull request rather than trusting the
+# branch name by itself. `gh run list --branch` matches a run's head_branch,
+# and head_branch is only ever the name the triggering ref happened to have
+# -- on whatever repo triggered it. This repo is public with forking
+# allowed, and `pull_request` runs the workflow FILE FROM THE PR, so a fork
+# controls both what gets built and what the uploaded artifact contains. A
+# fork opening a PR from a branch that happens to share this one's name
+# would otherwise look like a perfectly plausible `--branch "$BRANCH"`
+# match -- two PRs can share a branch name even without malice, which is why
+# this pins to a commit a specific pull request names, not to a name alone.
+PR_JSON="$(gh pr view "$BRANCH" --repo "$REPO" --json headRepositoryOwner,headRefOid,number)"
+HEAD_OWNER="$(jq -r '.headRepositoryOwner.login' <<<"$PR_JSON")"
+HEAD_SHA="$(jq -r '.headRefOid' <<<"$PR_JSON")"
+PR_NUMBER="$(jq -r '.number' <<<"$PR_JSON")"
+
+# The refusal, not a silent fallback to some other run: a branch whose pull
+# request heads from a fork is not this script's to preview, no matter how
+# plausible its name looks.
+if [[ "$HEAD_OWNER" != "$REPO_OWNER" ]]; then
+  echo "refusing to preview $BRANCH: pull request #$PR_NUMBER's head is $HEAD_OWNER/trellis, not $REPO_OWNER/trellis -- that branch's PR comes from a fork" >&2
+  exit 1
+fi
+
+# Pinned to the exact commit the pull request names (headRefOid), not
+# `--limit 1` on the branch name -- a second, differently-owned PR sharing
+# this branch name would otherwise be indistinguishable from this one by
+# `--branch` alone, fork or not.
 RUN_ID="$(gh run list \
   --repo "$REPO" \
   --workflow "$WORKFLOW" \
   --branch "$BRANCH" \
+  --event pull_request \
   --status success \
-  --limit 1 \
-  --json databaseId \
-  --jq '.[0].databaseId')"
+  --json databaseId,headSha \
+  --jq --arg sha "$HEAD_SHA" '[.[] | select(.headSha == $sha)][0].databaseId // empty')"
 
 if [[ -z "$RUN_ID" ]]; then
-  echo "no successful $WORKFLOW run found on $BRANCH" >&2
-  echo "(a run only exists once a pull request is open for this branch -- ci.yml's push trigger fires on trunk only)" >&2
+  echo "no successful $WORKFLOW run found for $BRANCH at $HEAD_SHA (pull request #$PR_NUMBER)" >&2
   exit 1
 fi
 
@@ -88,9 +116,19 @@ chmod +x "$NEW_BINARY"
 # Same sanity check ops/update.sh runs before a downloaded binary ever
 # touches a real data directory: refuse one that isn't the static build the
 # release gate promises (features/release_binary.feature).
-LDD_OUTPUT="$(ldd "$NEW_BINARY" 2>&1 || true)"
-if [[ "$LDD_OUTPUT" != *"not a dynamic executable"* && "$LDD_OUTPUT" != *"statically linked"* ]]; then
-  echo "downloaded binary is not statically linked, refusing to install: $LDD_OUTPUT" >&2
+#
+# `file`, not `ldd`. `ldd` answers "is this dynamically linked" by actually
+# running the binary under the dynamic loader -- and for a binary the loader
+# considers static, glibc's `ldd` execs it directly rather than merely
+# inspecting it. Either way, the artifact runs before this check has decided
+# whether to trust it, and a crafted ELF that names its own interpreter
+# would execute at exactly that moment -- the very check meant to refuse
+# untrusted code would have run it first. `file` reads the ELF header and
+# answers the same question without ever loading or executing what it is
+# looking at.
+FILE_OUTPUT="$(file "$NEW_BINARY")"
+if [[ "$FILE_OUTPUT" != *"static"* ]]; then
+  echo "downloaded binary is not statically linked, refusing to install: $FILE_OUTPUT" >&2
   exit 1
 fi
 

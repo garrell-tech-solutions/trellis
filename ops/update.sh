@@ -32,10 +32,21 @@ command -v gh >/dev/null || {
   exit 1
 }
 
+# --event push, not just --branch trunk. `--branch` matches a run's
+# head_branch, and head_branch is whatever the triggering ref was named --
+# including on a fork. This repo is public with forking allowed, and a
+# fork's default branch is also conventionally named `trunk`: someone forks,
+# opens a pull request from their own `trunk`, and that PR's `pull_request`
+# run has head_branch `trunk` too, indistinguishable from ours by name
+# alone. `--event push` excludes it by construction, because a
+# `pull_request` run is never a push, and only the owner can push to this
+# repo's `trunk` -- a PR run builds and tests the code but does not carry
+# the trust this script extends to what it installs.
 RUN_ID="$(gh run list \
   --repo "$REPO" \
   --workflow "$WORKFLOW" \
   --branch "$BRANCH" \
+  --event push \
   --status success \
   --limit 1 \
   --json databaseId \
@@ -65,9 +76,18 @@ chmod +x "$NEW_BINARY"
 # Sanity check before it ever touches the real data directory: refuse a
 # binary that isn't the static build the release gate promises
 # (features/release_binary.feature).
-LDD_OUTPUT="$(ldd "$NEW_BINARY" 2>&1 || true)"
-if [[ "$LDD_OUTPUT" != *"not a dynamic executable"* && "$LDD_OUTPUT" != *"statically linked"* ]]; then
-  echo "downloaded binary is not statically linked, refusing to install: $LDD_OUTPUT" >&2
+#
+# `file`, not `ldd`. `ldd` answers "is this dynamically linked" by actually
+# running the binary under the dynamic loader -- and for a binary the loader
+# considers static, glibc's `ldd` execs it directly and inspects how it
+# behaves, rather than merely inspecting it. Either way, the artifact runs
+# before this check has decided whether to trust it, and a crafted ELF that
+# names its own interpreter would execute at exactly that moment. `file`
+# reads the ELF header and answers the same question without ever loading
+# or executing what it is looking at.
+FILE_OUTPUT="$(file "$NEW_BINARY")"
+if [[ "$FILE_OUTPUT" != *"static"* ]]; then
+  echo "downloaded binary is not statically linked, refusing to install: $FILE_OUTPUT" >&2
   exit 1
 fi
 

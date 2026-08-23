@@ -17,12 +17,12 @@ use axum::Router;
 use sqlx::SqlitePool;
 
 use crate::capture::http::create_capture;
-use crate::committed::http::show_committed;
+use crate::committed::http::{mark_committed_task_done, show_committed};
 use crate::dismiss::http::dismiss_capture;
 use crate::inbox::http::show_inbox;
 use crate::platform::assets::{htmx_js, space_grotesk_woff2, trellis_css};
 use crate::platform::clock::Clock;
-use crate::pool::http::show_pool;
+use crate::pool::http::{mark_pool_task_done, show_pool};
 use crate::settings::http::set_timezone;
 use crate::triage::http::create_triage;
 
@@ -61,7 +61,9 @@ pub fn build_app(pool: SqlitePool, clock: Clock) -> Router {
         .route("/captures/{id}/dismiss", post(dismiss_capture))
         .route("/timezone", post(set_timezone))
         .route("/pool", get(show_pool))
+        .route("/pool/tasks/{id}/done", post(mark_pool_task_done))
         .route("/committed", get(show_committed))
+        .route("/committed/tasks/{id}/done", post(mark_committed_task_done))
         .with_state(AppState { pool, clock })
 }
 

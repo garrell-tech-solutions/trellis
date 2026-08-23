@@ -29,3 +29,14 @@ pub(crate) async fn insert_capture(pool: &SqlitePool, raw_text: &str, tag: Optio
         .await
         .unwrap()
 }
+
+/// A task's stored `archived_at` -- both `committed::http` and `pool::http`
+/// assert on it after marking a task done (#97), since both go through the
+/// same [`crate::mark_done::mark_task_done`] write.
+pub(crate) async fn archived_at(pool: &SqlitePool, task_id: i64) -> Option<i64> {
+    sqlx::query_scalar("SELECT archived_at FROM tasks WHERE id = ?")
+        .bind(task_id)
+        .fetch_one(pool)
+        .await
+        .unwrap()
+}

@@ -46,6 +46,15 @@ pub async fn trellis_css() -> impl IntoResponse {
 /// makes an installed window standalone rather than a bookmark, served the
 /// same way `trellis_css` is -- a file checked into the repo and embedded at
 /// compile time, not built up in code.
+/// The embedded manifest source, for the one test that must read the very
+/// bytes this server serves rather than a copy of them
+/// (`app::every_url_the_manifest_names_is_a_real_route`). Test-only: nothing
+/// in a shipped binary needs the source, only the response built from it.
+#[cfg(test)]
+pub(crate) fn manifest_source() -> &'static str {
+    MANIFEST
+}
+
 pub async fn manifest() -> impl IntoResponse {
     (
         [(header::CONTENT_TYPE, "application/manifest+json")],

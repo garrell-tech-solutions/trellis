@@ -83,11 +83,12 @@ log() {
   fi
 }
 err()   { log 3 "$@"; }
-warn()  { log 4 "$@"; }
 info()  { log 6 "$@"; }
 debug() { log 7 "$@"; }
 
 # note <priority> <message> -- say it the first time, then stop saying it.
+# The priority is the syslog number rather than one of the helpers above,
+# because the states this is used for span three of them.
 #
 # Every routine "nothing to do here" message goes through this. Polling every
 # two minutes means 720 ticks a day, and a state that persists (no labelled

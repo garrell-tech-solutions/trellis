@@ -44,6 +44,12 @@ fn triage_fields(payload: &Value) -> TriageFields {
         target_count: payload.get("target_count").and_then(Value::as_i64),
         target_minutes_each: payload.get("target_minutes_each").and_then(Value::as_i64),
         period: string_field(payload, "period"),
+        // #110's date/time/zone trio is the page form's alternative to
+        // `deadline`, never JSON's -- the API keeps sending one complete
+        // instant, per `committed-date-json-still-takes-an-instant-05`.
+        deadline_date: None,
+        deadline_time: None,
+        timezone: None,
     }
 }
 
@@ -61,6 +67,15 @@ fn triage_fields(payload: &Value) -> TriageFields {
 pub struct TriageFormRequest {
     kind: Option<String>,
     deadline: Option<String>,
+    /// `"2026-08-25"` -- the committed date-picker's value (#110). Absent
+    /// for every other kind, and for a committed submission that still
+    /// sends a complete `deadline` (an older client, or a test fixture).
+    #[serde(default)]
+    deadline_date: Option<String>,
+    /// `"08:30"` -- the committed time-picker's value, present only for an
+    /// *at*. A *by* never asks the page for one.
+    #[serde(default)]
+    deadline_time: Option<String>,
     commitment: Option<String>,
     priority: Option<String>,
     estimated_minutes: Option<i64>,
@@ -76,6 +91,12 @@ impl From<&TriageFormRequest> for TriageFields {
         TriageFields {
             kind: form.kind.clone(),
             deadline: form.deadline.clone(),
+            deadline_date: form.deadline_date.clone(),
+            deadline_time: form.deadline_time.clone(),
+            // Set by `create_triage`, which has the database this
+            // conversion does not (`T-core-owns-validation-order`: the
+            // adapter keeps only what the core genuinely cannot have).
+            timezone: None,
             commitment: form.commitment.clone(),
             priority: form.priority.clone(),
             estimated_minutes: form.estimated_minutes,
@@ -93,7 +114,7 @@ impl From<&TriageFormRequest> for TriageFields {
 /// no such case; every value a browser form submits is already a string.
 pub enum TriageInput {
     Json(Value),
-    Form(TriageFormRequest),
+    Form(Box<TriageFormRequest>),
 }
 
 impl<S: Send + Sync> FromRequest<S> for TriageInput {
@@ -109,7 +130,7 @@ impl<S: Send + Sync> FromRequest<S> for TriageInput {
             let Form(form) = Form::<TriageFormRequest>::from_request(req, state)
                 .await
                 .map_err(|_| StatusCode::BAD_REQUEST)?;
-            Ok(Self::Form(form))
+            Ok(Self::Form(Box::new(form)))
         }
     }
 }
@@ -257,7 +278,11 @@ fn fields_from_input(input: TriageInput) -> (TriageFields, Value, Option<String>
         TriageInput::Form(form) => {
             let kind_submitted = json!(form.kind);
             let context_tag = form.context_tag.clone();
-            (TriageFields::from(&form), kind_submitted, context_tag)
+            (
+                TriageFields::from(form.as_ref()),
+                kind_submitted,
+                context_tag,
+            )
         }
     }
 }
@@ -289,8 +314,19 @@ pub async fn create_triage(
     input: TriageInput,
 ) -> Result<Response, StatusCode> {
     let from_page = matches!(input, TriageInput::Form(_));
-    let (fields, kind_submitted, context_tag) = fields_from_input(input);
+    let (mut fields, kind_submitted, context_tag) = fields_from_input(input);
     let created_at_ms = clock.now_ms();
+
+    // #110: the one piece of a `deadline_date` conversion the core cannot
+    // supply itself. Fetched unconditionally rather than only when
+    // `deadline_date` is present -- `TaskKind::from_fields` already ignores
+    // `timezone` whenever `deadline` or no date is given, so branching here
+    // would just be a second copy of that same decision.
+    fields.timezone = Some(
+        crate::settings::current_timezone(&pool)
+            .await
+            .map_err(write_failed)?,
+    );
 
     let outcome = decide_triage(&pool, capture_id, &fields).await?;
 
@@ -582,6 +618,78 @@ mod tests {
         assert_eq!(row.3.as_deref(), Some("P1"));
         assert_eq!(row.4, Some(180));
         assert_eq!(row.5, None, "committed task must have no quota target");
+    }
+
+    /// #110: the page's own committed form sends `deadline_date` and
+    /// `deadline_time` instead of a pre-resolved `deadline`, and the
+    /// resulting instant must land in the *owner's* configured zone, not
+    /// UTC -- the whole reason the near-midnight scenarios exist.
+    #[tokio::test]
+    async fn triaging_as_committed_through_the_page_with_a_local_date_and_time_uses_the_owner_zone()
+    {
+        let (_dir, pool) = test_pool().await;
+        crate::settings::current_timezone(&pool).await.unwrap(); // sanity: row exists
+        sqlx::query("UPDATE settings SET timezone = 'America/New_York' WHERE id = 1")
+            .execute(&pool)
+            .await
+            .unwrap();
+        let capture_id = insert_untriaged_capture(&pool, "book the dentist").await;
+
+        let response = page_triage_response(
+            &pool,
+            capture_id,
+            &[
+                ("kind", "committed"),
+                ("deadline_date", "2026-08-25"),
+                ("deadline_time", "08:30"),
+                ("commitment", "at"),
+                ("priority", "P1"),
+                ("estimated_minutes", "30"),
+            ],
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::CREATED);
+        let deadline: Option<i64> = sqlx::query_scalar("SELECT deadline FROM tasks")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        // 2026-08-25T08:30 America/New_York (EDT, UTC-4).
+        assert_eq!(deadline, Some(1787661000000));
+    }
+
+    /// A `by` submitted through the page sends only `deadline_date`, and
+    /// the resulting instant is the end of that day in the owner's zone --
+    /// `committed-date-by-takes-a-day-02`.
+    #[tokio::test]
+    async fn triaging_as_committed_by_through_the_page_with_only_a_date_is_the_end_of_that_day() {
+        let (_dir, pool) = test_pool().await;
+        sqlx::query("UPDATE settings SET timezone = 'America/New_York' WHERE id = 1")
+            .execute(&pool)
+            .await
+            .unwrap();
+        let capture_id = insert_untriaged_capture(&pool, "file the tax return").await;
+
+        let response = page_triage_response(
+            &pool,
+            capture_id,
+            &[
+                ("kind", "committed"),
+                ("deadline_date", "2026-08-27"),
+                ("commitment", "by"),
+                ("priority", "P1"),
+                ("estimated_minutes", "30"),
+            ],
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::CREATED);
+        let deadline: Option<i64> = sqlx::query_scalar("SELECT deadline FROM tasks")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        // End of 2026-08-27 in America/New_York.
+        assert_eq!(deadline, Some(1787889599999));
     }
 
     #[tokio::test]
@@ -1040,6 +1148,7 @@ mod tests {
                 target_count: Some(3),
                 target_minutes_each: Some(45),
                 period: Some("week".to_string()),
+                ..TriageFields::default()
             }
         );
     }
@@ -1132,6 +1241,8 @@ mod tests {
         TriageFormRequest {
             kind: fields.kind.clone(),
             deadline: fields.deadline.clone(),
+            deadline_date: fields.deadline_date.clone(),
+            deadline_time: fields.deadline_time.clone(),
             commitment: fields.commitment.clone(),
             priority: fields.priority.clone(),
             estimated_minutes: fields.estimated_minutes,
@@ -1173,6 +1284,11 @@ mod tests {
                 target_count,
                 target_minutes_each,
                 period,
+                // #110's deadline_date/deadline_time/timezone are the page
+                // form's own fields, with no JSON equivalent to round-trip
+                // against -- left at their default `None` here and covered
+                // by their own example tests instead.
+                ..TriageFields::default()
             };
 
             let from_json = triage_fields(&json_body(&submission));
@@ -1203,7 +1319,7 @@ mod tests {
 
             let mut form = form_request(&TriageFields::default());
             form.context_tag = context_tag.clone();
-            let (_, _, from_form) = fields_from_input(TriageInput::Form(form));
+            let (_, _, from_form) = fields_from_input(TriageInput::Form(Box::new(form)));
 
             prop_assert_eq!(from_json, context_tag.clone());
             prop_assert_eq!(from_form, context_tag);

@@ -27,7 +27,8 @@ pub(super) async fn build(
     clock: Clock,
 ) -> Result<CommittedBodyTemplate, sqlx::Error> {
     let rows = super::store::list_committed_tasks(pool).await?;
-    let built = view::build(rows, clock.now_ms());
+    let zone = crate::settings::current_timezone(pool).await?;
+    let built = view::build(rows, clock.now_ms(), &zone);
     Ok(CommittedBodyTemplate {
         meta: built.meta,
         empty: built.empty,

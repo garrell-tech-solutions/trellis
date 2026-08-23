@@ -36,6 +36,12 @@
       "why": "Gherkin step dispatcher; regex chain, one-line delegation per arm. 14 -> 11 (#88): the response-time-budget arm was deleted along with then_response_within_budget -- T-latency-is-a-qa-assertion moved that assertion to qa/capture_endpoint.md and qa/one_screen.md, and this dispatcher lost the step that drove it, not logic."
     },
     {
+      "file": "crates/acceptance-tests/src/steps/committed_date.rs",
+      "function": "dispatch",
+      "cyclomatic_complexity": 10,
+      "why": "Gherkin step dispatcher; regex chain, one-line delegation per arm. New module for features/committed_date.feature (#110). Reviewed arm by arm: every branch is `if let Some(caps) = REGEX.captures(text) { return Some(handler(..).await) }` with no conditional of its own."
+    },
+    {
       "file": "crates/acceptance-tests/src/steps/committed_screen.rs",
       "function": "dispatch",
       "cyclomatic_complexity": 18,
@@ -62,8 +68,8 @@
     {
       "file": "crates/acceptance-tests/src/steps/mod.rs",
       "function": "dispatch",
-      "cyclomatic_complexity": 17,
-      "why": "Top-level step dispatcher; delegates to one step module per arm. 16 -> 17 for the new mark_done module's arm (#97): a new step, not new logic."
+      "cyclomatic_complexity": 18,
+      "why": "Top-level step dispatcher; delegates to one step module per arm. 17 -> 18 for the new committed_date module's arm (#110): a new step, not new logic."
     },
     {
       "file": "crates/acceptance-tests/src/steps/one_screen.rs",

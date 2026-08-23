@@ -45,6 +45,7 @@ fn any_fields() -> impl Strategy<Value = TriageFields> {
                     target_count,
                     target_minutes_each,
                     period,
+                    ..TriageFields::default()
                 }
             },
         )

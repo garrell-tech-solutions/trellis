@@ -30,6 +30,22 @@ pub const QUOTA: &str = "quota";
 pub struct TriageFields {
     pub kind: Option<String>,
     pub deadline: Option<String>,
+    /// A local civil date (`"2026-08-25"`), the page-form alternative to
+    /// [`Self::deadline`]'s pre-resolved instant (#110). Ignored when
+    /// `deadline` is present -- JSON keeps sending a complete instant and
+    /// this trio is the page's only.
+    pub deadline_date: Option<String>,
+    /// A local civil time (`"08:30"`) paired with [`Self::deadline_date`]
+    /// for an *at*. Absent for a *by*, which the page never asks a time
+    /// for -- `commitment` decides which fields the page sent, never the
+    /// other way around (`T-commitment-is-chosen-not-derived`).
+    pub deadline_time: Option<String>,
+    /// The zone [`Self::deadline_date`] is local to -- the one piece of
+    /// this conversion an adapter must supply, because reading the
+    /// owner's stored timezone needs a database the core does not have
+    /// (`T-core-owns-validation-order`: the adapter keeps only what the
+    /// core genuinely cannot). Ignored when `deadline` is present.
+    pub timezone: Option<String>,
     pub commitment: Option<String>,
     pub priority: Option<String>,
     pub target_count: Option<i64>,
@@ -111,6 +127,36 @@ pub struct TaskAttributes {
     pub period: Option<&'static str>,
 }
 
+/// A committed deadline's required-ness is decided before its source is,
+/// so this carries either shape [`TaskKind::require_deadline_input`] found
+/// through to [`DeadlineInput::resolve_ms`] -- the one place that turns
+/// either into an instant, and the one place [`TriageRejection::InvalidField`]
+/// for a bad deadline can come from.
+enum DeadlineInput {
+    /// JSON's own shape: an already-complete instant.
+    Instant(String),
+    /// The page's shape: a local date, an optional local time (absent for
+    /// a *by*), and the zone they are local to.
+    LocalDate {
+        date: String,
+        time: Option<String>,
+        zone: String,
+    },
+}
+
+impl DeadlineInput {
+    fn resolve_ms(self) -> Result<i64, TriageRejection> {
+        match self {
+            Self::Instant(text) => fields::parse_deadline_ms(&text)
+                .ok_or(TriageRejection::InvalidField(Field::Deadline)),
+            Self::LocalDate { date, time, zone } => {
+                fields::local_deadline_ms(&date, time.as_deref(), &zone)
+                    .map_err(|_| TriageRejection::InvalidField(Field::Deadline))
+            }
+        }
+    }
+}
+
 /// Requires a string field to be both present and non-empty
 /// (T-empty-equals-absent: absent and empty are the same submitter mistake,
 /// so they report identically).
@@ -156,22 +202,48 @@ impl TaskKind {
 
     fn require_committed_fields(
         fields: &TriageFields,
-    ) -> Result<(String, String, String, i64), TriageRejection> {
-        let deadline = require(Field::Deadline, &fields.deadline)?;
+    ) -> Result<(DeadlineInput, String, String, i64), TriageRejection> {
+        let deadline = Self::require_deadline_input(fields)?;
         let commitment = require(Field::Commitment, &fields.commitment)?;
         let priority = require(Field::Priority, &fields.priority)?;
         let estimated_minutes = require_i64(Field::EstimatedMinutes, fields.estimated_minutes)?;
         Ok((deadline, commitment, priority, estimated_minutes))
     }
 
+    /// `deadline` (JSON's pre-resolved instant) wins when present, exactly
+    /// as before #110; a page submission carries `deadline_date` instead,
+    /// paired with the `timezone` an adapter fetched because the core
+    /// cannot (`T-core-owns-validation-order`). Required-ness is checked
+    /// here, over whichever source is in play, so a submission missing
+    /// both still reports one `MissingField(Deadline)` -- never two, and
+    /// always in the same position among the four required fields.
+    fn require_deadline_input(fields: &TriageFields) -> Result<DeadlineInput, TriageRejection> {
+        if let Some(deadline) = &fields.deadline {
+            if !deadline.is_empty() {
+                return Ok(DeadlineInput::Instant(deadline.clone()));
+            }
+        }
+        match &fields.deadline_date {
+            Some(date) if !date.is_empty() => {
+                let zone = require(Field::Deadline, &fields.timezone)?;
+                let time = fields.deadline_time.clone().filter(|t| !t.is_empty());
+                Ok(DeadlineInput::LocalDate {
+                    date: date.clone(),
+                    time,
+                    zone,
+                })
+            }
+            _ => Err(TriageRejection::MissingField(Field::Deadline)),
+        }
+    }
+
     fn parse_committed_fields(
-        deadline: String,
+        deadline: DeadlineInput,
         commitment: String,
         priority: String,
         estimated_minutes: i64,
     ) -> Result<Self, TriageRejection> {
-        let deadline = fields::parse_deadline_ms(&deadline)
-            .ok_or(TriageRejection::InvalidField(Field::Deadline))?;
+        let deadline = deadline.resolve_ms()?;
         let commitment = Commitment::parse(&commitment)
             .ok_or(TriageRejection::InvalidField(Field::Commitment))?;
         let priority =
@@ -405,6 +477,106 @@ mod tests {
     fn committed_fields_with_an_unparseable_deadline_are_rejected_naming_it_invalid() {
         let mut fields = committed_fields();
         fields.deadline = Some("banana".to_string());
+        assert_eq!(
+            TaskKind::from_fields(&fields),
+            Err(TriageRejection::InvalidField(Field::Deadline))
+        );
+    }
+
+    // --- committed via deadline_date/deadline_time/timezone (#110) --------
+
+    fn committed_fields_via_local_date() -> TriageFields {
+        TriageFields {
+            kind: Some(COMMITTED.to_string()),
+            deadline_date: Some("2026-08-25".to_string()),
+            deadline_time: Some("08:30".to_string()),
+            timezone: Some("America/New_York".to_string()),
+            commitment: Some("at".to_string()),
+            priority: Some("P1".to_string()),
+            estimated_minutes: Some(180),
+            ..TriageFields::default()
+        }
+    }
+
+    #[test]
+    fn a_local_date_and_time_resolve_to_the_instant_they_name_in_the_zone() {
+        assert_eq!(
+            TaskKind::from_fields(&committed_fields_via_local_date()),
+            Ok(TaskKind::Committed {
+                deadline: 1787661000000,
+                commitment: Commitment::At,
+                priority: Priority::P1,
+                estimated_minutes: 180,
+            })
+        );
+    }
+
+    #[test]
+    fn a_local_date_with_no_time_resolves_to_the_end_of_that_day() {
+        let mut fields = committed_fields_via_local_date();
+        fields.deadline_date = Some("2026-08-27".to_string());
+        fields.deadline_time = None;
+        fields.commitment = Some("by".to_string());
+        assert_eq!(
+            TaskKind::from_fields(&fields),
+            Ok(TaskKind::Committed {
+                deadline: 1787889599999,
+                commitment: Commitment::By,
+                priority: Priority::P1,
+                estimated_minutes: 180,
+            })
+        );
+    }
+
+    #[test]
+    fn deadline_wins_over_deadline_date_when_both_are_present() {
+        let mut fields = committed_fields_via_local_date();
+        fields.deadline = Some("2026-08-20T17:00:00Z".to_string());
+        assert_eq!(
+            TaskKind::from_fields(&fields),
+            Ok(TaskKind::Committed {
+                deadline: 1787245200000,
+                commitment: Commitment::At,
+                priority: Priority::P1,
+                estimated_minutes: 180,
+            })
+        );
+    }
+
+    #[test]
+    fn deadline_date_without_a_timezone_is_rejected_as_missing_deadline() {
+        let mut fields = committed_fields_via_local_date();
+        fields.timezone = None;
+        assert_eq!(
+            TaskKind::from_fields(&fields),
+            Err(TriageRejection::MissingField(Field::Deadline))
+        );
+    }
+
+    #[test]
+    fn neither_deadline_nor_deadline_date_is_rejected_as_missing_deadline() {
+        let mut fields = committed_fields_via_local_date();
+        fields.deadline_date = None;
+        assert_eq!(
+            TaskKind::from_fields(&fields),
+            Err(TriageRejection::MissingField(Field::Deadline))
+        );
+    }
+
+    #[test]
+    fn an_unparseable_local_date_is_rejected_as_invalid_deadline() {
+        let mut fields = committed_fields_via_local_date();
+        fields.deadline_date = Some("banana".to_string());
+        assert_eq!(
+            TaskKind::from_fields(&fields),
+            Err(TriageRejection::InvalidField(Field::Deadline))
+        );
+    }
+
+    #[test]
+    fn an_unknown_zone_is_rejected_as_invalid_deadline() {
+        let mut fields = committed_fields_via_local_date();
+        fields.timezone = Some("Nowhere/Imaginary".to_string());
         assert_eq!(
             TaskKind::from_fields(&fields),
             Err(TriageRejection::InvalidField(Field::Deadline))

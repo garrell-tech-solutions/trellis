@@ -42,7 +42,11 @@ pub struct CommittedRow {
 /// Orders `tasks` chronologically (earliest first, so a past deadline sorts
 /// to the top) and marks each row past relative to `now_ms`. `tasks` may
 /// arrive in any order; a stable sort keeps ties in the order they arrived.
-pub fn order(mut tasks: Vec<CommittedTask>, now_ms: i64) -> Vec<CommittedRow> {
+/// `zone` is the owner's configured timezone (#110, `T-timezone-is-a-setting`)
+/// -- both "past" and the date cell are read in it, not UTC, since a
+/// deadline entered correctly at 23:00 local and shown on the wrong day is
+/// the same bug from the other end.
+pub fn order(mut tasks: Vec<CommittedTask>, now_ms: i64, zone: &str) -> Vec<CommittedRow> {
     tasks.sort_by_key(|t| t.deadline_ms);
     tasks
         .into_iter()
@@ -50,7 +54,7 @@ pub fn order(mut tasks: Vec<CommittedTask>, now_ms: i64) -> Vec<CommittedRow> {
             id: task.id,
             text: task.text,
             context_tag: task.context_tag,
-            date_cell: date_cell(task.deadline_ms, task.commitment),
+            date_cell: date_cell(task.deadline_ms, task.commitment, now_ms, zone),
             past: task.deadline_ms < now_ms,
         })
         .collect()
@@ -69,20 +73,47 @@ fn weekday_abbrev(weekday: jiff::civil::Weekday) -> &'static str {
     }
 }
 
+const MONTH_ABBREVS: [&str; 12] = [
+    "JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC",
+];
+
+fn month_abbrev(month: i8) -> &'static str {
+    MONTH_ABBREVS[usize::try_from(month - 1).expect("jiff guarantees month is 1..=12")]
+}
+
 /// `"TUE 8:30"` for an *at* — the day and time, hour unpadded, minute
-/// zero-padded; `"BY THU"` for a *by* — the day alone, since a *by*'s time
-/// of day is not the commitment (`committed-screen-at-and-by-02`: a *by*
-/// with a time still renders as a *by*, not silently becomes an *at*).
-/// Always UTC — this product has no per-user timezone applied to display
-/// yet, the same ground `qa/committed_screen.md`'s clock-pinning stands on.
-fn date_cell(deadline_ms: i64, commitment: Commitment) -> String {
+/// zero-padded, in `zone`. `"BY THU"` for a *by* within the next six days
+/// of `now_ms`, since a *by*'s time of day is not the commitment
+/// (`committed-screen-at-and-by-02`: a *by* with a time still renders as a
+/// *by*, not silently becomes an *at*). Beyond that window `"BY THU"` can no
+/// longer tell two Thursdays apart (`committed-date-cell-disambiguates-07`),
+/// so a *by* further out reads `"BY 17 SEP"` instead — still short enough
+/// for the cell's 66px, unlike a form that keeps the weekday too.
+fn date_cell(deadline_ms: i64, commitment: Commitment, now_ms: i64, zone: &str) -> String {
     let zoned = jiff::Timestamp::from_millisecond(deadline_ms)
         .expect("deadline_ms is a valid instant; the triage boundary already validated it")
-        .to_zoned(jiff::tz::TimeZone::UTC);
+        .in_tz(zone)
+        .expect("zone is validated when the owner sets it (T-timezone-is-a-setting)");
     let day = weekday_abbrev(zoned.weekday());
     match commitment {
         Commitment::At => format!("{day} {}:{:02}", zoned.hour(), zoned.minute()),
-        Commitment::By => format!("BY {day}"),
+        Commitment::By => {
+            let today = jiff::Timestamp::from_millisecond(now_ms)
+                .expect("now_ms is a valid instant")
+                .in_tz(zone)
+                .expect("zone is validated when the owner sets it")
+                .date();
+            let days_out = zoned
+                .date()
+                .since(today)
+                .expect("both dates are in jiff's representable range")
+                .get_days();
+            if days_out < 7 {
+                format!("BY {day}")
+            } else {
+                format!("BY {} {}", zoned.day(), month_abbrev(zoned.month()))
+            }
+        }
     }
 }
 
@@ -110,18 +141,27 @@ mod tests {
 
     #[test]
     fn an_at_cell_reads_the_weekday_and_unpadded_time() {
-        assert_eq!(date_cell(DENTIST_MS, Commitment::At), "TUE 8:30");
+        assert_eq!(
+            date_cell(DENTIST_MS, Commitment::At, NOW_MS, "UTC"),
+            "TUE 8:30"
+        );
     }
 
     #[test]
     fn a_by_cell_reads_only_the_weekday_prefixed_by() {
-        assert_eq!(date_cell(TAX_RETURN_MS, Commitment::By), "BY THU");
+        assert_eq!(
+            date_cell(TAX_RETURN_MS, Commitment::By, NOW_MS, "UTC"),
+            "BY THU"
+        );
     }
 
     #[test]
     fn a_by_with_a_time_still_renders_as_a_by_not_an_at() {
         // 17:00 is a real time, and it must not leak into the by cell.
-        assert_eq!(date_cell(TAX_RETURN_MS, Commitment::By), "BY THU");
+        assert_eq!(
+            date_cell(TAX_RETURN_MS, Commitment::By, NOW_MS, "UTC"),
+            "BY THU"
+        );
     }
 
     #[test]
@@ -133,6 +173,7 @@ mod tests {
                 task("Furnace service window", FURNACE_MS, Commitment::At),
             ],
             NOW_MS,
+            "UTC",
         );
         let order: Vec<&str> = rows.iter().map(|r| r.text.as_str()).collect();
         assert_eq!(
@@ -150,6 +191,7 @@ mod tests {
         let rows = order(
             vec![task("Renew the passport", NOW_MS - 1, Commitment::By)],
             NOW_MS,
+            "UTC",
         );
         assert!(rows[0].past);
     }
@@ -159,6 +201,7 @@ mod tests {
         let rows = order(
             vec![task("Book the dentist", DENTIST_MS, Commitment::At)],
             NOW_MS,
+            "UTC",
         );
         assert!(!rows[0].past);
     }
@@ -171,6 +214,7 @@ mod tests {
         let rows = order(
             vec![task("Renew the passport", NOW_MS, Commitment::By)],
             NOW_MS,
+            "UTC",
         );
         assert!(!rows[0].past);
     }
@@ -183,6 +227,7 @@ mod tests {
                 task("Renew the passport", NOW_MS - 1, Commitment::By),
             ],
             NOW_MS,
+            "UTC",
         );
         assert_eq!(rows[0].text, "Renew the passport");
         assert!(rows[0].past);
@@ -193,23 +238,78 @@ mod tests {
     fn context_tag_is_preserved_and_none_stays_none() {
         let mut with_tag = task("buy screws", DENTIST_MS, Commitment::At);
         with_tag.context_tag = Some("@desk".to_string());
-        let rows = order(vec![with_tag], NOW_MS);
+        let rows = order(vec![with_tag], NOW_MS, "UTC");
         assert_eq!(rows[0].context_tag.as_deref(), Some("@desk"));
 
-        let rows = order(vec![task("no tag", DENTIST_MS, Commitment::At)], NOW_MS);
+        let rows = order(
+            vec![task("no tag", DENTIST_MS, Commitment::At)],
+            NOW_MS,
+            "UTC",
+        );
         assert_eq!(rows[0].context_tag, None);
     }
 
     #[test]
     fn an_empty_list_orders_to_nothing() {
-        assert!(order(vec![], NOW_MS).is_empty());
+        assert!(order(vec![], NOW_MS, "UTC").is_empty());
     }
 
     #[test]
     fn a_rows_id_is_its_tasks_id() {
         let mut with_id = task("book the dentist", DENTIST_MS, Commitment::At);
         with_id.id = 42;
-        let rows = order(vec![with_id], NOW_MS);
+        let rows = order(vec![with_id], NOW_MS, "UTC");
         assert_eq!(rows[0].id, 42);
+    }
+
+    // --- timezone-aware rendering (#110) -----------------------------------
+
+    const NY: &str = "America/New_York";
+    // 2026-08-25T08:30:00Z in America/New_York (2026-08-25T08:30 NY was
+    // computed as this instant by scheduler_core::task::fields::
+    // local_deadline_ms -- rendering it back in the same zone must
+    // round-trip to the same wall-clock day and time).
+    const DENTIST_NY_AT_0830_MS: i64 = 1787661000000;
+    const DENTIST_NY_AT_2330_MS: i64 = 1787715000000;
+    const DENTIST_NY_AT_0030_MS: i64 = 1787632200000;
+    const TAX_RETURN_NY_BY_MS: i64 = 1787889599999; // end of 2026-08-27 NY
+    const PASSPORT_NY_FAR_BY_MS: i64 = 1789703999999; // end of 2026-09-17 NY
+
+    #[test]
+    fn an_at_cell_renders_in_the_given_zone_not_utc() {
+        assert_eq!(
+            date_cell(DENTIST_NY_AT_0830_MS, Commitment::At, NOW_MS, NY),
+            "TUE 8:30"
+        );
+    }
+
+    #[test]
+    fn near_midnight_local_times_render_on_the_day_they_were_chosen() {
+        assert_eq!(
+            date_cell(DENTIST_NY_AT_2330_MS, Commitment::At, NOW_MS, NY),
+            "TUE 23:30"
+        );
+        assert_eq!(
+            date_cell(DENTIST_NY_AT_0030_MS, Commitment::At, NOW_MS, NY),
+            "TUE 0:30"
+        );
+    }
+
+    #[test]
+    fn a_by_within_the_next_six_days_reads_the_weekday() {
+        // NOW_MS is 2026-08-24T09:00:00Z; the by is three days out.
+        assert_eq!(
+            date_cell(TAX_RETURN_NY_BY_MS, Commitment::By, NOW_MS, NY),
+            "BY THU"
+        );
+    }
+
+    #[test]
+    fn a_by_beyond_this_week_reads_the_date_instead() {
+        // 24 days out -- "BY THU" could not tell it apart from a closer one.
+        assert_eq!(
+            date_cell(PASSPORT_NY_FAR_BY_MS, Commitment::By, NOW_MS, NY),
+            "BY 17 SEP"
+        );
     }
 }

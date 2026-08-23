@@ -118,30 +118,61 @@ command -v jq >/dev/null || {
   exit 1
 }
 
-# The named gotcha (#114): a systemd --user unit has $HOME, so gh finds
-# ~/.config/gh, but it is not a login shell and its environment is the user
-# manager's, not an interactive one's. On this host the token is not in
-# hosts.yml at all -- it is in the GNOME keyring -- so authentication here
-# depends on something outside gh's own config directory. Checked explicitly,
-# up front, because the alternative is a `gh pr list` that returns nothing and
-# is indistinguishable from "no pull request is labelled preview": the failure
-# would look exactly like the quiet, correct, do-nothing path.
-if ! AUTH_STATUS="$(gh auth status --hostname github.com 2>&1)"; then
-  err "gh is not authenticated from this unit -- polling cannot continue"
-  err "$AUTH_STATUS"
-  err "gh's token on this host lives in the login keyring, not ~/.config/gh/hosts.yml;"
-  err "a user unit running with nobody logged in has no unlocked keyring to read it from."
-  exit 1
-fi
-
 # One request answers everything this script needs to decide: which pull
 # requests carry the label, what commit each one heads at, and whether CI has
 # finished on it.
-PR_JSON="$(gh pr list \
+#
+# Every open pull request, filtered here -- not `gh pr list --label`. That flag
+# is served by GitHub's search index, which lags the label: adding `preview`
+# to #115 and immediately asking for it by label returned nothing for about
+# five seconds, while the label was already on the pull request object. A
+# two-minute poll would have shrugged that off, but the failure it produces is
+# the bad one -- an empty list is indistinguishable from "nothing is labelled",
+# so a lagging index reads as the owner not having asked for a preview, and if
+# the lag ever outlasts a tick the log would say the wrong thing confidently.
+# The labels on the pull request objects themselves are not indexed, they are
+# the record, and this repo has a handful of open pull requests, so filtering
+# them here costs one request either way.
+# The named gotcha (#114): a systemd --user unit has $HOME, so gh finds
+# ~/.config/gh, but it is not a login shell and its environment is the user
+# manager's rather than an interactive one's. On this host the token is not in
+# hosts.yml at all -- hosts.yml names the account and nothing else, and the
+# token itself is in the login keyring -- so whether gh can authenticate from
+# here depends on something outside gh's own config directory entirely.
+#
+# So the request is made, and its failure is what gets checked. NOT
+# `gh auth status`: that exits 0 while the ACTIVE account's token is invalid,
+# as long as some other account in the keyring still works. Observed here --
+# with a deliberately bogus GH_TOKEN it printed
+#
+#   X Failed to log in to github.com using token (GH_TOKEN)
+#   - The token in GH_TOKEN is invalid.
+#
+# and returned 0, and the script sailed past its own preflight into a 401 on
+# the next line. A preflight that cannot fail is worse than no preflight,
+# because it is read as evidence (decisions.md T-a-check-must-be-seen-to-fail).
+# The listing below is the request whose success actually matters, so it is
+# the one whose failure is reported.
+GH_OUT="$(mktemp)"
+GH_ERR="$(mktemp)"
+trap 'rm -f "$GH_OUT" "$GH_ERR"' EXIT
+
+if ! gh pr list \
   --repo "$REPO" \
   --state open \
-  --label "$LABEL" \
-  --json number,url,headRefName,headRefOid,statusCheckRollup)"
+  --limit 100 \
+  --json number,url,headRefName,headRefOid,labels,statusCheckRollup \
+  >"$GH_OUT" 2>"$GH_ERR"; then
+  err "could not list open pull requests on $REPO -- polling cannot continue"
+  while IFS= read -r line; do err "  gh: $line"; done <"$GH_ERR"
+  err "if that is an authentication failure: gh's token on this host is in the login"
+  err "keyring, not ~/.config/gh/hosts.yml, and a user unit running with nobody"
+  err "logged in has no unlocked keyring to read it from."
+  exit 1
+fi
+ALL_JSON="$(cat "$GH_OUT")"
+
+PR_JSON="$(jq -c --arg label "$LABEL" '[.[] | select(.labels | any(.name == $label))]' <<<"$ALL_JSON")"
 
 COUNT="$(jq 'length' <<<"$PR_JSON")"
 
@@ -183,15 +214,33 @@ fi
 # tick, because a pull request opened thirty seconds ago has no successful run
 # for ops/preview.sh to find and that is not a fault to report.
 ROLLUP="$(jq -c '.[0].statusCheckRollup // []' <<<"$PR_JSON")"
-debug "statusCheckRollup for #$NUMBER at $SHA: $ROLLUP"
 
-# A rollup entry is either a check run (status/conclusion/name) or a commit
-# status (state/context). Read defensively rather than by type: a missing
-# `status` reads as finished and a missing `state` as fine, so each kind of
-# entry is judged only by the fields it actually has.
-CHECKS_TOTAL="$(jq 'length' <<<"$ROLLUP")"
-CHECKS_PENDING="$(jq '[.[] | select(((.status // "COMPLETED") != "COMPLETED") or ((.state // "SUCCESS") | IN("PENDING","EXPECTED")))] | length' <<<"$ROLLUP")"
-CHECKS_BAD="$(jq -r '[.[] | select((((.conclusion // "SUCCESS") | IN("SUCCESS","NEUTRAL","SKIPPED")) | not) or ((.state // "SUCCESS") | IN("FAILURE","ERROR"))) | (.name // .context // "check")] | join(", ")' <<<"$ROLLUP")"
+# A rollup entry is either a check run (name/status/conclusion) or a commit
+# status (context/state), and the two are read here without asking which is
+# which: a field the entry does not have is absent, and a field it has but has
+# not filled in yet is the EMPTY STRING, not null. That distinction is the
+# whole reason this normalises first. `.conclusion // "SUCCESS"` looks right
+# and is wrong, because `//` only substitutes for null and false -- an
+# in-progress check run reports `"conclusion": ""`, which sails past the
+# default and then fails the "is it a success" test, marking every running
+# check as failed. Observed on #115's own first tick.
+NORM="$(jq -c '[.[] | {
+    name:       (.name // .context // "check"),
+    status:     (if (.status // "") == "" then "COMPLETED" else .status end),
+    conclusion: (if (.conclusion // "") == "" then null else .conclusion end),
+    state:      (if (.state // "") == "" then null else .state end)
+  }]' <<<"$ROLLUP")"
+debug "checks for #$NUMBER at $SHA: $NORM"
+
+CHECKS_TOTAL="$(jq 'length' <<<"$NORM")"
+CHECKS_PENDING="$(jq '[.[] | select(.status != "COMPLETED" or (.state != null and (.state | IN("PENDING","EXPECTED"))))] | length' <<<"$NORM")"
+# Only entries that have finished can be judged to have failed, so a running
+# check can never be counted here whatever it reports in the meantime.
+CHECKS_BAD="$(jq -r '[.[]
+    | select(.status == "COMPLETED")
+    | select((.conclusion != null and ((.conclusion | IN("SUCCESS","NEUTRAL","SKIPPED")) | not))
+             or (.state != null and (.state | IN("FAILURE","ERROR"))))
+    | .name] | join(", ")' <<<"$NORM")"
 
 if [[ "$CHECKS_TOTAL" -eq 0 ]]; then
   note 6 "pull request #$NUMBER ($BRANCH) at $SHA has reported no checks yet; waiting"
@@ -215,8 +264,23 @@ info "previewing pull request #$NUMBER ($BRANCH) at $SHA"
 # routine state was last announced is over regardless of how this ends.
 rm -f "$NOTE_FILE"
 
+# Output is streamed rather than captured and re-emitted, so a run that takes
+# a minute shows its progress while it is happening rather than all at once
+# when it is over.
+#
+# One caveat, observed rather than assumed: journald occasionally fails to
+# attribute a line to this unit when the process that wrote it exits within a
+# few milliseconds. A stub standing in for a fork refusal was logged twice in
+# identical runs -- once attributed and once not, the unattributed one still
+# present in the unfiltered journal at the same millisecond. The real
+# ops/preview.sh lives for seconds, so this does not bite it, and this
+# script's own lines always come from the long-running parent and are always
+# attributed. The message below says where else to look rather than promising
+# the detail is directly above it.
 if ! "$PREVIEW_SH" "$BRANCH"; then
-  err "ops/preview.sh failed for pull request #$NUMBER ($BRANCH) at $SHA -- see the preceding lines"
+  err "ops/preview.sh failed for pull request #$NUMBER ($BRANCH) at $SHA"
+  err "its own explanation is above; if journald did not attribute it to this unit,"
+  err "it is in \`journalctl --user --since '10 min ago'\` unfiltered"
   err "the preview has NOT been updated; the next tick will try again"
   exit 1
 fi

@@ -263,17 +263,9 @@ fn dispatch_offers_trips(
     example: &BTreeMap<String, String>,
     caps: &regex::Captures<'_>,
 ) -> Result<(), String> {
-    let expected: Vec<String> = resolve(example, &caps[1])?
-        .split(", ")
-        .map(str::to_string)
-        .collect();
+    let expected = resolve(example, &caps[1])?;
     let body = html_body(world)?;
-    let actual = trip_tags_in_order(body);
-    if actual == expected {
-        Ok(())
-    } else {
-        Err(format!("expected trips {expected:?}, got {actual:?}"))
-    }
+    html::listed_in_order(&expected, trip_tags_in_order(body), "trips")
 }
 
 /// Every `.trip-tag` label's text, in document order — what "the pool
@@ -401,18 +393,9 @@ fn dispatch_trip_lists_exactly(
     caps: &regex::Captures<'_>,
 ) -> Result<(), String> {
     let tag = resolve(example, &caps[1])?;
-    let expected: Vec<String> = resolve(example, &caps[2])?
-        .split(", ")
-        .map(str::to_string)
-        .collect();
+    let expected = resolve(example, &caps[2])?;
     let actual = trip_visible_items(world, &tag)?;
-    if actual == expected {
-        Ok(())
-    } else {
-        Err(format!(
-            "expected the trip {tag:?} to list {expected:?}, got {actual:?}"
-        ))
-    }
+    html::listed_in_order(&expected, actual, &format!("the trip {tag:?} to list"))
 }
 
 fn dispatch_trip_lists_n_items(
@@ -472,10 +455,7 @@ fn dispatch_loose_order(
     example: &BTreeMap<String, String>,
     caps: &regex::Captures<'_>,
 ) -> Result<(), String> {
-    let expected: Vec<String> = resolve(example, &caps[1])?
-        .split(", ")
-        .map(str::to_string)
-        .collect();
+    let expected = resolve(example, &caps[1])?;
     let body = html_body(world)?;
     let section = html::between(body, r#"<ul class="loose">"#, "</ul>")?;
     let actual: Vec<String> = section
@@ -487,13 +467,7 @@ fn dispatch_loose_order(
                 .map(|(text, _)| text.trim().to_string())
         })
         .collect();
-    if actual == expected {
-        Ok(())
-    } else {
-        Err(format!(
-            "expected the loose ends in the order {expected:?}, got {actual:?}"
-        ))
-    }
+    html::listed_in_order(&expected, actual, "the loose ends in the order")
 }
 
 /// **Absent, not disabled and not hidden** — the whole page, not a scoped

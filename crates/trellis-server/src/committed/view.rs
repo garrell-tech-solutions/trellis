@@ -25,10 +25,25 @@ pub struct CommittedView {
 
 /// `rows` need not arrive in any particular order --
 /// `scheduler_core::committed_screen::order` establishes chronological order
-/// itself. `zone` is the owner's configured timezone (#110,
-/// `T-timezone-is-a-setting`): both "past" and each row's date cell are
-/// read in it, never UTC.
-pub(super) fn build(rows: Vec<CommittedTaskRow>, now_ms: i64, zone: &str) -> CommittedView {
+/// itself. `zone` is the owner's configured timezone, already resolved
+/// (#110, `T-timezone-is-a-setting`): both "past" and each row's date cell
+/// are read in it, never UTC.
+///
+/// It arrives as a `TimeZone` rather than as its name because resolving a
+/// name can fail, and the layer that read the name is the layer that should
+/// answer for it. Taking a `&str` put two `expect`s inside `scheduler-core`,
+/// resting on a doc comment asserting `settings` had validated the value --
+/// an invariant held across two capabilities by prose, which is what
+/// `T-cross-capability-invariants-need-an-owner` is about, and a panic path
+/// in the one crate meant to be pure and total. Resolved here the core
+/// cannot be handed a zone it cannot use, so there is nothing left to tie:
+/// the shape the deleted `free_time` already used, where `free_intervals`
+/// took a `&TimeZone` and `today_and_zone` did the resolving.
+pub(super) fn build(
+    rows: Vec<CommittedTaskRow>,
+    now_ms: i64,
+    zone: &jiff::tz::TimeZone,
+) -> CommittedView {
     let total = rows.len();
     let tasks = rows
         .into_iter()
@@ -69,6 +84,10 @@ pub(super) fn build(rows: Vec<CommittedTaskRow>, now_ms: i64, zone: &str) -> Com
 mod tests {
     use super::*;
 
+    fn zone(name: &str) -> jiff::tz::TimeZone {
+        scheduler_core::timezone::resolve(name).expect("test zones are real IANA names")
+    }
+
     fn row(text: &str, tag: Option<&str>, deadline: i64, commitment: &str) -> CommittedTaskRow {
         CommittedTaskRow {
             task_id: 1,
@@ -83,7 +102,7 @@ mod tests {
 
     #[test]
     fn an_empty_committed_screen_reports_nothing_dated_and_the_empty_flag() {
-        let view = build(vec![], NOW_MS, "UTC");
+        let view = build(vec![], NOW_MS, &zone("UTC"));
         assert_eq!(view.meta, "nothing dated");
         assert!(view.empty);
     }
@@ -97,7 +116,7 @@ mod tests {
                 row("c", None, 1787922000000, "at"),
             ],
             NOW_MS,
-            "UTC",
+            &zone("UTC"),
         );
         assert_eq!(view.meta, "3 dated");
         assert!(!view.empty);
@@ -108,7 +127,7 @@ mod tests {
         let view = build(
             vec![row("book the dentist", Some("@phone"), 1787646600000, "at")],
             NOW_MS,
-            "UTC",
+            &zone("UTC"),
         );
         assert_eq!(view.rows[0].text, "book the dentist");
         assert_eq!(view.rows[0].context_tag.as_deref(), Some("@phone"));
@@ -121,7 +140,7 @@ mod tests {
         let view = build(
             vec![row("furnace service window", None, 1787922000000, "at")],
             NOW_MS,
-            "UTC",
+            &zone("UTC"),
         );
         assert_eq!(view.rows[0].context_tag, None);
     }
@@ -135,7 +154,7 @@ mod tests {
                 row("Furnace service window", None, 1787922000000, "at"),
             ],
             NOW_MS,
-            "UTC",
+            &zone("UTC"),
         );
         let order: Vec<&str> = view.rows.iter().map(|r| r.text.as_str()).collect();
         assert_eq!(
@@ -153,7 +172,7 @@ mod tests {
         let view = build(
             vec![row("File the tax return", None, 1787850000000, "by")],
             NOW_MS,
-            "UTC",
+            &zone("UTC"),
         );
         assert_eq!(view.rows[0].date_cell, "BY THU");
     }
@@ -162,7 +181,7 @@ mod tests {
     fn a_rows_id_is_its_tasks_id() {
         let mut with_id = row("book the dentist", None, 1787646600000, "at");
         with_id.task_id = 42;
-        let view = build(vec![with_id], NOW_MS, "UTC");
+        let view = build(vec![with_id], NOW_MS, &zone("UTC"));
         assert_eq!(view.rows[0].id, 42);
     }
 
@@ -173,7 +192,7 @@ mod tests {
         let view = build(
             vec![row("book the dentist", None, 1787646600000, "at")],
             NOW_MS,
-            "America/New_York",
+            &zone("America/New_York"),
         );
         assert_eq!(view.rows[0].date_cell, "TUE 4:30");
     }

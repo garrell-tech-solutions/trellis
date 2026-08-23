@@ -117,6 +117,31 @@ pub fn details_section_after<'a>(body: &'a str, start_tag: &str) -> Result<&'a s
     }
 }
 
+/// A comma-separated example value, compared against what a screen actually
+/// listed, in order.
+///
+/// Six step handlers across four screens had written this out: split the
+/// example on `", "`, collect, compare to a `Vec<String>` the caller
+/// extracted from the body, and report both sides on a mismatch. It is the
+/// same move `html`, `payloads` and `app_client` already are -- when the
+/// second caller appears the shared thing gets its own home -- applied to
+/// the one assertion every "lists exactly" step makes.
+///
+/// `what` names the thing being listed, so the failure still reads as that
+/// screen's own sentence rather than a generic one.
+pub(super) fn listed_in_order(
+    expected_csv: &str,
+    actual: Vec<String>,
+    what: &str,
+) -> Result<(), String> {
+    let expected: Vec<String> = expected_csv.split(", ").map(str::to_string).collect();
+    if actual == expected {
+        Ok(())
+    } else {
+        Err(format!("expected {what} {expected:?}, got {actual:?}"))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

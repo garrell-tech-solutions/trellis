@@ -39,43 +39,10 @@ qa_get_committed() {
   curl -s "http://$ADDR/committed"
 }
 
-qa_loose_section() {
-  qa_between "$1" '<ul class="loose">' '</ul>'
-}
-
-# The <li class="loose-item">...</li> block containing needle, within the
-# loose section already extracted by qa_loose_section.
-qa_loose_row_containing() {
-  local loose_section="$1" needle="$2"
-  python3 -c '
-import re, sys
-section, needle = sys.argv[1], sys.argv[2]
-for m in re.finditer(r"<li class=\"loose-item\">(.*?)</li>", section, re.S):
-    if needle in m.group(1):
-        print(m.group(1))
-        sys.exit()
-' "$loose_section" "$needle"
-}
-
 qa_task_id_for_text() {
   local text="$1" escaped
   escaped="${text//\'/\'\'}"
   sqlite3 "$DB_PATH" "SELECT tasks.id FROM tasks JOIN captures ON captures.id = tasks.capture_id WHERE captures.raw_text = '$escaped' ORDER BY tasks.id DESC LIMIT 1;"
-}
-
-qa_pool_task() {
-  local raw_text="$1" tag="${2:-}" capture_id body
-  capture_id="$(qa_submit_capture "$raw_text")"
-  if [[ -n "$tag" ]]; then
-    body="$(python3 -c 'import json,sys; print(json.dumps({"kind":"pool","context_tag":sys.argv[1]}))' "$tag")"
-  else
-    body='{"kind":"pool"}'
-  fi
-  qa_triage "$capture_id" "$body"
-  if [[ "$STATUS" != "201" ]]; then
-    echo "FAIL: setup -- triaging \"$raw_text\" as pool returned status $STATUS" >&2
-    FAILURES=1
-  fi
 }
 
 qa_committed_task() {

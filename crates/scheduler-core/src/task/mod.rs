@@ -218,11 +218,22 @@ impl TaskKind {
     /// both still reports one `MissingField(Deadline)` -- never two, and
     /// always in the same position among the four required fields.
     fn require_deadline_input(fields: &TriageFields) -> Result<DeadlineInput, TriageRejection> {
-        if let Some(deadline) = &fields.deadline {
-            if !deadline.is_empty() {
-                return Ok(DeadlineInput::Instant(deadline.clone()));
-            }
+        match Self::instant_deadline_input(fields) {
+            Some(input) => Ok(input),
+            None => Self::local_date_deadline_input(fields),
         }
+    }
+
+    /// JSON's pre-resolved instant, when present and non-empty.
+    fn instant_deadline_input(fields: &TriageFields) -> Option<DeadlineInput> {
+        let deadline = fields.deadline.as_ref()?;
+        (!deadline.is_empty()).then(|| DeadlineInput::Instant(deadline.clone()))
+    }
+
+    /// The page transport's alternative: `deadline_date` paired with the
+    /// `timezone` an adapter fetched, since the core cannot
+    /// (`T-core-owns-validation-order`).
+    fn local_date_deadline_input(fields: &TriageFields) -> Result<DeadlineInput, TriageRejection> {
         match &fields.deadline_date {
             Some(date) if !date.is_empty() => {
                 let zone = require(Field::Deadline, &fields.timezone)?;
@@ -557,6 +568,16 @@ mod tests {
     fn neither_deadline_nor_deadline_date_is_rejected_as_missing_deadline() {
         let mut fields = committed_fields_via_local_date();
         fields.deadline_date = None;
+        assert_eq!(
+            TaskKind::from_fields(&fields),
+            Err(TriageRejection::MissingField(Field::Deadline))
+        );
+    }
+
+    #[test]
+    fn an_empty_deadline_date_is_rejected_the_same_as_absent() {
+        let mut fields = committed_fields_via_local_date();
+        fields.deadline_date = Some(String::new());
         assert_eq!(
             TaskKind::from_fields(&fields),
             Err(TriageRejection::MissingField(Field::Deadline))

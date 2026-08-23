@@ -62,13 +62,6 @@ impl DeadlineType {
             _ => None,
         }
     }
-
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Hard => "hard",
-            Self::Soft => "soft",
-        }
-    }
 }
 
 /// `commitment`'s closed domain (`D-committed-is-at-or-by`, #94): an **at**

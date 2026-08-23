@@ -474,6 +474,24 @@ mod tests {
         .unwrap()
     }
 
+    /// Submits `fields` through the page transport and asserts the standard
+    /// "accepted, deadline resolved" contract: 201, and the stored
+    /// `tasks.deadline` is exactly `expected_ms`.
+    async fn assert_stored_deadline(
+        pool: &SqlitePool,
+        capture_id: i64,
+        fields: &[(&str, &str)],
+        expected_ms: i64,
+    ) {
+        let response = page_triage_response(pool, capture_id, fields).await;
+        assert_eq!(response.status(), StatusCode::CREATED);
+        let deadline: Option<i64> = sqlx::query_scalar("SELECT deadline FROM tasks")
+            .fetch_one(pool)
+            .await
+            .unwrap();
+        assert_eq!(deadline, Some(expected_ms));
+    }
+
     async fn response_html(response: axum::response::Response) -> String {
         let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
             .await
@@ -635,7 +653,7 @@ mod tests {
             .unwrap();
         let capture_id = insert_untriaged_capture(&pool, "book the dentist").await;
 
-        let response = page_triage_response(
+        assert_stored_deadline(
             &pool,
             capture_id,
             &[
@@ -646,16 +664,10 @@ mod tests {
                 ("priority", "P1"),
                 ("estimated_minutes", "30"),
             ],
+            // 2026-08-25T08:30 America/New_York (EDT, UTC-4).
+            1787661000000,
         )
         .await;
-
-        assert_eq!(response.status(), StatusCode::CREATED);
-        let deadline: Option<i64> = sqlx::query_scalar("SELECT deadline FROM tasks")
-            .fetch_one(&pool)
-            .await
-            .unwrap();
-        // 2026-08-25T08:30 America/New_York (EDT, UTC-4).
-        assert_eq!(deadline, Some(1787661000000));
     }
 
     /// A `by` submitted through the page sends only `deadline_date`, and
@@ -670,7 +682,7 @@ mod tests {
             .unwrap();
         let capture_id = insert_untriaged_capture(&pool, "file the tax return").await;
 
-        let response = page_triage_response(
+        assert_stored_deadline(
             &pool,
             capture_id,
             &[
@@ -680,16 +692,10 @@ mod tests {
                 ("priority", "P1"),
                 ("estimated_minutes", "30"),
             ],
+            // End of 2026-08-27 in America/New_York.
+            1787889599999,
         )
         .await;
-
-        assert_eq!(response.status(), StatusCode::CREATED);
-        let deadline: Option<i64> = sqlx::query_scalar("SELECT deadline FROM tasks")
-            .fetch_one(&pool)
-            .await
-            .unwrap();
-        // End of 2026-08-27 in America/New_York.
-        assert_eq!(deadline, Some(1787889599999));
     }
 
     #[tokio::test]

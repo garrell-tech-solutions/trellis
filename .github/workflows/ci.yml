@@ -274,13 +274,32 @@ jobs:
       # letting the runner discard it, so what gets installed is
       # byte-identical to what this gate proved green.
       #
-      # trunk only, and only on push: a PR's build is unmerged code, and
-      # shipping it to the one real host this project runs on would make
-      # "green on trunk" stop meaning what ops/update.sh assumes it means.
-      # pull_request runs of this same job still build and test the binary --
-      # they just do not upload it.
-      - name: Upload release binary (trunk only)
-        if: ${{ github.ref == 'refs/heads/trunk' && github.event_name == 'push' }}
+      # Two conditions, not one, since issue #102 widened this from "trunk
+      # only":
+      #
+      #   push to trunk    unchanged from #98. ops/update.sh's whole premise
+      #                     is that "green on trunk" means safe to run on the
+      #                     one real host this project's live instance runs
+      #                     on, and that premise still needs push+trunk
+      #                     specifically -- a PR run's `github.ref` is a
+      #                     merge ref, not trunk, so this arm alone was
+      #                     always trunk-exclusive by construction.
+      #
+      #   pull_request      new for #102. ops/preview.sh fetches a branch's
+      #                     own most recent successful run so a branch can be
+      #                     looked at on the phone before it merges, and
+      #                     ci.yml's push trigger only fires for `trunk` (see
+      #                     the `on:` block above) -- a feature branch is
+      #                     built at all only via its pull_request run, so
+      #                     that is the one this arm has to allow. The
+      #                     artifact this uploads is still just the build two
+      #                     steps up, still proven static, still never
+      #                     installed anywhere but the SEPARATE preview unit
+      #                     ops/preview.sh manages -- it never reaches
+      #                     trellis.service, which only ever runs what
+      #                     ops/update.sh fetched from trunk.
+      - name: Upload release binary
+        if: ${{ (github.event_name == 'push' && github.ref == 'refs/heads/trunk') || github.event_name == 'pull_request' }}
         uses: actions/upload-artifact@v4
         with:
           name: trellis-linux-musl

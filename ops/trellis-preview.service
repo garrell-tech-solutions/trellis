@@ -1,0 +1,41 @@
+# Trellis preview -- a second, disposable instance for looking at one
+# branch before it merges (issue #102), run the same way trellis.service is
+# (ops/trellis.service, issue #98): a systemd --user unit, kept alive with no
+# one logged in by the `loginctl enable-linger` install.sh already ran on
+# this host.
+#
+# Everything here is deliberately a second copy of everything trellis.service
+# has, never a shared one:
+#
+#   binary    %h/.local/bin/trellis-preview   -- never %h/.local/bin/trellis.
+#             ops/preview.sh installs branch builds only to this path, so a
+#             preview can never become what `systemctl --user restart
+#             trellis.service` restarts.
+#   database  %h/.local/share/trellis/preview.db -- never trellis.db. Wiped
+#             and re-migrated by ops/preview.sh on every reseed
+#             (T-sqlite-sqlx: WAL mode, so the unit is stopped first --
+#             see ops/preview.sh for why).
+#   port      127.0.0.1:8081 -- never 8080.
+#
+# %h expands to the invoking user's home directory (systemd specifier), same
+# as trellis.service, so this file is portable across the account without
+# hardcoding a path.
+
+[Unit]
+Description=Trellis preview (branch under review, disposable)
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/trellis-preview serve --db %h/.local/share/trellis/preview.db --addr 127.0.0.1:8081
+Restart=on-failure
+RestartSec=5
+# Reachable only through `tailscale serve --bg --https=8443 8081`'s reverse
+# proxy on 127.0.0.1 (ops/preview.sh runs this) -- never `tailscale funnel`.
+# Same R-multi-tenancy boundary trellis.service relies on: Trellis has no
+# authentication of its own, so the tailnet is the entire security boundary.
+# A preview reachable outside the tailnet is not a smaller version of that
+# boundary, it is the absence of it.
+
+[Install]
+WantedBy=default.target

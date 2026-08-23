@@ -261,6 +261,68 @@ jobs:
         if: ${{ !cancelled() }}
         run: ./scripts/qa/scheduler_core_purity.sh
 
+      # issue #101 / qa/phone_layout.md. The only check in this repo that can
+      # observe a computed style, a scroll height or a rendered box: it drives
+      # a real headless Chrome at a 390x844 phone viewport against a running
+      # server and asserts geometry. Every other gate in this workflow, and
+      # every Gherkin scenario in `quality`, asserts over HTTP against markup,
+      # and none of them could see the bug this closes -- it shipped in #92,
+      # #94 and #96, was named in all three pull-request bodies, and CI was
+      # green through every one of them.
+      #
+      # In `gate` rather than a job of its own, following the two
+      # scripts/qa/*.sh this job already invokes by name. The script builds
+      # the debug binary, which this job has already built and cached, and the
+      # browser work itself is seconds; a separate job would pay for a second
+      # checkout, a second rustup install and a second cargo build to run one
+      # script.
+      #
+      # The three setup steps below exist so the dependency is declared rather
+      # than hoped for. The script itself fails closed when node or
+      # playwright-core is missing -- its own header says so -- and this
+      # wiring must not undo that: no continue-on-error, no `if:`, nothing
+      # that turns an absent browser into a silent pass. A check that skips
+      # when its own dependency is missing reproduces the exact blind spot it
+      # exists to close, one layer down.
+      - name: Node for the phone-layout browser check
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      # Globally, not into the checkout: scripts/qa/phone_layout.sh resolves
+      # the module through `npm root -g` and this repo has no package.json to
+      # install into. playwright-core rather than playwright on purpose -- it
+      # is the driver without the browser bundle it would otherwise download,
+      # and the step below points it at the runner's own Chrome instead.
+      - name: Install playwright-core
+        run: |
+          npm install -g playwright-core
+          node -e "console.log('playwright-core', require('playwright-core/package.json').version)"
+
+      # ubuntu-latest is widely believed to preinstall Google Chrome. This
+      # step does not take that on faith: it resolves an actual binary and
+      # fails the job with a readable error if it finds none, rather than
+      # letting the check die inside playwright with a launch failure about a
+      # path nobody chose. The result is exported as PHONE_LAYOUT_CHROME,
+      # which is the override scripts/qa/phone_layout.cjs already reads (its
+      # default is a bare /usr/bin/google-chrome).
+      - name: Locate Chrome for the phone-layout check
+        run: |
+          for candidate in google-chrome google-chrome-stable chromium chromium-browser; do
+            if chrome_path="$(command -v "$candidate")"; then
+              echo "PHONE_LAYOUT_CHROME=$chrome_path" >> "$GITHUB_ENV"
+              echo "using $candidate at $chrome_path"
+              "$chrome_path" --version \
+                || echo "::warning::$candidate did not report a version"
+              exit 0
+            fi
+          done
+          echo "::error::no Chrome or Chromium binary on PATH -- the phone-layout check cannot run, and it is not allowed to skip"
+          exit 1
+
+      - name: Phone layout (real browser, 390x844)
+        run: ./scripts/qa/phone_layout.sh
+
       # Runs `cargo build --release --target x86_64-unknown-linux-musl` and
       # then asserts via ldd that the produced binary is actually static --
       # a release build that exits 0 but links dynamically is not a pass.

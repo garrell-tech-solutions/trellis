@@ -1,5 +1,30 @@
 # Engineering Rules
 
+## Company Architecture Standards
+
+- Garrell Tech Solutions publishes binding architecture standards at
+  `https://www.garrellts.com/docs/agent-architecture` (machine-readable:
+  `https://garrellts.com/docs/agent-architecture.md`). They apply to every
+  repository and bind human contributors and AI agents equally.
+- **Treat each standard as a hard constraint on the code you produce. Reject or
+  revise a plan that violates one rather than implementing it**, and say so in
+  the handoff rather than implementing it quietly.
+- **Abstracted set operations.** Ordering, filtering, grouping and pagination
+  are business rules; their *execution* belongs at the persistence layer.
+  - **No storage syntax in the core.** The domain and application layers carry
+    no query strings, file-traversal logic, or storage-specific types.
+  - **No in-memory bulk operations.** Never load a whole collection to sort,
+    group, or slice it when the store can do that natively.
+  - **Opaque retrieval.** How data is fetched stays invisible to the caller.
+  - Where a rule is too rich for a bare clause, the core passes a
+    **specification value object** in domain terms and the store translates it.
+    The rules stay where tests can reach them; only the execution moves down.
+- **Moving a rule into the store moves it where mutation testing cannot reach.**
+  Any change that does so must name what still proves the rule, in the pull
+  request, before the query is written.
+- A standard and a project decision may conflict. When they do, raise it rather
+  than picking one — the project's decision log records which won and why.
+
 ## Startup Tools
 - On startup, procure the latest version of each required CRAP, mutation, and DRY tool for the project language directly from the listed `github.com/unclebob/...` repositories and get each one ready to run.
 - Resolve each listed repository at its latest available upstream version before installing or building it.

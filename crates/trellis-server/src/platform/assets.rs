@@ -18,6 +18,10 @@ const HTMX_JS: &str = include_str!("../../static/htmx.min.js");
 const TRELLIS_CSS: &str = include_str!("../../static/trellis.css");
 const SPACE_GROTESK_WOFF2: &[u8] =
     include_bytes!("../../static/fonts/space-grotesk-variable.woff2");
+const MANIFEST: &str = include_str!("../../static/manifest.webmanifest");
+const ICON_192: &[u8] = include_bytes!("../../static/icons/icon-192.png");
+const ICON_512: &[u8] = include_bytes!("../../static/icons/icon-512.png");
+const ICON_MASKABLE_512: &[u8] = include_bytes!("../../static/icons/icon-maskable-512.png");
 
 /// A year, which is what the fingerprint-free URLs here can honestly claim:
 /// the font is a versioned file that never changes, and the stylesheet ships
@@ -36,6 +40,38 @@ pub async fn trellis_css() -> impl IntoResponse {
         [(header::CONTENT_TYPE, "text/css; charset=utf-8")],
         TRELLIS_CSS,
     )
+}
+
+/// The web app manifest (#112, `installable-manifest-is-linked-01`): what
+/// makes an installed window standalone rather than a bookmark, served the
+/// same way `trellis_css` is -- a file checked into the repo and embedded at
+/// compile time, not built up in code.
+/// The embedded manifest source, for the one test that must read the very
+/// bytes this server serves rather than a copy of them
+/// (`app::every_url_the_manifest_names_is_a_real_route`). Test-only: nothing
+/// in a shipped binary needs the source, only the response built from it.
+#[cfg(test)]
+pub(crate) fn manifest_source() -> &'static str {
+    MANIFEST
+}
+
+pub async fn manifest() -> impl IntoResponse {
+    (
+        [(header::CONTENT_TYPE, "application/manifest+json")],
+        MANIFEST,
+    )
+}
+
+pub async fn icon_192() -> impl IntoResponse {
+    ([(header::CONTENT_TYPE, "image/png")], ICON_192)
+}
+
+pub async fn icon_512() -> impl IntoResponse {
+    ([(header::CONTENT_TYPE, "image/png")], ICON_512)
+}
+
+pub async fn icon_maskable_512() -> impl IntoResponse {
+    ([(header::CONTENT_TYPE, "image/png")], ICON_MASKABLE_512)
 }
 
 pub async fn space_grotesk_woff2() -> impl IntoResponse {
@@ -97,6 +133,78 @@ mod tests {
             body.contains("url('/static/fonts/space-grotesk-variable.woff2')"),
             "expected the stylesheet to name the font's own route"
         );
+    }
+
+    #[tokio::test]
+    async fn manifest_serves_as_the_manifest_content_type() {
+        let response = manifest().await.into_response();
+        assert_eq!(
+            response.headers().get(header::CONTENT_TYPE).unwrap(),
+            "application/manifest+json"
+        );
+    }
+
+    #[tokio::test]
+    async fn manifest_parses_as_json_and_carries_the_required_members() {
+        let response = manifest().await.into_response();
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let parsed: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(parsed["name"], "Trellis");
+        assert_eq!(parsed["short_name"], "Trellis");
+        assert_eq!(parsed["start_url"], "/");
+        assert_eq!(parsed["display"], "standalone");
+    }
+
+    #[tokio::test]
+    async fn manifest_declares_192_and_512_any_icons_and_one_maskable_icon() {
+        let response = manifest().await.into_response();
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let parsed: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        let icons = parsed["icons"].as_array().unwrap();
+
+        assert!(icons
+            .iter()
+            .any(|i| i["sizes"] == "192x192" && i["type"] == "image/png"));
+        assert!(icons
+            .iter()
+            .any(|i| i["sizes"] == "512x512" && i["type"] == "image/png"));
+        assert!(icons.iter().any(|i| i["purpose"]
+            .as_str()
+            .is_some_and(|p| p.split(' ').any(|word| word == "maskable"))
+            && i["type"] == "image/png"));
+    }
+
+    #[tokio::test]
+    async fn icon_192_serves_a_png_at_the_declared_size() {
+        let response = icon_192().await.into_response();
+        assert_eq!(
+            response.headers().get(header::CONTENT_TYPE).unwrap(),
+            "image/png"
+        );
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        assert!(body.starts_with(&[0x89, b'P', b'N', b'G']));
+    }
+
+    #[tokio::test]
+    async fn icon_512_serves_a_png() {
+        let response = icon_512().await.into_response();
+        assert_eq!(
+            response.headers().get(header::CONTENT_TYPE).unwrap(),
+            "image/png"
+        );
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        assert!(body.starts_with(&[0x89, b'P', b'N', b'G']));
+    }
+
+    #[tokio::test]
+    async fn icon_maskable_512_serves_a_png() {
+        let response = icon_maskable_512().await.into_response();
+        assert_eq!(
+            response.headers().get(header::CONTENT_TYPE).unwrap(),
+            "image/png"
+        );
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        assert!(body.starts_with(&[0x89, b'P', b'N', b'G']));
     }
 
     #[tokio::test]

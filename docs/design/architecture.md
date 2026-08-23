@@ -241,6 +241,25 @@ their own fragments, because only they know what "done" removed a row from.
 > step function-by-function (`pub(super)` on the writes that matter).
 > **`mark_done` is the shape to copy, not the exception.**
 
+**The route table is stated three times**, and each restatement needs its
+own tie. `app::build_app` is the table; `platform/nav.rs` is the header's
+copy of it; and since `#112` the web app manifest is a third, naming a
+`start_url` and three icon `src`s. Each has a test that **walks** rather
+than restates —
+`app::every_header_link_reaches_the_page_it_names` and
+`app::every_url_the_manifest_names_is_a_real_route` — so a fourth tab or a
+fourth icon is covered by existing rather than by somebody remembering.
+
+> The manifest's disagreement is the hardest to see: a wrong `start_url` or
+> icon `src` costs nothing until the app is installed on a phone and the
+> home-screen icon is tapped. What existed covered what somebody remembered
+> — `assets.rs` compared `start_url` to the literal `"/"`, which agrees with
+> itself however wrong both are, and `installable.feature` fetches the icon
+> sizes its own Examples table lists. Seen to fail three ways
+> (`T-a-check-must-be-seen-to-fail`): a manifest naming a route that does
+> not exist, a route renamed with the manifest left alone, and a
+> `start_url` pointing nowhere.
+
 **`platform/nav.rs` is back**, deleted by #88 and rebuilt for `#92`, now
 three pages of the design's four: `ALL` names only what `app::build_app`
 can actually route to, because a dead link is worse than no link. The guard

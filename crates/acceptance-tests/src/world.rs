@@ -27,6 +27,19 @@ pub struct World {
     pub cargo_tree_output: Option<String>,
     pub release_build_ok: Option<bool>,
     pub release_binaries: Option<Vec<PathBuf>>,
+
+    /// The manifest `<link>`'s own `href`, and the manifest body it served
+    /// (#112) -- kept apart from `last_html_body` so a page view and a
+    /// manifest fetch in the same scenario cannot clobber each other.
+    pub last_manifest_href: Option<String>,
+    pub last_manifest_body: Option<String>,
+    /// The `src` of whichever icon a "the manifest declares an icon ..."
+    /// step most recently matched, for the "that icon is served as ..."
+    /// step immediately after it to fetch.
+    pub last_icon_src: Option<String>,
+    /// The theme colour a "the page declares a theme colour" step read off
+    /// the current page, for a later step to compare against the manifest's.
+    pub last_theme_colour: Option<String>,
 }
 
 impl World {

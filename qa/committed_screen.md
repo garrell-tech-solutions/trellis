@@ -74,9 +74,11 @@ rather than filing it twice.
   three jobs — a time, a BY, and a past marker. **Check it at phone width**;
   `BY THU 17:00` is the longest thing it must hold and it is the one most
   likely to wrap or clip.
-- **This is the third phone-first screen shipped without a phone.** There is
-  no browser automation in this stack and no device. **Say so in the report
-  rather than implying the layout was seen.**
+- **This screen shipped without a phone**, and #101 is what that produced.
+  `qa/phone_layout.md` now drives a real browser at 390×844 and asserts the
+  geometry on this screen among others — **so the date cell's width is still
+  unchecked, but the scroll and the tab bar are not.** Report anything the
+  automated check cannot see, and do not claim what it does not assert.
 
 ## Setup — repeat below
 

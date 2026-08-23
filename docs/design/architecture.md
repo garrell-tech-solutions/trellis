@@ -98,6 +98,49 @@ an independent dependency set — not because a layer has a name. That closes
 #24. Renaming the crates that exist is deliberately not part of it:
 `scheduler-core` is named twice in the constitution, which no agent may edit.
 
+## How it runs — built (`#98`, `#101`)
+
+**Until 2026-08-22 this section could not have been written**, and that was
+the problem: the server was a debug binary launched by hand on `127.0.0.1`,
+the newest release build on disk was 179 commits old, and nothing restarted
+it or survived a reboot. `#83` closed "Capture works from a phone, anywhere"
+on a viewport and a manifest — a stylesheet, with nothing on the network to
+load it.
+
+```
+ops/trellis.service   systemd --user unit; ExecStart trellis serve --addr 127.0.0.1:8080
+ops/install.sh        first install; runs loginctl enable-linger
+ops/update.sh         fetches CI's release artifact; no local compile
+ops/backup.sh         the SQLite file
+```
+
+**A `--user` unit with linger, not a system unit.** The host defaults to
+`Linger=no`, so a user unit would die when the desktop session ended —
+silently, with nothing connecting cause to effect. `enable-linger` keeps it
+running from boot with nobody logged in, and costs root exactly once instead
+of on every future edit to the unit file.
+
+**The binary is CI's artifact, not a local build.** `ci.yml`'s gate job
+already builds `--release --target x86_64-unknown-linux-musl` and asserts it
+is static; `update.sh` fetches that exact artifact from the last green run
+on `trunk`. So the running binary is byte-identical to the one CI proved,
+and no musl release build competes with a mutation swarm for CPU on the same
+box.
+
+**Reachable over the tailnet, still bound to loopback.** `tailscale serve`
+reverse-proxies to `127.0.0.1:8080`; the unit binds nothing wider.
+`R-multi-tenancy` holds — single user, local only — and being reachable from
+a phone does not weaken it.
+
+> **Two things already recorded here stopped being theoretical the day this
+> landed.** The 50ms capture budget is now measured against a real server
+> over a network rather than a loopback socket (`T-latency-is-a-qa-assertion`
+> put that assertion in the QA suite, which is where it can be measured
+> honestly). And the committed screen's UTC date cell, filed as a gap under
+> `#94`, is now something the owner can *see* — a weekday and an hour they
+> never typed — rather than a latent disagreement between a comment and a
+> settled decision.
+
 ## Two things are called "layers". They are unrelated.
 
 ### Domain layers — specified (`T-fact-plan-line`)

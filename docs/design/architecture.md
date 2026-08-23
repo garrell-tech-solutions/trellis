@@ -570,8 +570,25 @@ than silently becoming an *at*.
 > named after a screen. Recorded so the third tab's author chooses rather
 > than copies whichever they read last.
 
-> **GAP — the date cell is always UTC, and the owner's zone is data nothing
-> reads.** `date_cell` resolves the deadline against `TimeZone::UTC` on a
+> **CLOSED at `#110`.** The date cell reads the owner's zone, and
+> `settings::current_timezone` is a front door again — the second capability
+> to need it (`triage`, converting a page-submitted local date to an
+> instant) is what earned it back. The zone reaches
+> `committed_screen::order` **already resolved**, as a `jiff::tz::TimeZone`
+> rather than a name: `#110` first passed the name and resolved it inside
+> the core behind two `expect`s, which put a panic path in the crate that is
+> meant to be pure and total, and rested it on a doc comment asserting
+> `settings` had validated the value — an invariant held across two
+> capabilities by prose (`T-cross-capability-invariants-need-an-owner`).
+> Resolving in `committed::body`, where the name is read, makes it
+> structural: the core cannot be handed a zone it cannot use, so there is
+> nothing left to tie. It is the shape the deleted `free_time` already had,
+> where `free_intervals` took a `&TimeZone` and `today_and_zone` resolved.
+>
+> The original gap, kept because it is why the fix exists:
+>
+> > **The date cell was always UTC, and the owner's zone was data nothing
+> > read.** `date_cell` resolves the deadline against `TimeZone::UTC` on a
 > comment saying the product "has no per-user timezone applied to display
 > yet". That is true of the code and contradicts `T-timezone-is-a-setting`,
 > which settled the owner's zone as a stored row they edit from the running
@@ -1295,6 +1312,6 @@ schemas are still there. A revival inherits the gap along with the tables.
 | ~~Per-life-area capacity vs `allowed_windows`~~ | ~~M2~~ | **closed** — `T-capacity-two-axes` + `D-life-area-owns-its-time`, #6 |
 | `Block::missed` unreachable under silence-means-done | M6 | #4 — the `block` table survives #88; nothing writes it |
 | `ScheduleTask` needs `life_area_id` and `deadline_type`; triage writes `NULL` for both | M3 revival | #88 · #94 — needs a decision, not a re-attachment |
-| The committed screen's date cell is always UTC; `T-timezone-is-a-setting` says the zone is stored data | correct on a fresh database, wrong once the zone is set | #94 · #85 (which brings the control back) |
+| ~~The committed screen's date cell is always UTC~~ | ~~wrong once the zone is set~~ | **closed** — `#110` reads the owner's zone; `settings::current_timezone` is a front door again |
 | U3 — backward-pass input | M3 | #7 · ~~U2~~ `T-hard-refuses-soft-slips` · ~~U4~~ `T-blocks-do-not-cross-guardrail-seams` |
 | ~~Crate layout ratification~~ | ~~nothing; cost grows~~ | **closed** — `T-package-by-business-domain`, #44 |

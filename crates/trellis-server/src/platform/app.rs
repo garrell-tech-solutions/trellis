@@ -20,7 +20,9 @@ use crate::capture::http::create_capture;
 use crate::committed::http::{mark_committed_task_done, show_committed};
 use crate::dismiss::http::dismiss_capture;
 use crate::inbox::http::show_inbox;
-use crate::platform::assets::{htmx_js, space_grotesk_woff2, trellis_css};
+use crate::platform::assets::{
+    htmx_js, icon_192, icon_512, icon_maskable_512, manifest, space_grotesk_woff2, trellis_css,
+};
 use crate::platform::clock::Clock;
 use crate::pool::http::{mark_pool_task_done, show_pool};
 use crate::settings::http::set_timezone;
@@ -55,6 +57,13 @@ pub fn build_app(pool: SqlitePool, clock: Clock) -> Router {
         .route(
             "/static/fonts/space-grotesk-variable.woff2",
             get(space_grotesk_woff2),
+        )
+        .route("/manifest.webmanifest", get(manifest))
+        .route("/static/icons/icon-192.png", get(icon_192))
+        .route("/static/icons/icon-512.png", get(icon_512))
+        .route(
+            "/static/icons/icon-maskable-512.png",
+            get(icon_maskable_512),
         )
         .route("/captures", post(create_capture))
         .route("/captures/{id}/triage", post(create_triage))

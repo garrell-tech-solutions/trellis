@@ -141,6 +141,42 @@ a phone does not weaken it.
 > never typed — rather than a latent disagreement between a comment and a
 > settled decision.
 
+## What is verified, and by what — built
+
+Five tiers, and the useful column is the last one.
+
+| Tier | Command | Gated by CI |
+|---|---|---|
+| Unit | `cargo test --workspace` | yes (`gate`) |
+| Property | `cargo test --workspace -- --include-ignored` | **yes, since `#101`** |
+| Acceptance (Gherkin) | `scripts/acceptance/run.sh` | yes (`quality`) |
+| Analyzers | coverage · CRAP · complexity baseline · DRY | yes (`quality`) |
+| QA suite | `scripts/qa/run.sh` | **no — two of seventeen** |
+| Mutation | `scripts/analyzers/mutation.sh` | no — the hardener's pass |
+
+**Property tests were skipped by every CI run until `#101`.** All 37 are
+`#[ignore]`d, deliberately: it keeps `cargo test` fast and stops mutation and
+coverage runs paying for 1024 cases per property. The cost was that
+`cargo test --workspace` skipped them and still printed `ok` — including the
+invariant properties `#11`'s strongest acceptance criterion names by number.
+The `Test` step's own comment had already noticed this shape for the
+acceptance suite ("a strict subset of what a reader assumes it ran") and the
+same sentence was true one tier down. Now a step runs them; 38s warm.
+
+> **The QA suite is the tier CI does not gate.** `ci.yml` names
+> `scheduler_core_purity.sh` and `release_binary.sh` and does not glob the
+> directory, so fifteen procedures — including `phone_layout`, the first
+> real-browser check in this project (`#101`: playwright-core driving Chrome
+> headless at 390×844, verified to fail when the CSS bug is reverted and to
+> fail closed when Chrome is missing) — run locally and gate nothing.
+>
+> **Stated rather than fixed here, and QA stated it first**, in the commit
+> that added the check: CI ownership sits outside that role. It sits outside
+> this one too, for the QA suite specifically (the constitution puts the QA
+> suite off this role's ledger entirely). Recorded so it is a decision
+> somebody makes rather than a thing nobody looks at — which is exactly how
+> `#101` shipped three times unseen.
+
 ## Two things are called "layers". They are unrelated.
 
 ### Domain layers — specified (`T-fact-plan-line`)

@@ -253,6 +253,26 @@ jobs:
       - name: Test
         run: cargo test --workspace
 
+      # The step above is exactly what its own comment says: a strict subset.
+      # The other half of that subset is the property tests. Every one of them
+      # is `#[ignore]`d by project convention -- so that a normal `cargo test`
+      # stays fast and so mutation and coverage runs do not pay for 1024 cases
+      # per property -- which means `cargo test --workspace` skips 37 tests and
+      # still prints `ok`.
+      #
+      # Among them are the invariant properties #11's strongest acceptance
+      # criterion names by number ("Invariants 1-5 hold under proptest, >= 1000
+      # cases"), the interval algebra M4's calendar busy will inherit, and the
+      # test tying pool's plain-equality grouping to capture's canonicalisation
+      # (T-cross-capability-invariants-need-an-owner). Until this step existed
+      # none of them ran unless an agent remembered a flag, which is this
+      # project's own recurring failure -- a gate nothing runs is a comment.
+      #
+      # It belongs in `gate` rather than `quality`: 38s warm, measured, against
+      # the twenty minutes of analyzers `quality` carries.
+      - name: Property tests (the `#[ignore]`d half of the suite)
+        run: cargo test --workspace -- --include-ignored
+
       # decisions.md T-core-no-tokio / issue #8 acceptance criterion 3:
       # scheduler-core must not depend on tokio or sqlx. Release gate for
       # every milestone from M0 onward. Runs even when an earlier step failed,

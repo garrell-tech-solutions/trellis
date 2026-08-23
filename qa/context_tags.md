@@ -28,9 +28,10 @@ mis-files one item. Same product, opposite rules, for a reason.
 The control offers **the whole set of prior tags**, and the browser narrows
 it as the owner types. These procedures assert **what the server sends** —
 every tag used before, exactly once — and **cannot** assert prefix narrowing,
-which is the browser's behaviour. **There is no browser automation in this
-stack; report prefix narrowing as unverified rather than implying it was
-checked.**
+which is the browser's behaviour. **Prefix narrowing is still unverified.** `qa/phone_layout.md` added
+browser automation in #101, but it asserts page *geometry* — it does not
+drive typing, and a `datalist`'s narrowing is the browser's own behaviour.
+Report it as unverified rather than assuming the new check covers it.
 
 ## The 50 ms budget's subject must not move
 

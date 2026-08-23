@@ -297,7 +297,15 @@ jobs:
       - name: Install playwright-core
         run: |
           npm install -g playwright-core
-          node -e "console.log('playwright-core', require('playwright-core/package.json').version)"
+          # Resolve from the GLOBAL root, the way phone_layout.sh itself does
+          # (`npm root -g`). A bare `node -e "require('playwright-core/...')"`
+          # cannot see a global install -- it resolves from the working
+          # directory -- so the first CI run failed here on a package that had
+          # installed correctly one line above.
+          NODE_MODULES_DIR="$(npm root -g)"
+          test -d "$NODE_MODULES_DIR/playwright-core" \
+            || { echo "::error::playwright-core not in $NODE_MODULES_DIR after install"; exit 1; }
+          node -e "console.log('playwright-core', require('$NODE_MODULES_DIR/playwright-core/package.json').version)"
 
       # ubuntu-latest is widely believed to preinstall Google Chrome. This
       # step does not take that on faith: it resolves an actual binary and

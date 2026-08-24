@@ -208,6 +208,27 @@ same sentence was true one tier down. Now a step runs them; 38s warm.
 > third time, because fixing it quietly is how a process problem stops being
 > visible.
 
+> **Client behaviour is the tier nothing automated covers.** `base.html`
+> carries the product's only hand-written JavaScript — a delegated click
+> handler for a trip's show-more toggle, and an `htmx:configRequest` hook
+> that appends `expanded=<tags>` to every request `#pool-body` issues so a
+> swapped-in fragment comes back already expanded (`#120`).
+>
+> **That contract has two halves and only one is gated.** Acceptance asserts
+> the *server* half — given `expanded=`, the fragment renders expanded — over
+> HTTP. Nothing executes the half that builds the parameter and toggles the
+> class: Rust tests do not run JavaScript, the acceptance runtime does not
+> either, and the two browser checks that do (`phone_layout`, `colour`)
+> assert geometry and colour rather than behaviour.
+>
+> **This is not hypothetical and `#120` says so itself.** Both listeners were
+> first written as `document.body.addEventListener`, which throws because
+> that block runs in `<head>` before `<body>` exists. Every server-rendered
+> assertion stayed green throughout; it was caught by driving a real browser
+> by hand. **The gap is now a wiring question rather than a capability one** —
+> the browser tier exists and two of its checks are CI-gated — and the next
+> owner to pass through it is whoever converts `qa/trip_controls.md`.
+
 > **The QA suite is the tier CI gates least, and the gap is closing from
 > the QA side.** `ci.yml` names each script by hand and does not glob the
 > directory. It named two of seventeen when this row was written; it now

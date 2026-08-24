@@ -277,29 +277,6 @@ fn trip_tags_in_order(body: &str) -> Vec<String> {
         .collect()
 }
 
-/// The markup of the one trip panel labelled `tag` — split on the panel's
-/// own opening tag rather than on `<div` generally, since a trip panel
-/// nests several plain `<div>`s of its own.
-fn trip_section<'a>(body: &'a str, tag: &str) -> Result<&'a str, String> {
-    let marker = r#"<div class="trip panel">"#;
-    let needle = format!(r#"<div class="trip-tag">{tag}</div>"#);
-    let mut offset = 0;
-    while let Some(rel_start) = body[offset..].find(marker) {
-        let start = offset + rel_start;
-        let after = start + marker.len();
-        let end = body[after..]
-            .find(marker)
-            .map(|rel| after + rel)
-            .unwrap_or(body.len());
-        let candidate = &body[start..end];
-        if candidate.contains(&needle) {
-            return Ok(candidate);
-        }
-        offset = after;
-    }
-    Err(format!("no trip panel found for tag {tag:?} in:\n{body}"))
-}
-
 fn dispatch_trip_reads(
     world: &mut World,
     example: &BTreeMap<String, String>,
@@ -308,7 +285,7 @@ fn dispatch_trip_reads(
     let tag = resolve(example, &caps[1])?;
     let expected = resolve(example, &caps[2])?;
     let body = html_body(world)?;
-    let section = trip_section(body, &tag)?;
+    let section = html::trip_section(body, &tag)?;
     let count = html::between(section, r#"<div class="trip-count">"#, "</div>")?;
     if count == expected {
         Ok(())
@@ -382,7 +359,7 @@ fn dispatch_meta(
 /// which differ only in what they do with the list once they have it.
 fn trip_visible_items(world: &World, tag: &str) -> Result<Vec<String>, String> {
     let body = html_body(world)?;
-    let section = trip_section(body, tag)?;
+    let section = html::trip_section(body, tag)?;
     let items = html::between(section, r#"<ul class="trip-items">"#, "</ul>")?;
     Ok(list_items(items))
 }
@@ -423,7 +400,7 @@ fn dispatch_trip_offers(
     let tag = resolve(example, &caps[1])?;
     let expected = resolve(example, &caps[2])?;
     let body = html_body(world)?;
-    let section = trip_section(body, &tag)?;
+    let section = html::trip_section(body, &tag)?;
     let label = html::between(section, "<summary>", "</summary>")?;
     if label == expected {
         Ok(())
@@ -668,7 +645,7 @@ mod tests {
     #[test]
     fn trip_section_finds_the_named_panel_and_not_another_one() {
         let body = two_trip_body();
-        let section = trip_section(&body, "@bakery").unwrap();
+        let section = html::trip_section(&body, "@bakery").unwrap();
         assert!(section.contains("4 things"));
         assert!(!section.contains("3 things"));
     }
@@ -676,7 +653,7 @@ mod tests {
     #[test]
     fn trip_section_errors_when_no_panel_matches() {
         let body = two_trip_body();
-        assert!(trip_section(&body, "@cellar").is_err());
+        assert!(html::trip_section(&body, "@cellar").is_err());
     }
 
     #[test]

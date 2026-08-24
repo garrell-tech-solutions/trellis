@@ -37,34 +37,6 @@ qa_get_pool() {
   curl -s "http://$ADDR/pool"
 }
 
-# The <div class="trip panel">...</div> block whose trip-tag reads exactly
-# `tag`, or "" if none matches -- trip_section's own logic in pool_screen.rs,
-# reimplemented here rather than assumed identical.
-qa_trip_section() {
-  local page="$1" tag="$2"
-  python3 -c '
-import sys
-page, tag = sys.argv[1], sys.argv[2]
-marker = "<div class=\"trip panel\">"
-needle = "<div class=\"trip-tag\">" + tag + "</div>"
-offset = 0
-while True:
-    start = page.find(marker, offset)
-    if start == -1:
-        print("")
-        break
-    after = start + len(marker)
-    end = page.find(marker, after)
-    if end == -1:
-        end = len(page)
-    candidate = page[start:end]
-    if needle in candidate:
-        print(candidate)
-        break
-    offset = after
-' "$page" "$tag"
-}
-
 # Every trip-tag label, in document order.
 qa_trip_tags_in_order() {
   local page="$1"
@@ -274,7 +246,7 @@ if qa_start_server "$BIN" "$TMP_DIR/$name.sqlite" "$TMP_DIR/$name.log"; then
   page="$(qa_get_pool)"
   trip="$(qa_trip_section "$page" "@homedepot")"
   visible_items="$(qa_between "$trip" '<ul class="trip-items">' '</ul>')"
-  visible_count="$(python3 -c 'import re,sys; print(len(re.findall(r"<li>", sys.argv[1])))' "$visible_items")"
+  visible_count="$(python3 -c 'import re,sys; print(len(re.findall(r"<li\b", sys.argv[1])))' "$visible_items")"
   if [[ "$visible_count" != "3" ]]; then
     echo "FAIL: [$name] expected 3 items shown before revealing more, got $visible_count" >&2
     FAILURES=1
@@ -284,7 +256,7 @@ if qa_start_server "$BIN" "$TMP_DIR/$name.sqlite" "$TMP_DIR/$name.log"; then
     FAILURES=1
   fi
   hidden="$(qa_between "$trip" '<summary>Show 2 more</summary>' '</details>')"
-  hidden_count="$(python3 -c 'import re,sys; print(len(re.findall(r"<li>", sys.argv[1])))' "$hidden")"
+  hidden_count="$(python3 -c 'import re,sys; print(len(re.findall(r"<li\b", sys.argv[1])))' "$hidden")"
   if [[ "$hidden_count" != "2" ]]; then
     echo "FAIL: [$name] expected the disclosure to already carry the remaining 2 items (a native <details>, no extra request), got $hidden_count" >&2
     FAILURES=1

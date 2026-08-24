@@ -35,6 +35,7 @@ mod pool_screen;
 mod quota_triage_validation;
 mod triage;
 mod triage_from_page;
+mod trip_progress;
 mod unknown_kind_rejection;
 
 fn example_value<'a>(example: &'a BTreeMap<String, String>, name: &str) -> Result<&'a str, String> {
@@ -280,6 +281,9 @@ pub async fn dispatch(
         return outcome;
     }
     if let Some(outcome) = disclosures::dispatch(world, text, example).await {
+        return outcome;
+    }
+    if let Some(outcome) = trip_progress::dispatch(world, text, example).await {
         return outcome;
     }
 

@@ -58,30 +58,10 @@ pub async fn mark_committed_task_done(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::platform::test_support::{archived_at, test_pool};
-    use axum::body::{to_bytes, Body};
-    use axum::http::Request;
-    use tower::ServiceExt;
-
-    async fn request(pool: &SqlitePool, method: &str, uri: &str) -> (StatusCode, String) {
-        let app = crate::platform::app::build_app(pool.clone(), Clock::pinned_at(1787562000000));
-        let response = app
-            .oneshot(
-                Request::builder()
-                    .method(method)
-                    .uri(uri)
-                    .body(Body::empty())
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-        let status = response.status();
-        let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
-        (status, String::from_utf8(bytes.to_vec()).unwrap())
-    }
+    use crate::platform::test_support::{archived_at, http_request, test_pool};
 
     async fn get_committed(pool: &SqlitePool) -> (StatusCode, String) {
-        request(pool, "GET", "/committed").await
+        http_request(pool, Clock::pinned_at(1787562000000), "GET", "/committed").await
     }
 
     #[tokio::test]
@@ -144,7 +124,13 @@ mod tests {
     }
 
     async fn post_mark_done(pool: &SqlitePool, task_id: i64) -> (StatusCode, String) {
-        request(pool, "POST", &format!("/committed/tasks/{task_id}/done")).await
+        http_request(
+            pool,
+            Clock::pinned_at(1787562000000),
+            "POST",
+            &format!("/committed/tasks/{task_id}/done"),
+        )
+        .await
     }
 
     #[tokio::test]

@@ -163,8 +163,31 @@ The `Test` step's own comment had already noticed this shape for the
 acceptance suite ("a strict subset of what a reader assumes it ran") and the
 same sentence was true one tier down. Now a step runs them; 38s warm.
 
-> **The DRY gate goes red on every screen slice, and that is a fact about
-> the harness rather than about any one slice.** Measured 2026-08-24: of 922
+> **SETTLED 2026-08-24 as `T-dry-measures-product-code`:** the gate measures
+> product code only; `crates/acceptance-tests/**` is excluded and the
+> threshold stays at 3%. Inline `#[cfg(test)]` tests stay measured — they
+> live in product files, a directory exclusion cannot reach them, and should
+> not. Product-only is **1.64%**, so nearly a point and a half of headroom
+> exists again without the threshold moving. The measurement below is what
+> made it a scope question rather than a discipline question, and is kept
+> because it is the argument.
+>
+> **What the gate can no longer see:** duplication inside the harness, which
+> now grows unmeasured. That is the deliberate trade — a step module sharing
+> helpers with another screen's is arguably harder to read, not easier — but
+> nothing watches it, and nothing is meant to.
+>
+> **What its floors do and do not cover.** `dry.sh` fails closed on the two
+> failures that would otherwise report a green zero: jscpd scanning no files
+> at all, and a format name that matched nothing. It has no *per-crate*
+> floor, because jscpd's report gives a file **count** and not the paths, so
+> asserting "trellis-server was still in scope" would mean restating the
+> intended exclusion inside the script that enforces it. So a future
+> widening of `IGNORE` that drops a product crate would shrink this gate
+> quietly, the way `src/store/*.rs` once would have. One line, one decision
+> to cite — worth knowing before the next one is added.
+>
+> The measurement that settled it: of 922
 > duplicated lines, **568 — 62% — are inside `crates/acceptance-tests/src/
 > steps/`**, spread across *pairs* of screen modules rather than
 > concentrated in one extractable shape (`committed_screen`↔`pool_screen`

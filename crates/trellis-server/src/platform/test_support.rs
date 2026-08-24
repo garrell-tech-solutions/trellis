@@ -1,4 +1,8 @@
+use crate::platform::clock::Clock;
+use axum::body::{to_bytes, Body};
+use axum::http::{Request, StatusCode};
 use sqlx::SqlitePool;
+use tower::ServiceExt;
 
 pub(crate) async fn test_pool() -> (tempfile::TempDir, SqlitePool) {
     let dir = tempfile::tempdir().unwrap();
@@ -39,4 +43,32 @@ pub(crate) async fn archived_at(pool: &SqlitePool, task_id: i64) -> Option<i64> 
         .fetch_one(pool)
         .await
         .unwrap()
+}
+
+/// Sends `method uri` against a fresh app built on `pool` and `clock`, with
+/// an empty body, and returns the status and the response body as text.
+/// Shared by every capability's own `http` tests that only need a bare
+/// request/response round trip -- `triage::http`'s own transports carry a
+/// real body and stay local, since a shared helper for those would need as
+/// many parameters as the thing it replaced.
+pub(crate) async fn http_request(
+    pool: &SqlitePool,
+    clock: Clock,
+    method: &str,
+    uri: &str,
+) -> (StatusCode, String) {
+    let app = crate::platform::app::build_app(pool.clone(), clock);
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method(method)
+                .uri(uri)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let status = response.status();
+    let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    (status, String::from_utf8(body.to_vec()).unwrap())
 }

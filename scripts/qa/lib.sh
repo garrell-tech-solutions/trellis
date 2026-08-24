@@ -456,6 +456,35 @@ for m in re.finditer(r"<li class=\"loose-item\">(.*?)</li>", section, re.S):
 ' "$loose_section" "$needle"
 }
 
+# The <div class="trip panel">...</div> block whose trip-tag reads exactly
+# `tag`, or "" if none matches -- mirrors html::trip_section, shared the
+# same way in crates/acceptance-tests/src/steps between pool_screen.rs and
+# trip_progress.rs. Shared here by pool_screen.sh and trip_progress.sh.
+qa_trip_section() {
+  local page="$1" tag="$2"
+  python3 -c '
+import sys
+page, tag = sys.argv[1], sys.argv[2]
+marker = "<div class=\"trip panel\">"
+needle = "<div class=\"trip-tag\">" + tag + "</div>"
+offset = 0
+while True:
+    start = page.find(marker, offset)
+    if start == -1:
+        print("")
+        break
+    after = start + len(marker)
+    end = page.find(marker, after)
+    if end == -1:
+        end = len(page)
+    candidate = page[start:end]
+    if needle in candidate:
+        print(candidate)
+        break
+    offset = after
+' "$page" "$tag"
+}
+
 qa_committed_row_for() {
   local page="$1" needle="$2" scope
   scope="$(qa_committed_rows_scope "$page")"

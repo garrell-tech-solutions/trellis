@@ -124,49 +124,18 @@ else
 fi
 qa_stop_server
 
-# --- Procedure: the trip that falls apart ---
-name="the-trip-that-falls-apart"
-if qa_start_server "$BIN" "$TMP_DIR/$name.sqlite" "$TMP_DIR/$name.log"; then
-  qa_pool_task "buy screws" "@homedepot"
-  qa_pool_task "return the drill" "@homedepot"
-  qa_pool_task "pick up trim" "@homedepot"
-
-  page="$(qa_get_pool)"
-  if [[ "$page" != *'<div class="trip-tag">@homedepot</div>'* ]]; then
-    echo "FAIL: [$name] setup expected @homedepot to form a trip first" >&2
-    FAILURES=1
-  fi
-
-  screws_id="$(qa_task_id_for_text "buy screws")"
-  drill_id="$(qa_task_id_for_text "return the drill")"
-  qa_mark_pool_done "$screws_id"
-  qa_mark_pool_done "$drill_id"
-
-  page="$(qa_get_pool)"
-  if [[ "$page" == *'class="trip panel"'* ]]; then
-    echo "FAIL: [$name] expected no trip panel once the group fell under three, got:
-$page" >&2
-    FAILURES=1
-  fi
-  loose="$(qa_loose_section "$page")"
-  survivor_row="$(qa_loose_row_containing "$loose" "pick up trim")"
-  if [[ "$survivor_row" != *"@homedepot"* ]]; then
-    echo "FAIL: [$name] expected the survivor still tagged @homedepot in loose ends, got: $survivor_row" >&2
-    FAILURES=1
-  fi
-
-  trim_id="$(qa_task_id_for_text "pick up trim")"
-  qa_mark_pool_done "$trim_id"
-  page="$(qa_get_pool)"
-  if [[ "$page" != *"Nothing in the pool"* ]]; then
-    echo "FAIL: [$name] expected the empty state once every item was done, got:
-$page" >&2
-    FAILURES=1
-  fi
-else
-  FAILURES=1
-fi
-qa_stop_server
+# "The trip that falls apart" (marking 2 of 3 same-tagged tasks done used to
+# dissolve the trip into loose ends) is REMOVED, not rewritten, per #122
+# (D-a-trip-survives-being-worked): persistence now counts everything
+# displayed, so working a trip never dissolves it -- the exact opposite of
+# what this procedure asserted. features/mark_done.feature's own
+# mark-done-trip-drops-below-three-02 was removed the same way, superseded
+# by trip_progress.feature's trip-progress-panel-holds-02 (holds while
+# worked) and trip-progress-clearing-can-drop-a-group-05 (drops only once
+# explicitly cleared) -- both now scripts/qa/trip_progress.sh's, not this
+# file's. qa/mark_done.md's own "Procedure -- the trip that falls apart"
+# still describes the old rule verbatim; flagged to the specifier as stale
+# rather than silently left unscripted.
 
 # --- Procedure: a committed task leaves the screen ---
 name="a-committed-task-leaves-the-screen"
@@ -247,8 +216,20 @@ else
 fi
 qa_stop_server
 
-# --- Procedure: nothing offers to undo it ---
-name="nothing-offers-to-undo-it"
+# --- Procedure: nothing lists completed work, and no un-archive route exists for Committed ---
+# qa/mark_done.md's own text still reads "Try any plausible un-archive
+# route by hand. It should refuse or not exist" unqualified -- true for
+# Committed, which #122 never touched, but no longer true for Pool:
+# POST /pool/tasks/{id}/undone is now a real, documented, deliberate route
+# (D-a-trip-survives-being-worked's own "unchecking a struck item puts it
+# back"), not a guessed one that happens to 404. Testing it here as "must
+# fail" would assert the opposite of what qa/trip_progress.md's own
+# procedures now verify it does; flagged to the specifier as the second
+# stale spot in this doc (see the removed "trip that falls apart" note
+# above), and this procedure checks what remains true: no un-do label
+# anywhere, no completed list, no reorder control, and Committed still has
+# no un-archive route at all.
+name="nothing-lists-completed-work"
 if qa_start_server "$BIN" "$TMP_DIR/$name.sqlite" "$TMP_DIR/$name.log"; then
   qa_pool_task "buy screws" "@homedepot"
   task_id="$(qa_task_id_for_text "buy screws")"
@@ -274,11 +255,14 @@ if qa_start_server "$BIN" "$TMP_DIR/$name.sqlite" "$TMP_DIR/$name.log"; then
     fi
   done
 
-  # A plausible un-archive route, tried by hand: it should refuse or not
-  # exist, never succeed.
-  undo_status="$(curl -s -o /dev/null -w '%{http_code}' -X POST "http://$ADDR/pool/tasks/$task_id/undone")"
-  if [[ "$undo_status" -ge 200 && "$undo_status" -lt 300 ]]; then
-    echo "FAIL: [$name] a guessed un-archive route succeeded with status $undo_status" >&2
+  # Committed has no #122 equivalent -- a guessed un-archive route there
+  # should still refuse or not exist.
+  qa_committed_task "Book the dentist" at "2026-08-25T08:30:00Z"
+  committed_task_id="$(qa_task_id_for_text "Book the dentist")"
+  qa_mark_committed_done "$committed_task_id"
+  committed_undo_status="$(curl -s -o /dev/null -w '%{http_code}' -X POST "http://$ADDR/committed/tasks/$committed_task_id/undone")"
+  if [[ "$committed_undo_status" -ge 200 && "$committed_undo_status" -lt 300 ]]; then
+    echo "FAIL: [$name] a guessed Committed un-archive route succeeded with status $committed_undo_status" >&2
     FAILURES=1
   fi
 else

@@ -163,6 +163,28 @@ The `Test` step's own comment had already noticed this shape for the
 acceptance suite ("a strict subset of what a reader assumes it ran") and the
 same sentence was true one tier down. Now a step runs them; 38s warm.
 
+> **The DRY gate goes red on every screen slice, and that is a fact about
+> the harness rather than about any one slice.** Measured 2026-08-24: of 922
+> duplicated lines, **568 — 62% — are inside `crates/acceptance-tests/src/
+> steps/`**, spread across *pairs* of screen modules rather than
+> concentrated in one extractable shape (`committed_screen`↔`pool_screen`
+> 83, `committed_date`↔`disclosures` 54, `context_tags`↔`pool_screen` 48,
+> `context_tags`↔`trip_progress` 41). The APS pattern gives each feature its
+> own step module; a sixth screen written the way the fifth was is
+> structurally similar to it, and jscpd measures exactly that similarity.
+> The harness is 8,100 lines and grows 400–800 per screen.
+>
+> **So the number has arrived at or over the ceiling on six consecutive
+> slices**, each time trimmed back to *exactly* 3.00 — which passes only
+> because the comparison is strict, and leaves the next role none.
+> Deduplication has been real each time and is worth doing; what it cannot
+> do is change the slope. **The open question is whether a 3% token-
+> duplication ceiling measures the right thing for a per-feature step-module
+> harness**, and that is a threshold question — `stack.prompt`, which is
+> constitution and not this role's to edit. Recorded rather than trimmed a
+> third time, because fixing it quietly is how a process problem stops being
+> visible.
+
 > **The QA suite is the tier CI does not gate.** `ci.yml` names
 > `scheduler_core_purity.sh` and `release_binary.sh` and does not glob the
 > directory, so fifteen procedures — including `phone_layout`, the first
@@ -1357,6 +1379,7 @@ schemas are still there. A revival inherits the gap along with the tables.
 | ~~Per-life-area capacity vs `allowed_windows`~~ | ~~M2~~ | **closed** — `T-capacity-two-axes` + `D-life-area-owns-its-time`, #6 |
 | `Block::missed` unreachable under silence-means-done | M6 | #4 — the `block` table survives #88; nothing writes it |
 | `ScheduleTask` needs `life_area_id` and `deadline_type`; triage writes `NULL` for both | M3 revival | #88 · #94 — needs a decision, not a re-attachment |
+| `scheduler_core::pool` filters and counts in memory; `pool/store.rs` still has no `ORDER BY` | the company set-operations standard | **#108** — surface grew at `#122`, which added done-filtering and a done-count to `pool::group` after the 2026-08-23 audit |
 | ~~The committed screen's date cell is always UTC~~ | ~~wrong once the zone is set~~ | **closed** — `#110` reads the owner's zone; `settings::current_timezone` is a front door again |
 | U3 — backward-pass input | M3 | #7 · ~~U2~~ `T-hard-refuses-soft-slips` · ~~U4~~ `T-blocks-do-not-cross-guardrail-seams` |
 | ~~Crate layout ratification~~ | ~~nothing; cost grows~~ | **closed** — `T-package-by-business-domain`, #44 |

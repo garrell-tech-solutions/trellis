@@ -1,13 +1,12 @@
-# mutation-stamp: sha256=19c23a2da07800d2afeb47e84e12afcb8efbaeb8caa34ba74087a69e9a983218
+# mutation-stamp: sha256=ead2ca10625c5216fe094c592bda156078e58138f6a9dbbd2d6224dce7cbe3bd
 # acceptance-mutation-manifest-begin
-# {"version":1,"tested_at":"2026-08-21T23:40:02.318937095Z","feature_name":"A task you have done leaves the screen it lives on","feature_path":"features/mark_done.feature","background_hash":"304f93e93e2b217b49069c091950b87589f0c7e789e2d0dc3aaa8d845450cb64","implementation_hash":"sha256:26fc8b699cf0eb72110cd6f3ef06909d93b9a3c7798e3af4684142e54e6438c9","scenarios":[{"index":1,"name":"A trip that falls under three becomes loose ends, keeping its tag","scenario_hash":"9548203db7c809693f275f23283b050d656e7e451c95ea065140ab7fb65e34fb","mutation_count":2,"result":{"Total":2,"Killed":2,"Survived":0,"Errors":0},"tested_at":"2026-08-21T23:40:02.318937095Z"},{"index":2,"name":"A committed task marked done leaves the Committed screen","scenario_hash":"065ccca448a023f9e1f2011fc130e4b246bde4d6b4bc12f2d6ef29bbeadcfde6","mutation_count":1,"result":{"Total":1,"Killed":1,"Survived":0,"Errors":0},"tested_at":"2026-08-21T23:40:02.318937095Z"},{"index":3,"name":"A done task is in no count any screen shows","scenario_hash":"b2c0ac4bc1f73d3a638ab3c8f394db9e4dbb71f1b69662e9526a3910770673df","mutation_count":2,"result":{"Total":2,"Killed":2,"Survived":0,"Errors":0},"tested_at":"2026-08-21T23:40:02.318937095Z"}]}
+# {"version":1,"tested_at":"2026-08-24T14:44:39.359880531Z","feature_name":"A task you have done leaves the screen it lives on","feature_path":"features/mark_done.feature","background_hash":"304f93e93e2b217b49069c091950b87589f0c7e789e2d0dc3aaa8d845450cb64","implementation_hash":"sha256:26fc8b699cf0eb72110cd6f3ef06909d93b9a3c7798e3af4684142e54e6438c9","scenarios":[{"index":1,"name":"A committed task marked done leaves the Committed screen","scenario_hash":"065ccca448a023f9e1f2011fc130e4b246bde4d6b4bc12f2d6ef29bbeadcfde6","mutation_count":1,"result":{"Total":1,"Killed":1,"Survived":0,"Errors":0},"tested_at":"2026-08-24T14:44:39.359880531Z"},{"index":2,"name":"A done task is in no count any screen shows","scenario_hash":"b2c0ac4bc1f73d3a638ab3c8f394db9e4dbb71f1b69662e9526a3910770673df","mutation_count":2,"result":{"Total":2,"Killed":2,"Survived":0,"Errors":0},"tested_at":"2026-08-24T14:44:39.359880531Z"}]}
 # acceptance-mutation-manifest-end
 
 # mark-done-leaves-pool-01: a pool task marked done leaves the Pool screen
-# mark-done-trip-drops-below-three-02: a trip that falls under three becomes loose ends, keeping its tag
 # mark-done-leaves-committed-03: a committed task marked done leaves the Committed screen
 # mark-done-counts-exclude-04: a done task is in no count any screen shows
-# mark-done-no-undo-05: nothing offers to un-do it, and the control is not a reorder arrow
+# mark-done-no-completed-list-05: nothing lists completed work, and the control is not a reorder arrow
 # mark-done-escapes-hostile-text-06: hostile text stays escaped in the fragment marking done returns
 #
 # ONE COLUMN, NOT TWO, AND NO DISCRIMINATOR YET. `tasks.archived_at` has
@@ -62,6 +61,18 @@
 # A DONE TASK KEEPS ITS CONTEXT TAG. The tag lives on the capture and nothing
 # removes it, so "done" is a filter over one list rather than a second list --
 # which is what lets M8 later ask what was done at @homedepot.
+#
+# mark-done-trip-drops-below-three-02 IS REMOVED, NOT NARROWED. It asserted
+# that marking 2 of 3 tagged tasks done dissolved the trip into loose ends --
+# true when this slice landed, false since #122 (trip-progress): PERSISTENCE
+# now counts everything displayed, so working a trip never dissolves it, and
+# a group only drops to loose ends when the owner explicitly clears its done
+# items (trip-progress-clearing-can-drop-a-group-05). Both the "checking
+# items off never dissolves the panel" case this scenario meant to guard and
+# the "a group can still drop to loose ends" case it was actually testing are
+# now trip_progress.feature's own (trip-progress-panel-holds-02 and -05
+# respectively) -- keeping a second, contradicting copy here would just be
+# the next agent's stale-scenario bug.
 Feature: A task you have done leaves the screen it lives on
 
   Background:
@@ -74,23 +85,6 @@ Feature: A task you have done leaves the screen it lives on
     And the pool screen is viewed
     Then the pool screen does not mention "buy screws"
     And the pool screen lists "fix the door latch" among the loose ends
-
-  # mark-done-trip-drops-below-three-02: a trip that falls under three becomes loose ends, keeping its tag
-  Scenario: A trip that falls under three becomes loose ends, keeping its tag
-    Given a pool task "buy screws" tagged "@homedepot"
-    And a pool task "return the drill" tagged "@homedepot"
-    And a pool task "pick up trim" tagged "@homedepot"
-    When the pool screen is viewed
-    Then the pool screen offers the trips "<trips>"
-    When "buy screws" is marked done
-    And "return the drill" is marked done
-    And the pool screen is viewed
-    Then the pool screen offers no trips
-    And the loose ends list shows "pick up trim" tagged "<tag>"
-
-    Examples:
-      | trips      | tag        |
-      | @homedepot | @homedepot |
 
   # mark-done-leaves-committed-03: a committed task marked done leaves the Committed screen
   Scenario: A committed task marked done leaves the Committed screen
@@ -121,13 +115,12 @@ Feature: A task you have done leaves the screen it lives on
       | pool_meta | committed_meta |
       | 1 waiting | nothing dated  |
 
-  # mark-done-no-undo-05: nothing offers to un-do it, and the control is not a reorder arrow
-  Scenario: Nothing offers to un-do it, and the control is not a reorder arrow
+  # mark-done-no-completed-list-05: nothing lists completed work, and the control is not a reorder arrow
+  Scenario: Nothing lists completed work, and the control is not a reorder arrow
     Given a pool task "buy screws" tagged "@homedepot"
     When "buy screws" is marked done
     And the pool screen is viewed
-    Then the pool screen offers no way to un-do a completed task
-    And the pool screen offers no reorder control
+    Then the pool screen offers no reorder control
     And the pool screen offers no list of completed work
 
   # mark-done-escapes-hostile-text-06: hostile text stays escaped in the fragment marking done returns

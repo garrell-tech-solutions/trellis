@@ -32,6 +32,14 @@ pub struct PoolTask {
     pub sequence: i64,
     pub text: String,
     pub context_tag: Option<String>,
+    /// Struck-through and still displayed (#122,
+    /// `D-a-trip-survives-being-worked`) — never a task that has been
+    /// cleared, which the adapter's own query excludes before this module
+    /// ever sees it. A *loose* end that is done is filtered out entirely
+    /// here rather than carried as `done: true`: it has no panel to hold it
+    /// in place, so it leaves the screen at once, exactly as it did before
+    /// this slice (`trip-progress-loose-ends-unchanged-08`).
+    pub done: bool,
 }
 
 /// One item's own identity and text, wherever a caller needs to act on it
@@ -40,6 +48,7 @@ pub struct PoolTask {
 pub struct PoolItem {
     pub id: i64,
     pub text: String,
+    pub done: bool,
 }
 
 /// A context tag with enough tasks waiting to be worth a special trip.
@@ -47,7 +56,14 @@ pub struct Trip {
     pub tag: String,
     /// Everything waiting under this tag, not just what is shown —
     /// `pool-screen-truncation-06`'s "the count reads five throughout".
+    /// Struck items count here too (#122): this is what stands between a
+    /// panel of one open item reading "1 of 3 done" (right) and one reading
+    /// "3 things" or "1 thing" (the half-pass trap #103 named, wearing a
+    /// new label).
     pub count: usize,
+    /// How many of `count` are struck through. Zero exactly when nothing in
+    /// this trip has been marked done yet.
+    pub done_count: usize,
     /// The newest [`VISIBLE_TRIP_ITEMS`], in newest-first order.
     pub visible: Vec<PoolItem>,
     /// Everything beyond `visible`, still newest-first — what a "show more"
@@ -92,6 +108,16 @@ const VISIBLE_TRIP_ITEMS: usize = 3;
 /// order; this function establishes newest-first itself rather than trusting
 /// the caller to have sorted already, since a caller that forgot would fail
 /// silently rather than loudly (both orders type-check).
+///
+/// **Two rules that are not the same rule** (#122): a tag needs
+/// [`TRIP_THRESHOLD`] tasks *waiting there* to become a trip in the first
+/// place, and a completed task is still waiting there until it is cleared
+/// — so the same `>= TRIP_THRESHOLD` count on the same (open + struck, not
+/// cleared) set both forms a trip and keeps one standing while it is
+/// worked. A below-threshold group's own struck items are dropped rather
+/// than shown as loose ends: a loose end has no panel to hold a completed
+/// item in place, so it leaves at once, exactly as it did before this
+/// slice (`trip-progress-loose-ends-unchanged-08`).
 pub fn group(mut tasks: Vec<PoolTask>) -> PoolGroups {
     tasks.sort_by_key(|t| std::cmp::Reverse(t.sequence));
     let (groups, mut loose) = bucket_by_tag(tasks);
@@ -101,7 +127,7 @@ pub fn group(mut tasks: Vec<PoolTask>) -> PoolGroups {
         if list.len() >= TRIP_THRESHOLD {
             trips.push(trip_from_group(tag, list));
         } else {
-            loose.extend(list);
+            loose.extend(list.into_iter().filter(|t| !t.done));
         }
     }
 
@@ -114,7 +140,10 @@ pub fn group(mut tasks: Vec<PoolTask>) -> PoolGroups {
 /// Splits `tasks` (already newest-first) into tag buckets, ranked by size
 /// then alphabetically (`pool-screen-trip-order-02`), and the untagged
 /// remainder. Every bucket's own relative order is preserved from `tasks`,
-/// so it stays newest-first without a second sort.
+/// so it stays newest-first without a second sort. A done, untagged task is
+/// dropped here rather than carried into `loose` -- it has no tag to ever
+/// reach [`TRIP_THRESHOLD`] with, so it is unconditionally a loose end, and
+/// a done loose end leaves the screen at once (#122).
 fn bucket_by_tag(tasks: Vec<PoolTask>) -> (Vec<(String, Vec<PoolTask>)>, Vec<PoolTask>) {
     let mut buckets: std::collections::HashMap<String, Vec<PoolTask>> =
         std::collections::HashMap::new();
@@ -122,24 +151,32 @@ fn bucket_by_tag(tasks: Vec<PoolTask>) -> (Vec<(String, Vec<PoolTask>)>, Vec<Poo
     for task in tasks {
         match &task.context_tag {
             Some(tag) => buckets.entry(tag.clone()).or_default().push(task),
-            None => loose.push(task),
+            None if !task.done => loose.push(task),
+            None => {}
         }
     }
 
     let mut groups: Vec<(String, Vec<PoolTask>)> = buckets.into_iter().collect();
-    groups.sort_by(|(a_tag, a_list), (b_tag, b_list)| {
-        b_list
-            .len()
-            .cmp(&a_list.len())
-            .then_with(|| a_tag.cmp(b_tag))
-    });
+    groups.sort_by(by_size_then_tag);
     (groups, loose)
+}
+
+/// Ranks buckets by size then alphabetically (`pool-screen-trip-order-02`).
+fn by_size_then_tag(
+    (a_tag, a_list): &(String, Vec<PoolTask>),
+    (b_tag, b_list): &(String, Vec<PoolTask>),
+) -> std::cmp::Ordering {
+    b_list
+        .len()
+        .cmp(&a_list.len())
+        .then_with(|| a_tag.cmp(b_tag))
 }
 
 /// A group at or over [`TRIP_THRESHOLD`], split into what a trip panel
 /// shows and what it hides behind a "show more" control.
 fn trip_from_group(tag: String, list: Vec<PoolTask>) -> Trip {
     let count = list.len();
+    let done_count = list.iter().filter(|t| t.done).count();
     let visible: Vec<PoolItem> = list
         .iter()
         .take(VISIBLE_TRIP_ITEMS)
@@ -154,6 +191,7 @@ fn trip_from_group(tag: String, list: Vec<PoolTask>) -> Trip {
     Trip {
         tag,
         count,
+        done_count,
         visible,
         hidden,
         more,
@@ -165,6 +203,7 @@ impl PoolItem {
         PoolItem {
             id: task.sequence,
             text: task.text.clone(),
+            done: task.done,
         }
     }
 }
@@ -188,6 +227,16 @@ mod tests {
             sequence,
             text: text.to_string(),
             context_tag: tag.map(str::to_string),
+            done: false,
+        }
+    }
+
+    fn done_task(sequence: i64, text: &str, tag: Option<&str>) -> PoolTask {
+        PoolTask {
+            sequence,
+            text: text.to_string(),
+            context_tag: tag.map(str::to_string),
+            done: true,
         }
     }
 
@@ -366,5 +415,79 @@ mod tests {
         let groups = group(vec![task(42, "fix the door latch", None)]);
 
         assert_eq!(groups.loose[0].id, 42);
+    }
+
+    // --- #122: a trip survives being worked ---------------------------
+
+    #[test]
+    fn a_trip_holds_while_some_of_it_is_done() {
+        let groups = group(vec![
+            done_task(1, "buy screws", Some("@homedepot")),
+            done_task(2, "return the drill", Some("@homedepot")),
+            task(3, "pick up trim", Some("@homedepot")),
+            task(4, "grab a tarp", Some("@homedepot")),
+            task(5, "buy screws again", Some("@homedepot")),
+        ]);
+
+        assert_eq!(groups.trips.len(), 1);
+        assert_eq!(groups.trips[0].count, 5);
+        assert_eq!(groups.trips[0].done_count, 2);
+        assert!(groups.loose.is_empty());
+    }
+
+    #[test]
+    fn a_trip_holds_when_every_item_in_it_is_done() {
+        let groups = group(vec![
+            done_task(1, "buy screws", Some("@homedepot")),
+            done_task(2, "return the drill", Some("@homedepot")),
+            done_task(3, "pick up trim", Some("@homedepot")),
+        ]);
+
+        assert_eq!(groups.trips.len(), 1);
+        assert_eq!(groups.trips[0].count, 3);
+        assert_eq!(groups.trips[0].done_count, 3);
+    }
+
+    #[test]
+    fn done_items_are_still_visible_and_carry_the_done_flag() {
+        let groups = group(vec![
+            done_task(1, "buy screws", Some("@homedepot")),
+            task(2, "return the drill", Some("@homedepot")),
+            task(3, "pick up trim", Some("@homedepot")),
+        ]);
+
+        let done_flags: Vec<bool> = groups.trips[0]
+            .visible
+            .iter()
+            .map(|item| item.done)
+            .collect();
+        // newest first: sequence 3, 2, 1 -- only the last (sequence 1) is done
+        assert_eq!(done_flags, vec![false, false, true]);
+    }
+
+    #[test]
+    fn a_below_threshold_groups_open_items_stay_loose_and_its_done_items_vanish() {
+        let groups = group(vec![
+            done_task(1, "buy screws", Some("@homedepot")),
+            task(2, "return the drill", Some("@homedepot")),
+        ]);
+
+        assert!(groups.trips.is_empty());
+        assert_eq!(groups.loose.len(), 1);
+        assert_eq!(groups.loose[0].text, "return the drill");
+    }
+
+    #[test]
+    fn a_done_untagged_task_vanishes_rather_than_appearing_loose() {
+        let groups = group(vec![done_task(1, "fix the door latch", None)]);
+
+        assert!(groups.loose.is_empty());
+    }
+
+    #[test]
+    fn an_open_untagged_task_still_appears_loose() {
+        let groups = group(vec![task(1, "fix the door latch", None)]);
+
+        assert_eq!(groups.loose.len(), 1);
     }
 }

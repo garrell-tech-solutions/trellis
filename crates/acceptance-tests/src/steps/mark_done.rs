@@ -23,9 +23,6 @@ static THEN_LISTED_AMONG_LOOSE: LazyLock<Regex> = LazyLock::new(|| {
 });
 static THEN_NO_TRIPS: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^the pool screen offers no trips$").unwrap());
-static THEN_NO_UNDO: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"^the pool screen offers no way to un-do a completed task$").unwrap()
-});
 static THEN_NO_COMPLETED_LIST: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^the pool screen offers no list of completed work$").unwrap());
 static THEN_RESPONSE_NO_UNESCAPED_SCRIPT: LazyLock<Regex> = LazyLock::new(|| {
@@ -47,12 +44,6 @@ pub async fn dispatch(
     }
     if THEN_NO_TRIPS.is_match(text) {
         return Some(then_no_trips(world));
-    }
-    if THEN_NO_UNDO.is_match(text) {
-        return Some(then_body_excludes_any(
-            world,
-            &["Undo", "Un-do", "Restore", "Un-archive", "Uncomplete"],
-        ));
     }
     if THEN_NO_COMPLETED_LIST.is_match(text) {
         return Some(then_body_excludes_any(

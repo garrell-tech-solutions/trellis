@@ -8,7 +8,7 @@
 # pool-screen-case-folded-grouping-03: two spellings of one tag are one trip
 # pool-screen-only-pool-04: committed and quota tasks do not appear
 # pool-screen-nothing-reorders-05: everything is newest first and nothing on the screen can be reordered
-# pool-screen-truncation-06: a long trip shows three and offers the rest
+# pool-screen-truncation-06: a long trip holds every item and offers to show the rest
 # pool-screen-empty-07: with nothing pooled the screen says so and points at Capture
 # pool-screen-escapes-hostile-text-09: a hostile context tag stays escaped on this screen
 #
@@ -61,6 +61,17 @@
 # because it asserts one order at three points as it changes, which is the
 # whole scenario. Reported as placeholder drift and it is not; splitting it
 # would lose the progression that is the point.
+#
+# SCENARIO 06 CHANGED WITH #120, AND THE OLD ASSERTION WAS ABOUT STRUCTURE.
+# It read "lists 3 items" for a trip of five, and `trip_visible_items` answers
+# that by reading the FIRST `<ul class="trip-items">` in the panel -- which
+# only distinguishes anything while the hidden items are a SECOND list inside
+# a `<details>`. That two-list shape is precisely the defect #120 removes:
+# the canvas draws one list whose visible slice grows, so over HTTP the trip
+# now holds all five and the control offers the other two. THE GUARANTEE
+# MOVED RATHER THAN LAPSED -- "only three are on screen" is now asserted in
+# `qa/trip_controls.md`, against a rendered page, where it is a fact rather
+# than an artefact of markup. See `features/trip_controls.feature`.
 #
 # `tasks.priority` already means P1-P4 for committed work. A loose end's
 # manual order is a different thing and must not be spelled with that column.
@@ -142,16 +153,16 @@ Feature: The pool screen groups loose work by where it can be done
       | trip_order                                 | loose_order                            |
       | pick up trim, return the drill, buy screws | sharpen the mower, fix the door latch  |
 
-  # pool-screen-truncation-06: a long trip shows three and offers the rest
-  Scenario: A long trip shows three and offers the rest
+  # pool-screen-truncation-06: a long trip holds every item and offers to show the rest
+  Scenario: A long trip holds every item and offers to show the rest
     Given "<total>" pool tasks tagged "@homedepot"
     When the pool screen is viewed
-    Then the trip "@homedepot" lists "<shown>" items
+    Then the trip "@homedepot" lists "<held>" items
     And the trip "@homedepot" offers "<more>"
 
     Examples:
-      | total | shown | more        |
-      | 5     | 3     | Show 2 more |
+      | total | held | more        |
+      | 5     | 5    | Show 2 more |
 
   # pool-screen-empty-07: with nothing pooled the screen says so and points at Capture
   Scenario: With nothing pooled the screen says so and points at Capture

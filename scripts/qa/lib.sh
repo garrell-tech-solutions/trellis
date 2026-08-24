@@ -171,6 +171,26 @@ qa_row_control_endpoint() {
   qa_block_control_endpoint "$(qa_capture_row_block "$page" "$capture_id")" "$marker"
 }
 
+# The hx-post endpoint of the <form class="fields"...> in `block` whose
+# hidden `kind` input names `kind` (#119: once a row's kind button has
+# opened its panel, the panel's own triage form is what this finds --
+# qa_block_control_endpoint would find the kind BUTTON's own endpoint
+# instead, since that form appears first in document order and also
+# carries `value="{kind}"`). "" if no such form is open in block.
+qa_open_panel_endpoint() {
+  local block="$1" kind="$2"
+  python3 -c '
+import re, sys
+block, kind = sys.argv[1], sys.argv[2]
+for form in re.findall(r"<form class=\"fields\"[^>]*>.*?</form>", block, re.S):
+    if "value=\"" + kind + "\"" in form:
+        hx = re.search(r"hx-post=\"([^\"]+)\"", form)
+        print(hx.group(1) if hx else "")
+        sys.exit()
+print("")
+' "$block" "$kind"
+}
+
 # The markup inside <tag id="id_prefix-ID">...</tag> whose
 # <span class="life-area-name"> exactly matches `name`, read from a rendered
 # page -- or from a response that already is that element -- or "" if no

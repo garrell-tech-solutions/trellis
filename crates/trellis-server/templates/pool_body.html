@@ -20,7 +20,7 @@
 
 <div class="trips">
 {% for trip in trips %}
-<div class="trip panel">
+<div class="trip panel{% if trip.expanded %} expanded{% endif %}">
 <div class="trip-header">
 <div class="trip-tag">{{ trip.tag }}</div>
 <div class="trip-progress">
@@ -28,20 +28,18 @@
 {% if trip.offers_clear %}<button type="button" class="clear-done" aria-label="Clear done" hx-post="/pool/trips/{{ trip.tag|urlencode_strict }}/clear" hx-target="#pool-body" hx-swap="outerHTML">&times;</button>{% endif %}
 </div>
 </div>
+{% if trip.offers_complete %}
+<div class="trip-actions">
+<button type="button" class="trip-complete" hx-post="/pool/trips/{{ trip.tag|urlencode_strict }}/complete" hx-target="#pool-body" hx-swap="outerHTML">{{ trip.complete_label }}</button>
+</div>
+{% endif %}
 <ul class="trip-items">
 {% for item in trip.items %}
 <li class="{% if item.done %}done{% endif %}"><label class="done-check"><input type="checkbox" aria-label="Mark done"{% if item.done %} checked hx-post="/pool/tasks/{{ item.id }}/undone"{% else %} hx-post="/pool/tasks/{{ item.id }}/done"{% endif %} hx-target="#pool-body" hx-swap="outerHTML"></label><span class="trip-item-text">{{ item.text }}</span></li>
 {% endfor %}
 </ul>
 {% if let Some(more) = trip.more_label %}
-<details class="trip-more">
-<summary>{{ more }}</summary>
-<ul class="trip-items">
-{% for item in trip.hidden %}
-<li class="{% if item.done %}done{% endif %}"><label class="done-check"><input type="checkbox" aria-label="Mark done"{% if item.done %} checked hx-post="/pool/tasks/{{ item.id }}/undone"{% else %} hx-post="/pool/tasks/{{ item.id }}/done"{% endif %} hx-target="#pool-body" hx-swap="outerHTML"></label><span class="trip-item-text">{{ item.text }}</span></li>
-{% endfor %}
-</ul>
-</details>
+<button type="button" class="trip-more-toggle" data-collapsed-label="{% if let Some(collapsed) = trip.collapsed_label %}{{ collapsed }}{% endif %}">{{ more }}</button>
 {% endif %}
 </div>
 {% endfor %}

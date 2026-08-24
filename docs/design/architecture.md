@@ -151,7 +151,7 @@ Five tiers, and the useful column is the last one.
 | Property | `cargo test --workspace -- --include-ignored` | **yes, since `#101`** |
 | Acceptance (Gherkin) | `scripts/acceptance/run.sh` | yes (`quality`) |
 | Analyzers | coverage · CRAP · complexity baseline · DRY | yes (`quality`) |
-| QA suite | `scripts/qa/run.sh` | **no — two of seventeen** |
+| QA suite | `scripts/qa/run.sh` | **partly — four of twenty-three** |
 | Mutation | `scripts/analyzers/mutation.sh` | no — the hardener's pass |
 
 **Property tests were skipped by every CI run until `#101`.** All 37 are
@@ -163,8 +163,31 @@ The `Test` step's own comment had already noticed this shape for the
 acceptance suite ("a strict subset of what a reader assumes it ran") and the
 same sentence was true one tier down. Now a step runs them; 38s warm.
 
-> **The DRY gate goes red on every screen slice, and that is a fact about
-> the harness rather than about any one slice.** Measured 2026-08-24: of 922
+> **SETTLED 2026-08-24 as `T-dry-measures-product-code`:** the gate measures
+> product code only; `crates/acceptance-tests/**` is excluded and the
+> threshold stays at 3%. Inline `#[cfg(test)]` tests stay measured — they
+> live in product files, a directory exclusion cannot reach them, and should
+> not. Product-only is **1.64%**, so nearly a point and a half of headroom
+> exists again without the threshold moving. The measurement below is what
+> made it a scope question rather than a discipline question, and is kept
+> because it is the argument.
+>
+> **What the gate can no longer see:** duplication inside the harness, which
+> now grows unmeasured. That is the deliberate trade — a step module sharing
+> helpers with another screen's is arguably harder to read, not easier — but
+> nothing watches it, and nothing is meant to.
+>
+> **What its floors do and do not cover.** `dry.sh` fails closed on the two
+> failures that would otherwise report a green zero: jscpd scanning no files
+> at all, and a format name that matched nothing. It has no *per-crate*
+> floor, because jscpd's report gives a file **count** and not the paths, so
+> asserting "trellis-server was still in scope" would mean restating the
+> intended exclusion inside the script that enforces it. So a future
+> widening of `IGNORE` that drops a product crate would shrink this gate
+> quietly, the way `src/store/*.rs` once would have. One line, one decision
+> to cite — worth knowing before the next one is added.
+>
+> The measurement that settled it: of 922
 > duplicated lines, **568 — 62% — are inside `crates/acceptance-tests/src/
 > steps/`**, spread across *pairs* of screen modules rather than
 > concentrated in one extractable shape (`committed_screen`↔`pool_screen`
@@ -185,19 +208,44 @@ same sentence was true one tier down. Now a step runs them; 38s warm.
 > third time, because fixing it quietly is how a process problem stops being
 > visible.
 
-> **The QA suite is the tier CI does not gate.** `ci.yml` names
-> `scheduler_core_purity.sh` and `release_binary.sh` and does not glob the
-> directory, so fifteen procedures — including `phone_layout`, the first
-> real-browser check in this project (`#101`: playwright-core driving Chrome
-> headless at 390×844, verified to fail when the CSS bug is reverted and to
-> fail closed when Chrome is missing) — run locally and gate nothing.
+> **Client behaviour is the tier nothing automated covers.** `base.html`
+> carries the product's only hand-written JavaScript — a delegated click
+> handler for a trip's show-more toggle, and an `htmx:configRequest` hook
+> that appends `expanded=<tags>` to every request `#pool-body` issues so a
+> swapped-in fragment comes back already expanded (`#120`).
 >
-> **Stated rather than fixed here, and QA stated it first**, in the commit
-> that added the check: CI ownership sits outside that role. It sits outside
-> this one too, for the QA suite specifically (the constitution puts the QA
-> suite off this role's ledger entirely). Recorded so it is a decision
-> somebody makes rather than a thing nobody looks at — which is exactly how
-> `#101` shipped three times unseen.
+> **That contract has two halves and only one is gated.** Acceptance asserts
+> the *server* half — given `expanded=`, the fragment renders expanded — over
+> HTTP. Nothing executes the half that builds the parameter and toggles the
+> class: Rust tests do not run JavaScript, the acceptance runtime does not
+> either, and the two browser checks that do (`phone_layout`, `colour`)
+> assert geometry and colour rather than behaviour.
+>
+> **This is not hypothetical and `#120` says so itself.** Both listeners were
+> first written as `document.body.addEventListener`, which throws because
+> that block runs in `<head>` before `<body>` exists. Every server-rendered
+> assertion stayed green throughout; it was caught by driving a real browser
+> by hand. **The gap is now a wiring question rather than a capability one** —
+> the browser tier exists and two of its checks are CI-gated — and the next
+> owner to pass through it is whoever converts `qa/trip_controls.md`.
+
+> **The QA suite is the tier CI gates least, and the gap is closing from
+> the QA side.** `ci.yml` names each script by hand and does not glob the
+> directory. It named two of seventeen when this row was written; it now
+> names four of twenty-three, and **both browser-driven checks are among
+> them** — `phone_layout` (`#101`, gated at `#106`) and `colour` (`#124`,
+> gated by QA in the same commit that added it). Nineteen procedures still
+> gate nothing.
+>
+> **The pattern worth keeping is who closed it.** This row first recorded
+> `phone_layout` shipping ungated, stated rather than fixed because CI
+> ownership sits outside this role and the QA suite sits outside it
+> entirely. Both were then wired by the role that owns them, unprompted, and
+> `colour`'s check went in gated from the start with its five assertions
+> each proved able to fail (`T-a-check-must-be-seen-to-fail`) — including
+> one found broken *inside the check itself*, an `rgb()`-only parser that
+> could not resolve `color()`. Recording a gap and naming its owner turned
+> out to be the thing that closed it.
 
 ## Two things are called "layers". They are unrelated.
 

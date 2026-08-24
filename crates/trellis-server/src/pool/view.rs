@@ -4,6 +4,7 @@
 
 use crate::pool::store::PoolTaskRow;
 use scheduler_core::pool::{self, PoolTask};
+use std::collections::HashSet;
 
 /// One item's own id and text, wherever the template needs to act on a
 /// specific one rather than just list it (#97: marking it done).
@@ -27,15 +28,36 @@ pub struct TripView {
     /// something in the trip is struck (`trip-progress-clear-control-
     /// appears-with-work-07`).
     pub offers_clear: bool,
-    /// Newest-first, always shown.
+    /// Newest-first, everything in the trip -- one list, not a visible
+    /// slice plus a second hidden one (#120: the old `<details>` nested the
+    /// revealed items in a second list with its own spacing, and nothing
+    /// reconciled the two; the template now renders these once and lets
+    /// CSS decide, under `.trip:not(.expanded)`, which ones paint).
     pub items: Vec<PoolItemView>,
-    /// Newest-first, hidden behind `more_label` until revealed — a native
-    /// `<details>` disclosure, so revealing them costs no request and no
-    /// server-held state.
-    pub hidden: Vec<PoolItemView>,
-    /// `Some("Show 2 more")` when `hidden` is non-empty; `None` exactly when
-    /// nothing is hidden (`pool-screen-truncation-06`).
+    /// Whether this trip renders already expanded -- client state ridden
+    /// along on the request that produced this render (#120: `expanded` is
+    /// never stored, only echoed back for the one response it arrived
+    /// with), never derived from anything in the database.
+    pub expanded: bool,
+    /// The show-more/fewer control's current text, `None` exactly when it
+    /// should not render at all -- the canvas's own `hasMore: more > 0 ||
+    /// open` (`Trellis.dc.html:850`): a trip already expanded keeps its
+    /// control even on the render where nothing turns out to be hidden, so
+    /// there is always something to tap back to collapsed.
     pub more_label: Option<String>,
+    /// What the control reads once collapsed again, baked in regardless of
+    /// `expanded` so the client-side toggle can restore it without a
+    /// request. `None` exactly when nothing is ever hidden.
+    pub collapsed_label: Option<String>,
+    /// `"Complete all 8"` -- the open count, not the group's size, so the
+    /// label alone tells you what a tap does before you make it (#125,
+    /// `D-bulk-completion-is-explicit`).
+    pub complete_label: String,
+    /// Whether the complete-group control appears at all -- never once
+    /// nothing is left open (`trip-controls-nothing-left-to-complete-03`):
+    /// a panel offering to complete a group with nothing open in it is
+    /// #103's half-pass trap wearing this slice's label.
+    pub offers_complete: bool,
 }
 
 pub struct LooseItemView {
@@ -76,7 +98,13 @@ fn count_label(count: usize, done_count: usize) -> String {
 /// threshold. `empty` stays keyed to whether any row exists at all, not to
 /// `waiting`, so a trip that is entirely done does not misreport the whole
 /// screen as empty out from under the panel still showing it.
-pub(super) fn build(rows: Vec<PoolTaskRow>) -> PoolView {
+///
+/// `expanded_tags` names which trips render already expanded (#120) --
+/// client state the caller read off *this* request and nothing this
+/// function stores. `GET /pool` always passes an empty set: expand state is
+/// a thing you did with your thumb during this page's own lifetime, not
+/// something a fresh navigation remembers.
+pub(super) fn build(rows: Vec<PoolTaskRow>, expanded_tags: &HashSet<String>) -> PoolView {
     let is_empty = rows.is_empty();
     let waiting = rows.iter().filter(|row| !row.done).count();
     let tasks = rows
@@ -90,7 +118,14 @@ pub(super) fn build(rows: Vec<PoolTaskRow>) -> PoolView {
         .collect();
     let groups = pool::group(tasks);
 
-    let trips = groups.trips.into_iter().map(trip_view).collect();
+    let trips = groups
+        .trips
+        .into_iter()
+        .map(|trip| {
+            let expanded = expanded_tags.contains(&trip.tag);
+            trip_view(trip, expanded)
+        })
+        .collect();
     let loose = groups
         .loose
         .into_iter()
@@ -113,14 +148,32 @@ pub(super) fn build(rows: Vec<PoolTaskRow>) -> PoolView {
     }
 }
 
-fn trip_view(trip: pool::Trip) -> TripView {
+fn trip_view(trip: pool::Trip, expanded: bool) -> TripView {
+    let more = trip.more;
+    let more_label = if expanded {
+        Some("Show fewer".to_string())
+    } else if more > 0 {
+        Some(format!("Show {more} more"))
+    } else {
+        None
+    };
+    let collapsed_label = (more > 0).then(|| format!("Show {more} more"));
+    let open_count = trip.count - trip.done_count;
     TripView {
         tag: trip.tag,
         count_label: count_label(trip.count, trip.done_count),
         offers_clear: trip.done_count > 0,
-        items: trip.visible.into_iter().map(pool_item_view).collect(),
-        more_label: (trip.more > 0).then(|| format!("Show {} more", trip.more)),
-        hidden: trip.hidden.into_iter().map(pool_item_view).collect(),
+        items: trip
+            .visible
+            .into_iter()
+            .chain(trip.hidden)
+            .map(pool_item_view)
+            .collect(),
+        expanded,
+        more_label,
+        collapsed_label,
+        complete_label: format!("Complete all {open_count}"),
+        offers_complete: open_count > 0,
     }
 }
 
@@ -152,6 +205,18 @@ mod tests {
             context_tag: tag.map(str::to_string),
             done: true,
         }
+    }
+
+    /// Every test in this module but the #120 ones below is indifferent to
+    /// expand state -- shadows the real `build` with the empty set baked
+    /// in, so those tests do not have to carry a `&HashSet::new()` they do
+    /// not care about.
+    fn build(rows: Vec<PoolTaskRow>) -> PoolView {
+        super::build(rows, &no_expanded())
+    }
+
+    fn build_expanded(rows: Vec<PoolTaskRow>, expanded: &HashSet<String>) -> PoolView {
+        super::build(rows, expanded)
     }
 
     #[test]
@@ -195,10 +260,14 @@ mod tests {
     fn a_trip_with_nothing_hidden_has_no_more_label() {
         let view = build(three_task_trip());
         assert_eq!(view.trips[0].more_label, None);
+        assert_eq!(
+            view.trips[0].collapsed_label, None,
+            "nothing is hidden, so there is nothing to show once collapsed either"
+        );
     }
 
     #[test]
-    fn a_truncated_trip_reports_how_many_more() {
+    fn a_truncated_trip_reports_how_many_more_and_holds_all_of_them_newest_first() {
         let view = build(vec![
             row(1, "a", Some("@homedepot")),
             row(2, "b", Some("@homedepot")),
@@ -207,13 +276,12 @@ mod tests {
             row(5, "e", Some("@homedepot")),
         ]);
         assert_eq!(view.trips[0].more_label.as_deref(), Some("Show 2 more"));
-        assert_eq!(view.trips[0].items.len(), 3);
-        let hidden: Vec<&str> = view.trips[0]
-            .hidden
+        let texts: Vec<&str> = view.trips[0]
+            .items
             .iter()
             .map(|item| item.text.as_str())
             .collect();
-        assert_eq!(hidden, vec!["b", "a"]);
+        assert_eq!(texts, vec!["e", "d", "c", "b", "a"]);
     }
 
     #[test]
@@ -308,5 +376,139 @@ mod tests {
         assert!(!view.empty);
         assert_eq!(view.meta, "0 waiting");
         assert_eq!(view.trips[0].count_label, "3 of 3 done");
+    }
+
+    // --- #120: the expand control is client state, ridden along ---------
+
+    fn no_expanded() -> std::collections::HashSet<String> {
+        std::collections::HashSet::new()
+    }
+
+    fn expanded_at(tag: &str) -> std::collections::HashSet<String> {
+        std::collections::HashSet::from([tag.to_string()])
+    }
+
+    #[test]
+    fn a_trips_items_are_one_list_holding_everything() {
+        let view = build_expanded(
+            vec![
+                row(1, "a", Some("@homedepot")),
+                row(2, "b", Some("@homedepot")),
+                row(3, "c", Some("@homedepot")),
+                row(4, "d", Some("@homedepot")),
+                row(5, "e", Some("@homedepot")),
+            ],
+            &no_expanded(),
+        );
+        assert_eq!(view.trips[0].items.len(), 5);
+    }
+
+    #[test]
+    fn a_trip_of_exactly_three_offers_no_more_control() {
+        let view = build_expanded(three_task_trip(), &no_expanded());
+        assert_eq!(view.trips[0].more_label, None);
+    }
+
+    #[test]
+    fn a_truncated_collapsed_trip_offers_a_more_control_naming_the_count() {
+        let view = build_expanded(
+            vec![
+                row(1, "a", Some("@homedepot")),
+                row(2, "b", Some("@homedepot")),
+                row(3, "c", Some("@homedepot")),
+                row(4, "d", Some("@homedepot")),
+                row(5, "e", Some("@homedepot")),
+            ],
+            &no_expanded(),
+        );
+        assert_eq!(view.trips[0].more_label.as_deref(), Some("Show 2 more"));
+        assert!(!view.trips[0].expanded);
+    }
+
+    #[test]
+    fn a_trip_named_in_the_expanded_set_renders_expanded_with_a_fewer_label() {
+        let view = build_expanded(
+            vec![
+                row(1, "a", Some("@homedepot")),
+                row(2, "b", Some("@homedepot")),
+                row(3, "c", Some("@homedepot")),
+                row(4, "d", Some("@homedepot")),
+                row(5, "e", Some("@homedepot")),
+            ],
+            &expanded_at("@homedepot"),
+        );
+        assert!(view.trips[0].expanded);
+        assert_eq!(view.trips[0].more_label.as_deref(), Some("Show fewer"));
+        assert_eq!(
+            view.trips[0].collapsed_label.as_deref(),
+            Some("Show 2 more"),
+            "the label to restore once collapsed again must survive being expanded"
+        );
+    }
+
+    #[test]
+    fn a_different_trips_expanded_state_is_independent() {
+        let view = build_expanded(
+            vec![
+                row(1, "a", Some("@homedepot")),
+                row(2, "b", Some("@homedepot")),
+                row(3, "c", Some("@homedepot")),
+                row(4, "d", Some("@homedepot")),
+                row(5, "e", Some("@homedepot")),
+                row(6, "f", Some("@supermarket")),
+                row(7, "g", Some("@supermarket")),
+                row(8, "h", Some("@supermarket")),
+                row(9, "i", Some("@supermarket")),
+                row(10, "j", Some("@supermarket")),
+            ],
+            &expanded_at("@homedepot"),
+        );
+        let homedepot = view.trips.iter().find(|t| t.tag == "@homedepot").unwrap();
+        let supermarket = view.trips.iter().find(|t| t.tag == "@supermarket").unwrap();
+        assert!(homedepot.expanded);
+        assert!(!supermarket.expanded);
+    }
+
+    // --- #125: the complete-group control ---------------------------------
+
+    #[test]
+    fn a_trip_with_nothing_done_offers_to_complete_the_whole_group() {
+        let view = build_expanded(
+            (1..=8)
+                .map(|n| row(n, "item", Some("@homedepot")))
+                .collect(),
+            &no_expanded(),
+        );
+        assert!(view.trips[0].offers_complete);
+        assert_eq!(view.trips[0].complete_label, "Complete all 8");
+    }
+
+    #[test]
+    fn a_partly_done_trip_names_only_the_open_count() {
+        let rows: Vec<PoolTaskRow> = (1..=8)
+            .map(|n| {
+                if n <= 5 {
+                    done_row(n, "item", Some("@homedepot"))
+                } else {
+                    row(n, "item", Some("@homedepot"))
+                }
+            })
+            .collect();
+        let view = build_expanded(rows, &no_expanded());
+        assert!(view.trips[0].offers_complete);
+        assert_eq!(view.trips[0].complete_label, "Complete all 3");
+    }
+
+    #[test]
+    fn a_fully_done_trip_offers_no_complete_control() {
+        let view = build_expanded(
+            vec![
+                done_row(1, "a", Some("@homedepot")),
+                done_row(2, "b", Some("@homedepot")),
+                done_row(3, "c", Some("@homedepot")),
+            ],
+            &no_expanded(),
+        );
+        assert!(!view.trips[0].offers_complete);
     }
 }

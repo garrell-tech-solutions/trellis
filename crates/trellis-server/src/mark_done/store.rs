@@ -42,6 +42,32 @@ pub(super) async fn unmark_task_done(pool: &SqlitePool, task_id: i64) -> Result<
     Ok(result.rows_affected() > 0)
 }
 
+/// Marks every not-yet-done task of `kind` at `tag` done at `done_at_ms`, in
+/// one statement (`T-set-operations-execute-in-the-store`: completing N
+/// tasks is one round trip through `sqlx`, not N). Returns how many rows
+/// actually changed. `kind` keeps this generic rather than pool-specific --
+/// the tag-and-kind join is the same shape the pool capability's own
+/// tag-scoped sweep already uses elsewhere, just writing `archived_at`
+/// instead of a different column.
+pub(super) async fn mark_group_done(
+    pool: &SqlitePool,
+    kind: &str,
+    tag: &str,
+    done_at_ms: i64,
+) -> Result<u64, sqlx::Error> {
+    let result = sqlx::query(
+        "UPDATE tasks SET archived_at = ? \
+         WHERE kind = ? AND archived_at IS NULL \
+         AND capture_id IN (SELECT id FROM captures WHERE context_tag = ?)",
+    )
+    .bind(done_at_ms)
+    .bind(kind)
+    .bind(tag)
+    .execute(pool)
+    .await?;
+    Ok(result.rows_affected())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -142,5 +168,111 @@ mod tests {
 
         assert!(!changed);
         assert_eq!(archived_at(&pool, task_id).await, Some(1));
+    }
+
+    // --- #125: a group completion is one statement ----------------------
+
+    async fn given_a_tagged_pool_task(pool: &SqlitePool, raw_text: &str, tag: &str) -> i64 {
+        let capture_id = insert_capture(pool, raw_text, Some(tag)).await;
+        crate::triage::store::insert_task(pool, capture_id, &TaskKind::Pool, 0)
+            .await
+            .unwrap();
+        sqlx::query_scalar("SELECT id FROM tasks WHERE capture_id = ?")
+            .bind(capture_id)
+            .fetch_one(pool)
+            .await
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn mark_group_done_stamps_every_open_task_at_the_tag() {
+        let (_dir, pool) = test_pool().await;
+        let a = given_a_tagged_pool_task(&pool, "buy screws", "@homedepot").await;
+        let b = given_a_tagged_pool_task(&pool, "return the drill", "@homedepot").await;
+
+        let changed = mark_group_done(&pool, "pool", "@homedepot", 4242)
+            .await
+            .unwrap();
+
+        assert_eq!(changed, 2);
+        assert_eq!(archived_at(&pool, a).await, Some(4242));
+        assert_eq!(archived_at(&pool, b).await, Some(4242));
+    }
+
+    #[tokio::test]
+    async fn mark_group_done_leaves_a_different_tag_alone() {
+        let (_dir, pool) = test_pool().await;
+        let homedepot = given_a_tagged_pool_task(&pool, "buy screws", "@homedepot").await;
+        let supermarket = given_a_tagged_pool_task(&pool, "milk", "@supermarket").await;
+
+        mark_group_done(&pool, "pool", "@homedepot", 4242)
+            .await
+            .unwrap();
+
+        assert_eq!(archived_at(&pool, homedepot).await, Some(4242));
+        assert_eq!(archived_at(&pool, supermarket).await, None);
+    }
+
+    #[tokio::test]
+    async fn mark_group_done_leaves_an_already_done_task_alone() {
+        let (_dir, pool) = test_pool().await;
+        let already_done = given_a_tagged_pool_task(&pool, "buy screws", "@homedepot").await;
+        mark_task_done(&pool, already_done, 1).await.unwrap();
+        let still_open = given_a_tagged_pool_task(&pool, "return the drill", "@homedepot").await;
+
+        let changed = mark_group_done(&pool, "pool", "@homedepot", 4242)
+            .await
+            .unwrap();
+
+        assert_eq!(changed, 1, "only the still-open task should have changed");
+        assert_eq!(
+            archived_at(&pool, already_done).await,
+            Some(1),
+            "the earlier stamp must not be overwritten"
+        );
+        assert_eq!(archived_at(&pool, still_open).await, Some(4242));
+    }
+
+    #[tokio::test]
+    async fn mark_group_done_leaves_a_different_kind_alone() {
+        let (_dir, pool) = test_pool().await;
+        let capture_id = insert_capture(&pool, "renew the passport", Some("@homedepot")).await;
+        crate::triage::store::insert_task(
+            &pool,
+            capture_id,
+            &TaskKind::Committed {
+                deadline: 1,
+                commitment: scheduler_core::task::Commitment::At,
+                priority: scheduler_core::task::Priority::P1,
+                estimated_minutes: 30,
+            },
+            0,
+        )
+        .await
+        .unwrap();
+        let committed_task_id: i64 =
+            sqlx::query_scalar("SELECT id FROM tasks WHERE capture_id = ?")
+                .bind(capture_id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+
+        let changed = mark_group_done(&pool, "pool", "@homedepot", 4242)
+            .await
+            .unwrap();
+
+        assert_eq!(changed, 0);
+        assert_eq!(archived_at(&pool, committed_task_id).await, None);
+    }
+
+    #[tokio::test]
+    async fn mark_group_done_reports_zero_for_an_unknown_tag() {
+        let (_dir, pool) = test_pool().await;
+
+        let changed = mark_group_done(&pool, "pool", "@nowhere", 4242)
+            .await
+            .unwrap();
+
+        assert_eq!(changed, 0);
     }
 }

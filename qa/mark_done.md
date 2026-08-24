@@ -68,16 +68,20 @@ to an existing arrow, breaks that assertion.**
 4. Reload. Confirm **`@homedepot` is no longer a trip**: one item left, below
    the threshold, sitting in loose ends **still carrying its tag**.
 5. Restart the server. Confirm the two you did have not come back.
-6. Confirm there is **no un-do**, and **no list of completed work** anywhere.
+6. Confirm there is **no list of completed work** anywhere.
 
 ### Expected Observable Outcomes
 - All six steps hold literally, per `D-visible-slices`.
 - **Step 4 is the point of the slice.** Without it the screen keeps sending
   you on a trip you already made.
-- **Step 6 is refused by decision, not omitted.** `D-inaction-archives`:
-  survival requires a deliberate act, so there is no un-do.
-  `D-kill-means-archive`: *"the moment an archive is browsable it becomes a
-  place to hide from decisions"* — so no completed list, ever.
+- **Step 6 is refused by decision, not omitted.** `D-kill-means-archive`:
+  *"the moment an archive is browsable it becomes a place to hide from
+  decisions"* — so no completed list, ever.
+- **Un-do was narrowed by #122, not refused.** A completed *pool* item now
+  stays on screen struck through and unchecking it puts it back — the direct
+  inverse of the tap that struck it. `qa/trip_progress.md` owns that
+  behaviour. The rule here is the half that still holds: **nothing brings
+  back what has left the screen.**
 - **Check the checkbox is a real tap target at phone width**, and check the
   Committed row hardest. The checkbox goes at the **leading edge on both
   screens** — so a Committed row is four columns wide: checkbox, 66px date,
@@ -154,14 +158,15 @@ to an existing arrow, breaks that assertion.**
 - **A done control on a quota item is a defect**, and it would also prejudge
   the slice that follows this one.
 
-## Procedure — nothing offers to undo it
+## Procedure — nothing lists completed work
 
 1. Mark a task done.
 2. Read the raw HTML of both screens.
 
 ### Expected Observable Outcomes
-- **No un-do control, no completed list, no link to either** — not hidden,
-  not disabled. Absent.
+- **No completed list and no link to one** — not hidden, not disabled.
+  Absent. (Unchecking a *visible* struck pool item is a different thing and is
+  `qa/trip_progress.md`'s.)
 - **No reorder arrow appeared anywhere** while adding this control.
 - Try any plausible un-archive route by hand. It should refuse or not exist.
 

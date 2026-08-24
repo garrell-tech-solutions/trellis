@@ -7,7 +7,7 @@
 # mark-done-trip-drops-below-three-02: a trip that falls under three becomes loose ends, keeping its tag
 # mark-done-leaves-committed-03: a committed task marked done leaves the Committed screen
 # mark-done-counts-exclude-04: a done task is in no count any screen shows
-# mark-done-no-undo-05: nothing offers to un-do it, and the control is not a reorder arrow
+# mark-done-no-completed-list-05: nothing lists completed work, and the control is not a reorder arrow
 # mark-done-escapes-hostile-text-06: hostile text stays escaped in the fragment marking done returns
 #
 # ONE COLUMN, NOT TWO, AND NO DISCRIMINATOR YET. `tasks.archived_at` has
@@ -121,13 +121,12 @@ Feature: A task you have done leaves the screen it lives on
       | pool_meta | committed_meta |
       | 1 waiting | nothing dated  |
 
-  # mark-done-no-undo-05: nothing offers to un-do it, and the control is not a reorder arrow
-  Scenario: Nothing offers to un-do it, and the control is not a reorder arrow
+  # mark-done-no-completed-list-05: nothing lists completed work, and the control is not a reorder arrow
+  Scenario: Nothing lists completed work, and the control is not a reorder arrow
     Given a pool task "buy screws" tagged "@homedepot"
     When "buy screws" is marked done
     And the pool screen is viewed
-    Then the pool screen offers no way to un-do a completed task
-    And the pool screen offers no reorder control
+    Then the pool screen offers no reorder control
     And the pool screen offers no list of completed work
 
   # mark-done-escapes-hostile-text-06: hostile text stays escaped in the fragment marking done returns

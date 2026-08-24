@@ -96,38 +96,21 @@ pub async fn clear_pool_trip_done(
 mod tests {
     use super::*;
     use crate::platform::clock::Clock;
-    use crate::platform::test_support::{archived_at, test_pool};
-    use axum::body::{to_bytes, Body};
-    use axum::http::Request;
+    use crate::platform::test_support::{archived_at, http_request, test_pool};
     use scheduler_core::task::TaskKind;
-    use tower::ServiceExt;
 
     async fn get_pool(pool: &SqlitePool) -> (StatusCode, String) {
-        let app = crate::platform::app::build_app(pool.clone(), Clock::system());
-        let response = app
-            .oneshot(Request::builder().uri("/pool").body(Body::empty()).unwrap())
-            .await
-            .unwrap();
-        let status = response.status();
-        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
-        (status, String::from_utf8(body.to_vec()).unwrap())
+        http_request(pool, Clock::system(), "GET", "/pool").await
     }
 
     async fn post_mark_done(pool: &SqlitePool, task_id: i64) -> (StatusCode, String) {
-        let app = crate::platform::app::build_app(pool.clone(), Clock::pinned_at(4242));
-        let response = app
-            .oneshot(
-                Request::builder()
-                    .method("POST")
-                    .uri(format!("/pool/tasks/{task_id}/done"))
-                    .body(Body::empty())
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-        let status = response.status();
-        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
-        (status, String::from_utf8(body.to_vec()).unwrap())
+        http_request(
+            pool,
+            Clock::pinned_at(4242),
+            "POST",
+            &format!("/pool/tasks/{task_id}/done"),
+        )
+        .await
     }
 
     async fn given_a_pool_task(pool: &SqlitePool, raw_text: &str, tag: Option<&str>) -> i64 {
@@ -273,40 +256,23 @@ mod tests {
     // --- #122: a trip survives being worked -----------------------------
 
     async fn post_undone(pool: &SqlitePool, task_id: i64) -> (StatusCode, String) {
-        let app = crate::platform::app::build_app(pool.clone(), Clock::pinned_at(4242));
-        let response = app
-            .oneshot(
-                Request::builder()
-                    .method("POST")
-                    .uri(format!("/pool/tasks/{task_id}/undone"))
-                    .body(Body::empty())
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-        let status = response.status();
-        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
-        (status, String::from_utf8(body.to_vec()).unwrap())
+        http_request(
+            pool,
+            Clock::pinned_at(4242),
+            "POST",
+            &format!("/pool/tasks/{task_id}/undone"),
+        )
+        .await
     }
 
     async fn post_clear(pool: &SqlitePool, tag: &str) -> (StatusCode, String) {
-        let app = crate::platform::app::build_app(pool.clone(), Clock::pinned_at(4242));
-        let response = app
-            .oneshot(
-                Request::builder()
-                    .method("POST")
-                    .uri(format!(
-                        "/pool/trips/{}/clear",
-                        urlencoding_placeholder(tag)
-                    ))
-                    .body(Body::empty())
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-        let status = response.status();
-        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
-        (status, String::from_utf8(body.to_vec()).unwrap())
+        http_request(
+            pool,
+            Clock::pinned_at(4242),
+            "POST",
+            &format!("/pool/trips/{}/clear", urlencoding_placeholder(tag)),
+        )
+        .await
     }
 
     /// Minimal percent-encoding for the one character (`@`) every fixture

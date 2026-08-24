@@ -65,6 +65,32 @@ pub fn row_containing<'a>(section: &'a str, needle: &str) -> Result<&'a str, Str
     Ok(&section[start..end])
 }
 
+/// The markup of the one trip panel labelled `tag` — split on the panel's
+/// own opening tag rather than on `<div` generally, since a trip panel
+/// nests several plain `<div>`s of its own. Shared by `pool_screen.rs` and
+/// `trip_progress.rs`, unlike most of this project's step-parsing helpers:
+/// it takes `body: &str` rather than `World`, so there is no per-module
+/// state to duplicate around.
+pub fn trip_section<'a>(body: &'a str, tag: &str) -> Result<&'a str, String> {
+    let marker = r#"<div class="trip panel">"#;
+    let needle = format!(r#"<div class="trip-tag">{tag}</div>"#);
+    let mut offset = 0;
+    while let Some(rel_start) = body[offset..].find(marker) {
+        let start = offset + rel_start;
+        let after = start + marker.len();
+        let end = body[after..]
+            .find(marker)
+            .map(|rel| after + rel)
+            .unwrap_or(body.len());
+        let candidate = &body[start..end];
+        if candidate.contains(&needle) {
+            return Ok(candidate);
+        }
+        offset = after;
+    }
+    Err(format!("no trip panel found for tag {tag:?} in:\n{body}"))
+}
+
 /// A comma-separated example value, compared against what a screen actually
 /// listed, in order.
 ///

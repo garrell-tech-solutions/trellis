@@ -45,7 +45,7 @@ pub(super) async fn unmark_task_done(pool: &SqlitePool, task_id: i64) -> Result<
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::platform::test_support::{insert_capture, test_pool};
+    use crate::platform::test_support::{archived_at, insert_capture, test_pool};
     use scheduler_core::task::TaskKind;
 
     async fn given_a_pool_task(pool: &SqlitePool, raw_text: &str) -> i64 {
@@ -68,13 +68,7 @@ mod tests {
         let changed = mark_task_done(&pool, task_id, 4242).await.unwrap();
 
         assert!(changed);
-        let archived_at: Option<i64> =
-            sqlx::query_scalar("SELECT archived_at FROM tasks WHERE id = ?")
-                .bind(task_id)
-                .fetch_one(&pool)
-                .await
-                .unwrap();
-        assert_eq!(archived_at, Some(4242));
+        assert_eq!(archived_at(&pool, task_id).await, Some(4242));
     }
 
     #[tokio::test]
@@ -86,14 +80,8 @@ mod tests {
         let changed = mark_task_done(&pool, task_id, 2).await.unwrap();
 
         assert!(!changed);
-        let archived_at: Option<i64> =
-            sqlx::query_scalar("SELECT archived_at FROM tasks WHERE id = ?")
-                .bind(task_id)
-                .fetch_one(&pool)
-                .await
-                .unwrap();
         assert_eq!(
-            archived_at,
+            archived_at(&pool, task_id).await,
             Some(1),
             "the first stamp must not be overwritten"
         );
@@ -117,13 +105,7 @@ mod tests {
         let changed = unmark_task_done(&pool, task_id).await.unwrap();
 
         assert!(changed);
-        let archived_at: Option<i64> =
-            sqlx::query_scalar("SELECT archived_at FROM tasks WHERE id = ?")
-                .bind(task_id)
-                .fetch_one(&pool)
-                .await
-                .unwrap();
-        assert_eq!(archived_at, None);
+        assert_eq!(archived_at(&pool, task_id).await, None);
     }
 
     #[tokio::test]
@@ -159,12 +141,6 @@ mod tests {
         let changed = unmark_task_done(&pool, task_id).await.unwrap();
 
         assert!(!changed);
-        let archived_at: Option<i64> =
-            sqlx::query_scalar("SELECT archived_at FROM tasks WHERE id = ?")
-                .bind(task_id)
-                .fetch_one(&pool)
-                .await
-                .unwrap();
-        assert_eq!(archived_at, Some(1));
+        assert_eq!(archived_at(&pool, task_id).await, Some(1));
     }
 }

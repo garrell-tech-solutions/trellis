@@ -157,13 +157,19 @@ fn bucket_by_tag(tasks: Vec<PoolTask>) -> (Vec<(String, Vec<PoolTask>)>, Vec<Poo
     }
 
     let mut groups: Vec<(String, Vec<PoolTask>)> = buckets.into_iter().collect();
-    groups.sort_by(|(a_tag, a_list), (b_tag, b_list)| {
-        b_list
-            .len()
-            .cmp(&a_list.len())
-            .then_with(|| a_tag.cmp(b_tag))
-    });
+    groups.sort_by(by_size_then_tag);
     (groups, loose)
+}
+
+/// Ranks buckets by size then alphabetically (`pool-screen-trip-order-02`).
+fn by_size_then_tag(
+    (a_tag, a_list): &(String, Vec<PoolTask>),
+    (b_tag, b_list): &(String, Vec<PoolTask>),
+) -> std::cmp::Ordering {
+    b_list
+        .len()
+        .cmp(&a_list.len())
+        .then_with(|| a_tag.cmp(b_tag))
 }
 
 /// A group at or over [`TRIP_THRESHOLD`], split into what a trip panel

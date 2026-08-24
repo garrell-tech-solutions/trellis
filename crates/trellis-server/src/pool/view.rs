@@ -90,18 +90,7 @@ pub(super) fn build(rows: Vec<PoolTaskRow>) -> PoolView {
         .collect();
     let groups = pool::group(tasks);
 
-    let trips = groups
-        .trips
-        .into_iter()
-        .map(|trip| TripView {
-            tag: trip.tag,
-            count_label: count_label(trip.count, trip.done_count),
-            offers_clear: trip.done_count > 0,
-            items: trip.visible.into_iter().map(pool_item_view).collect(),
-            more_label: (trip.more > 0).then(|| format!("Show {} more", trip.more)),
-            hidden: trip.hidden.into_iter().map(pool_item_view).collect(),
-        })
-        .collect();
+    let trips = groups.trips.into_iter().map(trip_view).collect();
     let loose = groups
         .loose
         .into_iter()
@@ -121,6 +110,17 @@ pub(super) fn build(rows: Vec<PoolTaskRow>) -> PoolView {
         empty: is_empty,
         trips,
         loose,
+    }
+}
+
+fn trip_view(trip: pool::Trip) -> TripView {
+    TripView {
+        tag: trip.tag,
+        count_label: count_label(trip.count, trip.done_count),
+        offers_clear: trip.done_count > 0,
+        items: trip.visible.into_iter().map(pool_item_view).collect(),
+        more_label: (trip.more > 0).then(|| format!("Show {} more", trip.more)),
+        hidden: trip.hidden.into_iter().map(pool_item_view).collect(),
     }
 }
 

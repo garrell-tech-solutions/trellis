@@ -98,6 +98,14 @@ mod tests {
         list_pool_tasks(pool).await.unwrap()
     }
 
+    async fn mark_archived(pool: &SqlitePool, task_id: i64) {
+        sqlx::query("UPDATE tasks SET archived_at = 1 WHERE id = ?")
+            .bind(task_id)
+            .execute(pool)
+            .await
+            .unwrap();
+    }
+
     #[tokio::test]
     async fn list_pool_tasks_is_empty_against_a_fresh_database() {
         let (_dir, pool) = test_pool().await;
@@ -160,11 +168,7 @@ mod tests {
         let (_dir, pool) = test_pool().await;
         let tasks = given_a_pool_task(&pool, "buy screws", Some("@homedepot")).await;
         let task_id = tasks[0].task_id;
-        sqlx::query("UPDATE tasks SET archived_at = 1 WHERE id = ?")
-            .bind(task_id)
-            .execute(&pool)
-            .await
-            .unwrap();
+        mark_archived(&pool, task_id).await;
 
         let tasks = list_pool_tasks(&pool).await.unwrap();
         assert_eq!(tasks.len(), 1);
@@ -199,11 +203,7 @@ mod tests {
         let (_dir, pool) = test_pool().await;
         let tasks = given_a_pool_task(&pool, "buy screws", Some("@homedepot")).await;
         let task_id = tasks[0].task_id;
-        sqlx::query("UPDATE tasks SET archived_at = 1 WHERE id = ?")
-            .bind(task_id)
-            .execute(&pool)
-            .await
-            .unwrap();
+        mark_archived(&pool, task_id).await;
 
         clear_done(&pool, "@homedepot", 42).await.unwrap();
 
@@ -233,11 +233,7 @@ mod tests {
             .fetch_one(&pool)
             .await
             .unwrap();
-        sqlx::query("UPDATE tasks SET archived_at = 1 WHERE id = ?")
-            .bind(done_task_id)
-            .execute(&pool)
-            .await
-            .unwrap();
+        mark_archived(&pool, done_task_id).await;
 
         clear_done(&pool, "@homedepot", 42).await.unwrap();
 
@@ -252,11 +248,7 @@ mod tests {
         let (_dir, pool) = test_pool().await;
         let tasks = given_a_pool_task(&pool, "buy screws", Some("@homedepot")).await;
         let task_id = tasks[0].task_id;
-        sqlx::query("UPDATE tasks SET archived_at = 1 WHERE id = ?")
-            .bind(task_id)
-            .execute(&pool)
-            .await
-            .unwrap();
+        mark_archived(&pool, task_id).await;
 
         clear_done(&pool, "@supermarket", 42).await.unwrap();
 

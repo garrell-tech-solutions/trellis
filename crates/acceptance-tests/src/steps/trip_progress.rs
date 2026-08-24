@@ -166,29 +166,6 @@ async fn dispatch_cleared_from(
     post_and_record(world, format!("/pool/trips/{}/clear", urlencode(&tag))).await
 }
 
-/// The markup of the one trip panel labelled `tag` -- see `pool_screen.rs`'s
-/// own copy for the full reasoning; duplicated rather than shared per this
-/// project's established convention.
-fn trip_section<'a>(body: &'a str, tag: &str) -> Result<&'a str, String> {
-    let marker = r#"<div class="trip panel">"#;
-    let needle = format!(r#"<div class="trip-tag">{tag}</div>"#);
-    let mut offset = 0;
-    while let Some(rel_start) = body[offset..].find(marker) {
-        let start = offset + rel_start;
-        let after = start + marker.len();
-        let end = body[after..]
-            .find(marker)
-            .map(|rel| after + rel)
-            .unwrap_or(body.len());
-        let candidate = &body[start..end];
-        if candidate.contains(&needle) {
-            return Ok(candidate);
-        }
-        offset = after;
-    }
-    Err(format!("no trip panel found for tag {tag:?} in:\n{body}"))
-}
-
 fn count_matching_items(section: &str, done: bool) -> usize {
     let needle = if done {
         r#"<li class="done">"#
@@ -198,14 +175,14 @@ fn count_matching_items(section: &str, done: bool) -> usize {
     section.matches(needle).count()
 }
 
-/// `trip_section`'s count when the tag names no panel at all, for the one
+/// `html::trip_section`'s count when the tag names no panel at all, for the one
 /// scenario that clears a group below threshold and then still asks "how
 /// many struck items does the trip show" -- a below-threshold group renders
 /// no panel (`T-trips-are-derived-not-ranked`: it is recomputed, not kept
 /// around half-empty), so the honest answer is zero, not an error
 /// (`trip-progress-clear-done-04`).
 fn count_in_trip_or_zero(body: &str, tag: &str, done: bool) -> usize {
-    trip_section(body, tag)
+    html::trip_section(body, tag)
         .map(|section| count_matching_items(section, done))
         .unwrap_or(0)
 }
@@ -253,7 +230,7 @@ fn dispatch_no_clear_control(
 ) -> Result<(), String> {
     let tag = resolve(example, &caps[1])?;
     let body = super::html_body(world, "no pool screen response recorded")?;
-    let section = trip_section(body, &tag)?;
+    let section = html::trip_section(body, &tag)?;
     if section.contains("clear-done") {
         Err(format!(
             "expected no clear-done control for the trip {tag:?}, got:\n{section}"
@@ -271,7 +248,7 @@ fn dispatch_clear_control_named(
     let tag = resolve(example, &caps[1])?;
     let expected_name = resolve(example, &caps[2])?;
     let body = super::html_body(world, "no pool screen response recorded")?;
-    let section = trip_section(body, &tag)?;
+    let section = html::trip_section(body, &tag)?;
     let needle = format!(r#"aria-label="{expected_name}""#);
     if section.contains("clear-done") && section.contains(&needle) {
         Ok(())
@@ -369,7 +346,7 @@ mod tests {
             trip_panel("@homedepot", "3 things", "", false),
             trip_panel("@supermarket", "3 things", "", false)
         );
-        let section = trip_section(&body, "@homedepot").unwrap();
+        let section = html::trip_section(&body, "@homedepot").unwrap();
         assert!(section.contains("@homedepot"));
         assert!(!section.contains("@supermarket"));
     }

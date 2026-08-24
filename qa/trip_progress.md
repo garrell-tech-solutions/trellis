@@ -160,8 +160,16 @@ cleared.** Check both halves.
   missing.
 - `pool_screen`'s threshold and ordering procedures still pass untouched:
   **order stays derived**, most items first, alphabetical tiebreak, and
-  `pool-screen-nothing-reorders-05` still holds. The canvas draws priority
-  arrows on pool items and **they are still not approved.**
+  `pool-screen-nothing-reorders-05` still holds.
+- **Correction to an earlier version of this document**, which said the
+  canvas's priority arrows are "not approved". **That was wrong and
+  overbroad**, and I inherited it from a brief the PM has since corrected.
+  `D-menu-is-a-worklist` names manual priority and **the arrows are approved
+  — for loose ends** (#95). The split is the point: **a trip is a unit you
+  clear in one stop, so its item order is noise; a loose end is a thing you
+  decide about, so it earns a control.** What must not appear *here* is a
+  reorder control **on a trip**, which is exactly what
+  `pool-screen-nothing-reorders-05` asserts.
 - **#108 is open on this exact query and is not this slice's** — if the
   `WHERE` moved out of the store to make this work, say so; that is the
   thing #108 exists to prevent.

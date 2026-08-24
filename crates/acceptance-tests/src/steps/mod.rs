@@ -17,6 +17,7 @@ use std::sync::LazyLock;
 mod app_client;
 mod build;
 mod capture;
+mod colour;
 mod committed_date;
 mod committed_empty_fields;
 mod committed_field_domains;
@@ -284,6 +285,9 @@ pub async fn dispatch(
         return outcome;
     }
     if let Some(outcome) = trip_progress::dispatch(world, text, example).await {
+        return outcome;
+    }
+    if let Some(outcome) = colour::dispatch(world, text, example).await {
         return outcome;
     }
 

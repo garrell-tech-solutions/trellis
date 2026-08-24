@@ -74,8 +74,8 @@
     {
       "file": "crates/acceptance-tests/src/steps/mod.rs",
       "function": "dispatch",
-      "cyclomatic_complexity": 21,
-      "why": "Top-level step dispatcher; delegates to one step module per arm. 18 -> 19 for the new installable module's arm (#112), 19 -> 20 for the new disclosures module's arm (#119), 20 -> 21 for the new trip_progress module's arm (#122): a new step, not new logic."
+      "cyclomatic_complexity": 22,
+      "why": "Top-level step dispatcher; delegates to one step module per arm. 18 -> 19 for the new installable module's arm (#112), 19 -> 20 for the new disclosures module's arm (#119), 20 -> 21 for the new trip_progress module's arm (#122), 21 -> 22 for the new colour module's arm (#124/#128): a new step, not new logic."
     },
     {
       "file": "crates/acceptance-tests/src/steps/one_screen.rs",

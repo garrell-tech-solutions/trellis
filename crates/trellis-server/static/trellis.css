@@ -23,6 +23,23 @@
     U+2212, U+2215, U+FEFF, U+FFFD;
 }
 
+/* Colour tokens (#124, #128): the `Trellis Design System` design-system
+ * project (`de98a7ad-1291-4326-b43a-5c9af1f94798`), reproduced verbatim --
+ * every token name this file already consumed is still here, in both
+ * modes, and none was renamed.
+ *
+ * NEUTRALS keep their light values exactly; the primary ramp keeps its
+ * lightness and chroma exactly and rotates hue 142.9 -> 255 (blue, the
+ * midpoint of the neutrals' own 247.8-264.7 hue band); mint folds into
+ * gold's hue family (90.89) at the design system's own lightness/chroma,
+ * replacing the old cyan (183.19). See `docs/decisions.md` for why (the
+ * warning panel and the trip panel share `.panel`, so both move together)
+ * and `qa/colour.md` for what was measured against which surface.
+ *
+ * `--color-on-primary` and `--color-on-gold` are new: the text colours for
+ * a `--color-primary-800` fill and the gold Save button, since both flip
+ * lightness between modes and their labels must flip with them.
+ */
 :root {
   --color-gray-50: oklch(0.985 0.002 247.839);
   --color-gray-100: oklch(0.967 0.003 264.542);
@@ -36,20 +53,23 @@
   --color-gray-900: oklch(0.21 0.034 264.665);
   --color-gray-950: oklch(0.13 0.028 261.692);
 
-  --color-primary-50: oklch(0.975 0.015 142.9);
-  --color-primary-100: oklch(0.95 0.035 142.9);
-  --color-primary-200: oklch(0.895 0.06 142.9);
-  --color-primary-300: oklch(0.815 0.085 142.9);
-  --color-primary-400: oklch(0.72 0.105 142.9);
-  --color-primary-500: oklch(0.61 0.12 142.9);
-  --color-primary-600: oklch(0.52 0.122 142.9);
-  --color-primary-700: oklch(0.43 0.118 142.9);
-  --color-primary-800: oklch(0.3714 0.1122 142.9);
-  --color-primary-900: oklch(0.28 0.09 142.9);
-  --color-primary-950: oklch(0.19 0.065 142.9);
+  --color-primary-50: oklch(0.975 0.015 255);
+  --color-primary-100: oklch(0.95 0.035 255);
+  --color-primary-200: oklch(0.895 0.06 255);
+  --color-primary-300: oklch(0.815 0.085 255);
+  --color-primary-400: oklch(0.72 0.105 255);
+  --color-primary-500: oklch(0.61 0.12 255);
+  --color-primary-600: oklch(0.52 0.122 255);
+  --color-primary-700: oklch(0.43 0.118 255);
+  --color-primary-800: oklch(0.3714 0.1122 255);
+  --color-primary-900: oklch(0.28 0.09 255);
+  --color-primary-950: oklch(0.19 0.065 255);
 
   --color-gold: oklch(0.7461 0.1447 90.89);
-  --color-mint: oklch(0.9656 0.0226 183.19);
+  --color-mint: oklch(0.965 0.032 90.89);
+
+  --color-on-primary: oklch(0.985 0.002 247.839);
+  --color-on-gold: oklch(0.28 0.09 255);
 
   --font-sans: 'Space Grotesk', ui-sans-serif, system-ui, sans-serif,
     'Apple Color Emoji', 'Segoe UI Emoji';
@@ -60,14 +80,71 @@
   --tap: 44px;
 }
 
+@media (prefers-color-scheme: dark) {
+  :root {
+    /* Not a mirror: 50-300 compress into surfaces/borders (0.165-0.330),
+       400-950 expand into text (0.600-0.988), and nothing is authored
+       between -- the two tokens that carry muted and secondary text never
+       land in the mid-grey mud a naive inversion would put them in. All
+       dark neutrals share the primary's hue (255), so the dark palette is
+       one hue throughout. */
+    --color-gray-50: oklch(0.165 0.012 255);
+    --color-gray-100: oklch(0.205 0.014 255);
+    --color-gray-200: oklch(0.262 0.016 255);
+    --color-gray-300: oklch(0.330 0.018 255);
+    --color-gray-400: oklch(0.600 0.022 255);
+    --color-gray-500: oklch(0.715 0.018 255);
+    --color-gray-600: oklch(0.792 0.014 255);
+    --color-gray-700: oklch(0.855 0.010 255);
+    --color-gray-800: oklch(0.910 0.006 255);
+    --color-gray-900: oklch(0.958 0.004 255);
+    --color-gray-950: oklch(0.988 0.002 255);
+
+    /* Same split as the neutrals: 50-400 are deep tinted surfaces, 500-950
+       are ink bright enough to read on them. primary-900 is held dark
+       (matching --color-on-gold) rather than inverted bright -- it is the
+       Save button's own glyph colour below, and gold stays light in dark
+       mode, so a "correctly" inverted primary-900 would make the product's
+       most-used control unreadable. */
+    --color-primary-50: oklch(0.200 0.048 255);
+    --color-primary-100: oklch(0.250 0.068 255);
+    --color-primary-200: oklch(0.310 0.088 255);
+    --color-primary-300: oklch(0.380 0.105 255);
+    --color-primary-400: oklch(0.460 0.120 255);
+    --color-primary-500: oklch(0.660 0.125 255);
+    --color-primary-600: oklch(0.715 0.115 255);
+    --color-primary-700: oklch(0.755 0.105 255);
+    --color-primary-800: oklch(0.800 0.095 255);
+    --color-primary-900: oklch(0.260 0.085 255);
+    --color-primary-950: oklch(0.900 0.055 255);
+
+    /* gold drops from L 0.746 to 0.715, still the brightest thing on the
+       screen with the glare pulled back; mint becomes a dark warm surface
+       at the same remove from the page it has in light, so the warning and
+       trip panels still read as panels in both modes. */
+    --color-gold: oklch(0.715 0.135 90.89);
+    --color-mint: oklch(0.255 0.030 90.89);
+
+    --color-on-primary: oklch(0.165 0.012 255);
+    --color-on-gold: oklch(0.260 0.085 255);
+  }
+}
+
 *,
 *::before,
 *::after {
   box-sizing: border-box;
 }
 
+/* Surface stack (#128): the product paints three levels and the design
+   system names two, so the stack shifts one rung rather than collapsing --
+   app surface `#fff` -> `--color-gray-50`, secondary `--color-gray-50` ->
+   `--color-gray-100`, frame (here) `--color-gray-100` -> `--color-gray-200`.
+   The relationship inverts in dark by design: `gray-50`/`gray-100` swap
+   which is lighter between the two ramps, so a panel that recedes by going
+   darker in light recedes by going lighter in dark. */
 html {
-  background: var(--color-gray-100);
+  background: var(--color-gray-200);
 }
 
 body {
@@ -86,7 +163,7 @@ body {
   display: flex;
   flex-direction: column;
   font-family: var(--font-sans);
-  background: #fff;
+  background: var(--color-gray-50);
   color: var(--color-gray-900);
   -webkit-text-size-adjust: 100%;
 }
@@ -100,8 +177,10 @@ body {
   }
 }
 
+/* #124: primary-500 fails 4.5:1 on every surface it sits on
+   (qa/colour.md); primary-600 clears all three with margin. */
 a {
-  color: var(--color-primary-500);
+  color: var(--color-primary-600);
   text-decoration: none;
 }
 
@@ -137,7 +216,7 @@ header {
   position: sticky;
   bottom: 0;
   border-top: 1px solid var(--color-gray-200);
-  background: #fff;
+  background: var(--color-gray-50);
   padding-bottom: env(safe-area-inset-bottom);
 }
 
@@ -164,7 +243,10 @@ header nav a {
   line-height: 1.2;
   letter-spacing: 0.06em;
   text-transform: uppercase;
-  color: var(--color-gray-400);
+  /* #124: the least legible thing in the product at 2.36:1 (gray-400 on
+     the page background nothing actually sits on). gray-500 clears 4.5:1
+     against the header's own surface, where this text actually sits. */
+  color: var(--color-gray-500);
 }
 
 header nav a[aria-current='page'] {
@@ -214,7 +296,10 @@ h3 {
   font-weight: 600;
   letter-spacing: 0.14em;
   text-transform: uppercase;
-  color: var(--color-gray-500);
+  /* #124: no current template renders an h3, but a generic element rule
+     with no fixed surface is held to whichever surface is least forgiving
+     -- gray-600 clears 4.5:1 on all three this stylesheet measures. */
+  color: var(--color-gray-600);
 }
 
 p {
@@ -257,7 +342,7 @@ main > h1 {
   margin: 0 0 8px;
   border: 1px solid var(--color-gray-300);
   border-bottom: 2px solid var(--color-primary-800);
-  background: var(--color-gray-50);
+  background: var(--color-gray-100);
 }
 
 .quick-add-box input[type='text'] {
@@ -273,7 +358,9 @@ main > h1 {
 }
 
 .quick-add-box input[type='text']::placeholder {
-  color: var(--color-gray-400);
+  /* #124: on this box's own (secondary) surface, gray-400 fails and
+     gray-500 still falls short (qa/colour.md) -- gray-600 clears it. */
+  color: var(--color-gray-600);
 }
 
 .quick-add-box button {
@@ -281,7 +368,11 @@ main > h1 {
   flex: none;
   border: none;
   background: var(--color-gold);
-  color: var(--color-primary-900);
+  /* --color-on-gold, not primary-900: the semantically correct token for
+     text on a gold fill, byte-identical to primary-900 in both modes
+     today (design system NOTE 4) but no longer holding primary-900 out of
+     the ramp on this rule's behalf. */
+  color: var(--color-on-gold);
   font-size: 17px;
   font-weight: 600;
   line-height: 1;
@@ -301,7 +392,9 @@ main > h1 {
 }
 
 .quick-add-tag::placeholder {
-  color: var(--color-gray-400);
+  /* #124: this input sits directly on the app surface (a sibling of
+     `.quick-add-box`, not nested inside it) -- gray-500 clears 4.5:1 there. */
+  color: var(--color-gray-500);
 }
 
 .hint {
@@ -342,7 +435,7 @@ main > h1 {
   padding: 12px var(--gutter) 13px 16px;
   border-bottom: 1px solid var(--color-gray-200);
   border-left: 2px solid var(--color-primary-800);
-  background: #fff;
+  background: var(--color-gray-50);
 }
 
 .row-text {
@@ -357,7 +450,9 @@ main > h1 {
   font-size: 10.5px;
   letter-spacing: 0.12em;
   text-transform: uppercase;
-  color: var(--color-gray-400);
+  /* #124: gray-400 fails here (2.36:1, the number this whole slice was
+     filed for); gray-500 clears 4.5:1 on this row's own surface. */
+  color: var(--color-gray-500);
 }
 
 /* A task: already sorted, so it recedes -- the canvas's triaged row. */
@@ -365,10 +460,12 @@ main > h1 {
   padding: 11px var(--gutter);
   border-bottom: 1px solid var(--color-gray-200);
   border-left: 2px solid transparent;
-  background: var(--color-gray-50);
+  background: var(--color-gray-100);
   font-size: 13.5px;
   line-height: 1.35;
-  color: var(--color-gray-500);
+  /* #124: gray-500 fails on this box's (secondary) surface (4.39:1);
+     gray-600 clears it. */
+  color: var(--color-gray-600);
   text-wrap: pretty;
 }
 
@@ -408,7 +505,7 @@ main > h1 {
   height: var(--tap);
   padding: 0 4px;
   border: 1px solid var(--color-gray-300);
-  background: #fff;
+  background: var(--color-gray-50);
   color: var(--color-gray-700);
   font-size: 12px;
   letter-spacing: 0.06em;
@@ -420,7 +517,7 @@ main > h1 {
 .kind-choice.chosen > button {
   border-color: var(--color-primary-800);
   background: var(--color-primary-800);
-  color: #fff;
+  color: var(--color-on-primary);
 }
 
 /* Pool takes the whole line: it is the default path, and until the
@@ -451,7 +548,7 @@ main > h1 {
   margin-top: 4px;
   padding: 0 8px;
   border: 1px solid var(--color-gray-300);
-  background: #fff;
+  background: var(--color-gray-50);
   outline: none;
   font-size: 13px;
   letter-spacing: normal;
@@ -486,7 +583,7 @@ main > h1 {
   height: var(--tap);
   padding: 0 10px;
   border: 1px solid var(--color-gray-300);
-  background: #fff;
+  background: var(--color-gray-50);
   color: var(--color-gray-700);
   font-size: 12px;
   letter-spacing: 0.06em;
@@ -501,14 +598,14 @@ main > h1 {
 .commitment-choice[open] > summary {
   border-color: var(--color-primary-800);
   background: var(--color-primary-800);
-  color: #fff;
+  color: var(--color-on-primary);
 }
 
 .fields {
   margin-top: 8px;
   padding: 10px;
   border: 1px solid var(--color-gray-200);
-  background: var(--color-gray-50);
+  background: var(--color-gray-100);
 }
 
 .fields label {
@@ -517,7 +614,9 @@ main > h1 {
   font-size: 10px;
   letter-spacing: 0.14em;
   text-transform: uppercase;
-  color: var(--color-gray-500);
+  /* #124: gray-500 fails on this box's (secondary) surface (4.39:1);
+     gray-600 clears it. */
+  color: var(--color-gray-600);
 }
 
 .fields input,
@@ -530,7 +629,7 @@ main > h1 {
   margin-top: 4px;
   padding: 0 10px;
   border: 1px solid var(--color-gray-300);
-  background: #fff;
+  background: var(--color-gray-50);
   outline: none;
   font-size: 13.5px;
   letter-spacing: normal;
@@ -552,7 +651,9 @@ main > h1 {
   font-size: 12.5px;
   font-weight: 600;
   letter-spacing: 0.04em;
-  color: var(--color-primary-500);
+  /* #124: primary-500 fails everywhere it is used as text; primary-600
+     clears 4.5:1 on every surface this stylesheet measures. */
+  color: var(--color-primary-600);
   cursor: pointer;
 }
 
@@ -567,7 +668,9 @@ main > h1 {
   background: none;
   font-size: 11.5px;
   letter-spacing: 0.06em;
-  color: var(--color-gray-400);
+  /* #124: this sits on `.row`'s app surface -- gray-400 fails (2.49:1),
+     gray-500 clears it, and the existing hover state still darkens further. */
+  color: var(--color-gray-500);
   cursor: pointer;
 }
 
@@ -624,7 +727,7 @@ main > section select {
   margin-top: 4px;
   padding: 0 10px;
   border: 1px solid var(--color-gray-300);
-  background: #fff;
+  background: var(--color-gray-50);
   outline: none;
   font-size: 13.5px;
   letter-spacing: normal;
@@ -638,7 +741,7 @@ main > section button {
   height: var(--tap);
   padding: 0 14px;
   border: 1px solid var(--color-primary-800);
-  background: #fff;
+  background: var(--color-gray-50);
   color: var(--color-primary-800);
   font-size: 12.5px;
   letter-spacing: 0.06em;
@@ -720,7 +823,7 @@ td {
 .pool-empty a {
   display: inline-block;
   margin-top: 4px;
-  color: var(--color-primary-500);
+  color: var(--color-primary-600);
 }
 
 .pool-subtitle {
@@ -780,7 +883,10 @@ td {
    direct inverse of the tap that struck it. */
 .trip-items > li.done .trip-item-text {
   text-decoration: line-through;
-  color: var(--color-gray-400);
+  /* #124: gray-400 fails hardest here (mint panel, the one surface dark
+     mode also fails on as authored -- qa/colour.md); gray-600 clears both
+     modes on this surface. */
+  color: var(--color-gray-600);
 }
 
 /* "Clear done" (#122): a bare glyph placed directly after the progress
@@ -797,7 +903,9 @@ td {
   padding: 0;
   border: none;
   background: none;
-  color: var(--color-gray-500);
+  /* #124: gray-500 fails on the mint panel this control sits on (4.37:1);
+     gray-600 clears it. */
+  color: var(--color-gray-600);
   font-size: 15px;
   line-height: 1;
   cursor: pointer;
@@ -829,7 +937,9 @@ td {
   font-size: 10px;
   letter-spacing: 0.12em;
   text-transform: uppercase;
-  color: var(--color-gray-400);
+  /* #124: gray-400 fails here too; gray-500 clears 4.5:1 on this row's
+     app surface. */
+  color: var(--color-gray-500);
 }
 
 /* --- Mark done -----------------------------------------------------------
@@ -883,7 +993,7 @@ td {
 .committed-empty a {
   display: inline-block;
   margin-top: 4px;
-  color: var(--color-primary-500);
+  color: var(--color-primary-600);
 }
 
 .committed-row {
@@ -902,8 +1012,12 @@ td {
   color: var(--color-gray-600);
 }
 
+/* #124: gold as text is 2.17:1, worse than the gray-400 failure this slice
+   was filed for (qa/colour.md). A past date fades to gray-500 instead --
+   still legible, and "faded" reads as "already gone by" on its own; the
+   PAST badge beside it carries the rest of the signal. */
 .committed-row.past .committed-date {
-  color: var(--color-gold);
+  color: var(--color-gray-500);
 }
 
 .committed-text {
@@ -923,12 +1037,18 @@ td {
   text-transform: uppercase;
   font-size: 10px;
   letter-spacing: 0.12em;
-  color: var(--color-gray-400);
+  /* #124: gray-400 fails here too; gray-500 clears 4.5:1 on this row's
+     app surface. */
+  color: var(--color-gray-500);
 }
 
+/* #124: a second gold-as-text failure the two issues never counted, worse
+   than the one this slice was filed for (2.17:1, qa/colour.md) -- fades to
+   gray-500 alongside the past date it labels, rather than staying the
+   product's one warm accent as illegible text. */
 .committed-past-badge {
   font-size: 10px;
   letter-spacing: 0.08em;
   text-transform: uppercase;
-  color: var(--color-gold);
+  color: var(--color-gray-500);
 }

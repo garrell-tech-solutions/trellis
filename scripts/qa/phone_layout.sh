@@ -63,6 +63,16 @@ if qa_start_server "$BIN" "$TMP_DIR/phone-layout.sqlite" "$TMP_DIR/phone-layout.
       -d "$(python3 -c 'import json,sys; print(json.dumps({"raw_text": f"errand number {sys.argv[1]}", "source": "web"}))' "$i")"
   done
 
+  # #119's own "nothing else changed": a row's fields-panel makes that row
+  # taller, and the document must still not scroll (qa/disclosures.md:
+  # "phone_layout still passes: the row is taller with a panel open").
+  # Opens one seeded capture's committed panel so the assertions below run
+  # against a row that actually has one open, not just the pre-#119 shape.
+  disclosures_capture_id="$(qa_submit_capture "open a panel for the phone check")"
+  curl -s -o /dev/null -X POST "http://$ADDR/captures/$disclosures_capture_id/kind" \
+    -H 'content-type: application/x-www-form-urlencoded' \
+    -d 'kind=committed'
+
   # qa/committed_date.md's own "the cell does not clip, on a phone"
   # procedure: seed a committed task dated far enough out that
   # committed_screen::date_cell uses its long form ("BY 17 SEP" rather than

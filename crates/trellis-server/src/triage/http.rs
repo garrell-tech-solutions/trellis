@@ -869,21 +869,48 @@ mod tests {
         .await;
     }
 
-    #[tokio::test]
-    async fn triaging_as_committed_with_an_invalid_commitment_is_rejected_naming_it_invalid() {
+    /// A well-formed submission of `kind` with one field replaced by
+    /// `value`, and the rejection that must draw.
+    ///
+    /// Four rejection tests had each written out a whole valid payload to
+    /// change one cell of it, which is the shape `payloads::with_field`
+    /// already exists for on the acceptance side. Each caller still names
+    /// its own field and its own expected rejection, so a failure still
+    /// reads as that field's test.
+    async fn one_bad_field_is_rejected(
+        kind: &str,
+        field: &str,
+        value: serde_json::Value,
+        expected: serde_json::Value,
+    ) {
         let (_dir, pool) = test_pool().await;
         let capture_id = insert_untriaged_capture(&pool, "call the dentist").await;
-
-        assert_json_rejected(
-            &pool,
-            capture_id,
-            json!({
+        let mut payload = match kind {
+            "committed" => json!({
                 "kind": "committed",
                 "deadline": "2026-08-20T17:00:00Z",
-                "commitment": "hard",
+                "commitment": "at",
                 "priority": "P1",
                 "estimated_minutes": 180,
             }),
+            _ => json!({
+                "kind": "quota",
+                "target_count": 3,
+                "target_minutes_each": 45,
+                "period": "week",
+            }),
+        };
+        payload[field] = value;
+
+        assert_json_rejected(&pool, capture_id, payload, expected).await;
+    }
+
+    #[tokio::test]
+    async fn triaging_as_committed_with_an_invalid_commitment_is_rejected_naming_it_invalid() {
+        one_bad_field_is_rejected(
+            "committed",
+            "commitment",
+            json!("hard"),
             json!({ "invalid_field": "commitment" }),
         )
         .await;
@@ -918,19 +945,10 @@ mod tests {
 
     #[tokio::test]
     async fn triaging_as_committed_with_an_invalid_priority_is_rejected_naming_it_invalid() {
-        let (_dir, pool) = test_pool().await;
-        let capture_id = insert_untriaged_capture(&pool, "call the dentist").await;
-
-        assert_json_rejected(
-            &pool,
-            capture_id,
-            json!({
-                "kind": "committed",
-                "deadline": "2026-08-20T17:00:00Z",
-                "commitment": "at",
-                "priority": "P9",
-                "estimated_minutes": 180,
-            }),
+        one_bad_field_is_rejected(
+            "committed",
+            "priority",
+            json!("P9"),
             json!({ "invalid_field": "priority" }),
         )
         .await;
@@ -991,18 +1009,10 @@ mod tests {
 
     #[tokio::test]
     async fn triaging_as_quota_with_period_left_empty_is_rejected_the_same_as_absent() {
-        let (_dir, pool) = test_pool().await;
-        let capture_id = insert_untriaged_capture(&pool, "go to the gym").await;
-
-        assert_json_rejected(
-            &pool,
-            capture_id,
-            json!({
-                "kind": "quota",
-                "target_count": 3,
-                "target_minutes_each": 45,
-                "period": "",
-            }),
+        one_bad_field_is_rejected(
+            "quota",
+            "period",
+            json!(""),
             json!({ "missing_field": "period" }),
         )
         .await;
@@ -1010,18 +1020,10 @@ mod tests {
 
     #[tokio::test]
     async fn triaging_as_quota_with_an_invalid_period_is_rejected_naming_it_invalid() {
-        let (_dir, pool) = test_pool().await;
-        let capture_id = insert_untriaged_capture(&pool, "go to the gym").await;
-
-        assert_json_rejected(
-            &pool,
-            capture_id,
-            json!({
-                "kind": "quota",
-                "target_count": 3,
-                "target_minutes_each": 45,
-                "period": "fortnight",
-            }),
+        one_bad_field_is_rejected(
+            "quota",
+            "period",
+            json!("fortnight"),
             json!({ "invalid_field": "period" }),
         )
         .await;

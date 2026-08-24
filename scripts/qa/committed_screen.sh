@@ -276,8 +276,10 @@ if qa_start_pinned "$TMP_DIR/$name.sqlite" "$TMP_DIR/$name.log"; then
 
   page_id="$(qa_submit_capture "File the tax return (page)")"
   pool_row="$(qa_capture_row_block "$(qa_get_inbox)" "$page_id")"
-  committed_endpoint="$(qa_block_control_endpoint "$pool_row" 'value="committed"')"
-  qa_triage_form "$committed_endpoint" "kind=committed&deadline=2026-08-27T17%3A00%3A00Z&priority=P1&estimated_minutes=60"
+  kind_endpoint="$(qa_block_control_endpoint "$pool_row" 'value="committed"')"
+  qa_triage_form "$kind_endpoint" "kind=committed"
+  committed_endpoint="$(qa_open_panel_endpoint "$(qa_capture_row_block "$BODY" "$page_id")" committed)"
+  qa_triage_form "$committed_endpoint" "kind=committed&deadline_date=2026-08-27&priority=P1&estimated_minutes=60"
   if [[ "$STATUS" != "422" ]]; then
     echo "FAIL: [$name-page] expected 422 with commitment omitted through the page, got $STATUS" >&2
     FAILURES=1

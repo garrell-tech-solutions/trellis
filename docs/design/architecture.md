@@ -735,7 +735,8 @@ database to check.
 ### Schema — built
 
 ```sql
-captures(id, raw_text, source, created_at_ms, left_inbox_at, context_tag)
+captures(id, raw_text, source, created_at_ms, left_inbox_at, context_tag,
+         shown_kind)
 tasks(id, capture_id, kind, deadline, deadline_type, commitment, priority,
       target_count, target_minutes_each, period, life_area_id,
       archived_at, created_at_ms)
@@ -759,6 +760,31 @@ tasks(id, capture_id, kind, deadline, deadline_type, commitment, priority,
 `kind`, `deadline_type`, `priority` and `period` carry `CHECK` constraints.
 `deadline` does **not** — SQLite's INTEGER affinity does not reject text, so a
 non-HTTP write path can still store a string there. Tracked in #33.
+
+> **`captures.shown_kind` is a display preference in a domain table**, and
+> that is the recorded cost of `#119` rather than an accident. It says which
+> kind's fields panel an untriaged row is showing; `NULL` is closed, and
+> triage validation never reads it.
+>
+> **Why it exists is the part worth keeping.** The brief specified
+> `<details name="…">` — an exclusive accordion the browser does natively,
+> with no JavaScript, no request and no schema. It works. What it cannot do
+> is be *seen* by an acceptance suite that speaks only HTTP: a native
+> disclosure's open state lives in the live DOM, the server always renders
+> it closed, and the row-independence scenario re-reads both rows from a
+> fresh response. The coder raised it rather than discovering it late, and
+> the owner chose server-side state. That is the protocol working, and it is
+> not reopened here.
+>
+> **What has changed since is that the premise has.** `#101` and `#106` gave
+> this project a browser tier — `scripts/qa/phone_layout.cjs`, driving real
+> Chrome, gated in CI — and the brief's own point 5 pointed at it:
+> *"disclosure state is exactly what it can see and no HTTP assertion
+> cannot."* It does not look at disclosures today. So the constraint that
+> bought a permanent column (`T-migrations-append-only` — `0012` cannot be
+> un-added) no longer holds, and nothing records that. **When the fourth
+> panel arrives (`#93`, Quota) the question is worth asking again, knowing
+> the answer changed.**
 
 `archived_at` is the single archive signal; there is no `status` column
 (`T-archived-at-only`). **`#97` gave it its first writer** — marking a task

@@ -1,12 +1,18 @@
 //! `GET /`: the untriaged capture queue and task list (D-visible-slices'
 //! first two slices, issues #30 and #33).
+//!
+//! `POST /captures/{id}/kind`: which kind's fields panel a still-untriaged
+//! row is showing (#119) -- a display preference the inbox owns the same
+//! way it owns membership, never read by triage validation.
 
+use super::lists;
 use super::lists::build_lists;
+use super::CAPTURE_NOT_OPEN_MESSAGE;
 use crate::inbox::view::{CaptureRow, TaskRow};
 use crate::platform::nav::{self, NavLink, Page};
 use crate::platform::response::{render_template, write_failed};
 use askama::Template;
-use axum::extract::State;
+use axum::extract::{Form, Path, State};
 use axum::http::StatusCode;
 use axum::response::Response;
 use sqlx::SqlitePool;
@@ -39,6 +45,42 @@ pub async fn show_inbox(State(pool): State<SqlitePool>) -> Result<Response, Stat
             nav: nav::links(Page::Capture),
         },
     ))
+}
+
+#[derive(serde::Deserialize)]
+pub struct SetShownKindRequest {
+    kind: String,
+}
+
+/// The only two kinds that have a panel at all -- pool files on one tap and
+/// never reaches this endpoint (`D-pool-is-default`).
+fn is_a_kind_with_a_panel(kind: &str) -> bool {
+    kind == "committed" || kind == "quota"
+}
+
+pub async fn set_shown_kind(
+    State(pool): State<SqlitePool>,
+    Path(capture_id): Path<i64>,
+    Form(payload): Form<SetShownKindRequest>,
+) -> Result<Response, StatusCode> {
+    if !is_a_kind_with_a_panel(&payload.kind) {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+    let open = super::capture_is_open(&pool, capture_id)
+        .await
+        .map_err(write_failed)?;
+    let (status, error) = if open {
+        super::store::set_shown_kind(&pool, capture_id, &payload.kind)
+            .await
+            .map_err(write_failed)?;
+        (StatusCode::OK, None)
+    } else {
+        (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            Some((capture_id, CAPTURE_NOT_OPEN_MESSAGE.to_string())),
+        )
+    };
+    lists::respond(&pool, status, error).await
 }
 
 #[cfg(test)]
@@ -131,6 +173,129 @@ mod tests {
         assert!(
             body.contains("boom"),
             "the capture's text must survive, escaped, got:\n{body}"
+        );
+    }
+
+    async fn set_kind_response(pool: &SqlitePool, capture_id: i64, kind: &str) -> Response {
+        let app =
+            crate::platform::app::build_app(pool.clone(), crate::platform::clock::Clock::system());
+        app.oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!("/captures/{capture_id}/kind"))
+                .header("content-type", "application/x-www-form-urlencoded")
+                .body(Body::from(format!("kind={kind}")))
+                .unwrap(),
+        )
+        .await
+        .unwrap()
+    }
+
+    async fn body_string(response: Response) -> String {
+        let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        String::from_utf8(bytes.to_vec()).unwrap()
+    }
+
+    async fn shown_kind(pool: &SqlitePool, capture_id: i64) -> Option<String> {
+        sqlx::query_scalar("SELECT shown_kind FROM captures WHERE id = ?")
+            .bind(capture_id)
+            .fetch_one(pool)
+            .await
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn choosing_committed_records_it_and_responds_200() {
+        let (_dir, pool) = test_pool().await;
+        let capture_id = insert_untriaged_capture(&pool, "buy milk").await;
+
+        let response = set_kind_response(&pool, capture_id, "committed").await;
+
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            shown_kind(&pool, capture_id).await.as_deref(),
+            Some("committed")
+        );
+    }
+
+    #[tokio::test]
+    async fn choosing_a_second_kind_replaces_the_first() {
+        let (_dir, pool) = test_pool().await;
+        let capture_id = insert_untriaged_capture(&pool, "buy milk").await;
+        set_kind_response(&pool, capture_id, "committed").await;
+
+        set_kind_response(&pool, capture_id, "quota").await;
+
+        assert_eq!(
+            shown_kind(&pool, capture_id).await.as_deref(),
+            Some("quota")
+        );
+    }
+
+    #[tokio::test]
+    async fn choosing_on_one_capture_leaves_another_alone() {
+        let (_dir, pool) = test_pool().await;
+        let chosen = insert_untriaged_capture(&pool, "buy milk").await;
+        let other = insert_untriaged_capture(&pool, "call the dentist").await;
+
+        set_kind_response(&pool, chosen, "committed").await;
+
+        assert_eq!(shown_kind(&pool, other).await, None);
+    }
+
+    #[tokio::test]
+    async fn an_unrecognized_kind_is_rejected_as_a_bad_request() {
+        let (_dir, pool) = test_pool().await;
+        let capture_id = insert_untriaged_capture(&pool, "buy milk").await;
+
+        let response = set_kind_response(&pool, capture_id, "pool").await;
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        assert_eq!(shown_kind(&pool, capture_id).await, None);
+    }
+
+    #[tokio::test]
+    async fn choosing_a_kind_for_a_capture_that_does_not_exist_is_rejected() {
+        let (_dir, pool) = test_pool().await;
+
+        let response = set_kind_response(&pool, 999, "committed").await;
+
+        assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    }
+
+    #[tokio::test]
+    async fn choosing_a_kind_for_an_already_triaged_capture_is_rejected() {
+        let (_dir, pool) = test_pool().await;
+        let capture_id = insert_untriaged_capture(&pool, "buy milk").await;
+        crate::triage::store::insert_task(
+            &pool,
+            capture_id,
+            &scheduler_core::task::TaskKind::Pool,
+            0,
+        )
+        .await
+        .unwrap();
+        crate::inbox::close_capture(&pool, capture_id, 0)
+            .await
+            .unwrap();
+
+        let response = set_kind_response(&pool, capture_id, "committed").await;
+
+        assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+        assert_eq!(shown_kind(&pool, capture_id).await, None);
+    }
+
+    #[tokio::test]
+    async fn choosing_committed_re_renders_the_lists_fragment_with_the_committed_panel_open() {
+        let (_dir, pool) = test_pool().await;
+        let capture_id = insert_untriaged_capture(&pool, "buy milk").await;
+
+        let response = set_kind_response(&pool, capture_id, "committed").await;
+
+        let body = body_string(response).await;
+        assert!(
+            body.contains("At a time") && body.contains("By a day"),
+            "expected the committed panel's fields in the response, got:\n{body}"
         );
     }
 }

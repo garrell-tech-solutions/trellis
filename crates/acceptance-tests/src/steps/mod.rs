@@ -25,6 +25,7 @@ mod context_tags;
 mod dismiss;
 mod html;
 mod inbox_view;
+mod installable;
 mod mark_done;
 mod migrations;
 mod one_screen;
@@ -258,6 +259,9 @@ pub async fn dispatch(
         return outcome;
     }
     if let Some(outcome) = committed_date::dispatch(world, text, example).await {
+        return outcome;
+    }
+    if let Some(outcome) = installable::dispatch(world, text, example).await {
         return outcome;
     }
 

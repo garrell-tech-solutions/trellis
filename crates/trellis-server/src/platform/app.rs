@@ -20,7 +20,9 @@ use crate::capture::http::create_capture;
 use crate::committed::http::{mark_committed_task_done, show_committed};
 use crate::dismiss::http::dismiss_capture;
 use crate::inbox::http::show_inbox;
-use crate::platform::assets::{htmx_js, space_grotesk_woff2, trellis_css};
+use crate::platform::assets::{
+    htmx_js, icon_192, icon_512, icon_maskable_512, manifest, space_grotesk_woff2, trellis_css,
+};
 use crate::platform::clock::Clock;
 use crate::pool::http::{mark_pool_task_done, show_pool};
 use crate::settings::http::set_timezone;
@@ -56,6 +58,13 @@ pub fn build_app(pool: SqlitePool, clock: Clock) -> Router {
             "/static/fonts/space-grotesk-variable.woff2",
             get(space_grotesk_woff2),
         )
+        .route("/manifest.webmanifest", get(manifest))
+        .route("/static/icons/icon-192.png", get(icon_192))
+        .route("/static/icons/icon-512.png", get(icon_512))
+        .route(
+            "/static/icons/icon-maskable-512.png",
+            get(icon_maskable_512),
+        )
         .route("/captures", post(create_capture))
         .route("/captures/{id}/triage", post(create_triage))
         .route("/captures/{id}/dismiss", post(dismiss_capture))
@@ -76,6 +85,66 @@ mod tests {
     use axum::http::{Request, StatusCode};
     use proptest::prelude::*;
     use tower::ServiceExt;
+
+    /// **Every URL the manifest names is a real route.**
+    ///
+    /// The manifest is the *third* independent statement of this route
+    /// table, after `build_app` above and `nav::Page::path`, and it is the
+    /// one whose disagreement is hardest to see: a wrong `start_url` or icon
+    /// `src` costs nothing until somebody installs Trellis on a phone and
+    /// taps the home-screen icon. That is the failure mode this project
+    /// keeps shipping -- `#101` went out three times unseen, and `#83`
+    /// closed "Capture works from a phone" on a stylesheet.
+    ///
+    /// What existed already covers what somebody remembered: `assets.rs`
+    /// compares `start_url` to the literal `"/"`, which agrees with itself
+    /// however wrong both are, and `installable.feature` fetches the icon
+    /// sizes its own Examples table lists. This **walks** the manifest, so a
+    /// fourth icon is covered by existing -- the same reason
+    /// [`every_header_link_reaches_the_page_it_names`] walks `nav::ALL`
+    /// rather than restating it.
+    #[tokio::test]
+    async fn every_url_the_manifest_names_is_a_real_route() {
+        let (_dir, pool) = test_pool().await;
+
+        let manifest: serde_json::Value =
+            serde_json::from_str(crate::platform::assets::manifest_source())
+                .expect("the embedded manifest is JSON");
+
+        let mut urls = vec![manifest["start_url"]
+            .as_str()
+            .expect("a manifest declares a start_url")
+            .to_string()];
+        urls.extend(
+            manifest["icons"]
+                .as_array()
+                .expect("a manifest declares an icons array")
+                .iter()
+                .map(|icon| {
+                    icon["src"]
+                        .as_str()
+                        .expect("every declared icon names a src")
+                        .to_string()
+                }),
+        );
+        assert!(
+            urls.len() >= 2,
+            "the walk found {} url(s); a manifest with no icons would pass vacuously",
+            urls.len()
+        );
+
+        for url in urls {
+            let response = build_app(pool.clone(), Clock::system())
+                .oneshot(Request::builder().uri(&url).body(Body::empty()).unwrap())
+                .await
+                .unwrap();
+            assert_eq!(
+                response.status(),
+                StatusCode::OK,
+                "the manifest names {url}, which this server does not serve"
+            );
+        }
+    }
 
     /// **Every header link is a real route, and the page it reaches agrees
     /// about which one it is.**

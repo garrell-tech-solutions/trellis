@@ -66,10 +66,16 @@
       "why": "Gherkin step dispatcher; regex chain, one-line delegation per arm."
     },
     {
+      "file": "crates/acceptance-tests/src/steps/installable.rs",
+      "function": "dispatch",
+      "cyclomatic_complexity": 12,
+      "why": "Gherkin step dispatcher; regex chain, one-line delegation per arm. New module for features/installable.feature (#112). Reviewed arm by arm: every branch is `if let Some(caps) = REGEX.captures(text) { return Some(handler(..).await) }` or `if REGEX.is_match(text) { return Some(handler(..)) }` with no conditional of its own."
+    },
+    {
       "file": "crates/acceptance-tests/src/steps/mod.rs",
       "function": "dispatch",
-      "cyclomatic_complexity": 18,
-      "why": "Top-level step dispatcher; delegates to one step module per arm. 17 -> 18 for the new committed_date module's arm (#110): a new step, not new logic."
+      "cyclomatic_complexity": 19,
+      "why": "Top-level step dispatcher; delegates to one step module per arm. 18 -> 19 for the new installable module's arm (#112): a new step, not new logic."
     },
     {
       "file": "crates/acceptance-tests/src/steps/one_screen.rs",

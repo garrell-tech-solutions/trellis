@@ -1,3 +1,7 @@
+# acceptance-mutation-manifest-begin
+# {"version":1,"tested_at":"2026-08-24T02:10:34.554025604Z","feature_name":"A capture row offers three kinds, and shows one set of fields","feature_path":"features/disclosures.feature","background_hash":"304f93e93e2b217b49069c091950b87589f0c7e789e2d0dc3aaa8d845450cb64","implementation_hash":"sha256:8cf9f4aa9e526e15ece45784ab1a23e9c99cde70f9918d1f04183dadb939c1ef","scenarios":[{"index":0,"name":"An untriaged row offers three kind buttons, and no fields until one is chosen","scenario_hash":"b600f70c85c13f5b382778d46ce69ffce0892edd9e3162a9fc5fdc7c5126a381","mutation_count":1,"result":{"Total":1,"Killed":1,"Survived":0,"Errors":0},"tested_at":"2026-08-24T02:10:34.554025604Z"},{"index":5,"name":"Every kind still submits exactly what it submitted before","scenario_hash":"7cf20d3bd9fe7de716261e3778a309d7b07859d9a416992b48eb7e96c9688f52","mutation_count":4,"result":{"Total":4,"Killed":4,"Survived":0,"Errors":0},"tested_at":"2026-08-24T02:07:04.129100418Z"}]}
+# acceptance-mutation-manifest-end
+
 # disclosures-three-buttons-01: an untriaged row offers three kind buttons, and no fields until one is chosen
 # disclosures-pool-files-immediately-02: pool files on one tap and shows no fields at all
 # disclosures-one-panel-at-a-time-03: choosing a kind shows that kind's fields and no other kind's

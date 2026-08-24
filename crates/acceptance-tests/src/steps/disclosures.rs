@@ -114,8 +114,14 @@ fn buttons_in_order(row: &str, expected_csv: &str) -> Result<(), String> {
     let expected: Vec<&str> = expected_csv.split(", ").collect();
     let mut positions = Vec::with_capacity(expected.len());
     for label in &expected {
+        // Scoped to `>{label}</button>` rather than a bare substring search:
+        // the kind buttons' own hidden `<input name="kind" value="pool">`
+        // carries the same word as the button label, lowercased, so an
+        // unscoped search matches the attribute instead of failing to find
+        // a differently-cased label.
+        let needle = format!(">{label}</button>");
         let pos = row
-            .find(label)
+            .find(&needle)
             .ok_or_else(|| format!("expected the button {label:?} in the row, got:\n{row}"))?;
         positions.push(pos);
     }
@@ -278,6 +284,16 @@ mod tests {
     fn buttons_in_order_errors_when_reversed() {
         let markup = row(false, false, "");
         assert!(buttons_in_order(&markup, "Quota, Committed, Pool").is_err());
+    }
+
+    #[test]
+    fn buttons_in_order_does_not_match_a_hidden_inputs_value_attribute() {
+        // The pool button's own hidden input carries value="pool"
+        // (lowercase); the visible button text is "Pool". A lowercase
+        // needle must fail to find the differently-cased label rather than
+        // matching the attribute instead.
+        let markup = row(false, false, "");
+        assert!(buttons_in_order(&markup, "pool, Committed, Quota").is_err());
     }
 
     #[test]

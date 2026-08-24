@@ -71,20 +71,6 @@ fn resolve(example: &BTreeMap<String, String>, raw: &str) -> Result<String, Stri
     }
 }
 
-/// The capture id for `raw_text`, looked up directly rather than trusted
-/// from `world.last_capture_id` -- a scenario with two captures in the
-/// inbox (05, the row-independence trap) sets that field to whichever was
-/// created *last*, not necessarily the one this step names.
-async fn capture_id_by_text(world: &World, raw_text: &str) -> Result<i64, String> {
-    let pool = world.pool()?;
-    sqlx::query_scalar("SELECT id FROM captures WHERE raw_text = ? ORDER BY id DESC LIMIT 1")
-        .bind(raw_text)
-        .fetch_optional(pool)
-        .await
-        .map_err(|e| format!("query capture by text: {e}"))?
-        .ok_or_else(|| format!("no capture found with raw text {raw_text:?}"))
-}
-
 /// The row for `raw_text`, scoped within the last response's captures
 /// section -- whatever that response was, a full inbox view or a
 /// `choose_kind` fragment swap, both carry the same `<ul id="captures">`

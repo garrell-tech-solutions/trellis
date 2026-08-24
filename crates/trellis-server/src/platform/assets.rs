@@ -174,37 +174,32 @@ mod tests {
             && i["type"] == "image/png"));
     }
 
-    #[tokio::test]
-    async fn icon_192_serves_a_png_at_the_declared_size() {
-        let response = icon_192().await.into_response();
+    /// Asserts a handler's response is served as `image/png` and its body
+    /// starts with the PNG magic bytes -- the contract all three icon
+    /// routes share, differing only in which handler and which declared
+    /// size produced it.
+    async fn assert_serves_a_png(response: axum::response::Response) {
         assert_eq!(
             response.headers().get(header::CONTENT_TYPE).unwrap(),
             "image/png"
         );
         let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
         assert!(body.starts_with(&[0x89, b'P', b'N', b'G']));
+    }
+
+    #[tokio::test]
+    async fn icon_192_serves_a_png_at_the_declared_size() {
+        assert_serves_a_png(icon_192().await.into_response()).await;
     }
 
     #[tokio::test]
     async fn icon_512_serves_a_png() {
-        let response = icon_512().await.into_response();
-        assert_eq!(
-            response.headers().get(header::CONTENT_TYPE).unwrap(),
-            "image/png"
-        );
-        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
-        assert!(body.starts_with(&[0x89, b'P', b'N', b'G']));
+        assert_serves_a_png(icon_512().await.into_response()).await;
     }
 
     #[tokio::test]
     async fn icon_maskable_512_serves_a_png() {
-        let response = icon_maskable_512().await.into_response();
-        assert_eq!(
-            response.headers().get(header::CONTENT_TYPE).unwrap(),
-            "image/png"
-        );
-        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
-        assert!(body.starts_with(&[0x89, b'P', b'N', b'G']));
+        assert_serves_a_png(icon_maskable_512().await.into_response()).await;
     }
 
     #[tokio::test]

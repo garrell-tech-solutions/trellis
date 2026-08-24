@@ -151,7 +151,7 @@ Five tiers, and the useful column is the last one.
 | Property | `cargo test --workspace -- --include-ignored` | **yes, since `#101`** |
 | Acceptance (Gherkin) | `scripts/acceptance/run.sh` | yes (`quality`) |
 | Analyzers | coverage · CRAP · complexity baseline · DRY | yes (`quality`) |
-| QA suite | `scripts/qa/run.sh` | **partly — four of twenty-three** |
+| QA suite | `scripts/qa/run.sh` | **partly — five of twenty-four, including all three browser checks** |
 | Mutation | `scripts/analyzers/mutation.sh` | no — the hardener's pass |
 
 **Property tests were skipped by every CI run until `#101`.** All 37 are
@@ -208,7 +208,17 @@ same sentence was true one tier down. Now a step runs them; 38s warm.
 > third time, because fixing it quietly is how a process problem stops being
 > visible.
 
-> **Client behaviour is the tier nothing automated covers.** `base.html`
+> **CLOSED at `#120`, by the role it was named for, in the next commit.**
+> `scripts/qa/trip_controls.cjs` drives a real browser through expand,
+> collapse and complete-group, and `trip_controls.sh` is CI-gated under the
+> same no-skip contract as the other two. QA found three bugs writing it —
+> two in their own first draft, before trusting a green run, and a third only
+> because a placement check reported something implausible. So the tier that
+> covers client behaviour now exists, is gated, and has already paid.
+>
+> The gap as recorded, kept because it is why the check exists:
+>
+> > **Client behaviour was the tier nothing automated covered.** `base.html`
 > carries the product's only hand-written JavaScript — a delegated click
 > handler for a trip's show-more toggle, and an `htmx:configRequest` hook
 > that appends `expanded=<tags>` to every request `#pool-body` issues so a

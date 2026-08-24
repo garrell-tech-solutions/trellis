@@ -40,8 +40,18 @@ FORMATS="rust,bash"
 # repo from 2.15% to 11.57%. Relying on that default leaves the exclusion
 # one --no-gitignore or one .jscpd.json away from silently reversing, so it
 # is stated here as well.
+#
+# crates/acceptance-tests/** (the whole crate, not just tests/) is excluded
+# as of stack.prompt's 2026-08-24 scope change: the gate exists to catch
+# copy-pasted product logic, and 62% of what it was flagging was duplication
+# *between* per-screen step modules under src/steps/ -- structural to a
+# per-feature APS harness (each screen earns its own module) and not
+# extractable, the same "reports a defect nobody is allowed to fix" problem
+# the format restriction above already exists to avoid. Product-only
+# measured 2.09% against 3.54% including the harness at the time, so the
+# threshold itself did not need to move.
 IGNORE="**/target/**,**/mutants.out*/**,**/build/**"
-IGNORE="$IGNORE,crates/acceptance-tests/tests/**,**/tmp/**"
+IGNORE="$IGNORE,crates/acceptance-tests/**,**/tmp/**"
 IGNORE="$IGNORE,**/.worktrees/**,**/.claude/**"
 
 # jscpd's status is captured rather than propagated, but it is not discarded:

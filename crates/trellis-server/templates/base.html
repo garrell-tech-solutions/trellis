@@ -3,13 +3,17 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="color-scheme" content="light">
-<!-- #112: theme_color is a literal value in manifest.webmanifest too --
+<meta name="color-scheme" content="light dark">
+<!-- #124/#128: theme_color is a literal value in manifest.webmanifest too --
      colours cannot be CSS custom properties in either place, so this and
-     the manifest's theme_color are kept in sync by hand until a slice
-     reworks both for the palette in flight (provisional, see the
-     installable pull request). -->
-<meta name="theme-color" content="#0f4e0f">
+     the manifest's theme_color are kept in sync by hand. Both are the app's
+     own surface (--color-gray-50) rather than a brand colour: what Trellis
+     looks like before it has painted anything. The unmediated tag is the
+     light one and stays first -- installable-theme-colour-05 matches a
+     page's theme colour against the manifest's by taking whichever tag
+     comes first, and the manifest only ever carries the light value. -->
+<meta name="theme-color" content="#f9fafb">
+<meta name="theme-color" content="#0b0f14" media="(prefers-color-scheme: dark)">
 <link rel="manifest" href="/manifest.webmanifest">
 <title>{% block title %}Trellis{% endblock %}</title>
 <link rel="stylesheet" href="/static/trellis.css">

@@ -24,6 +24,45 @@
    so it needs to be swapped in too -- product-wide, on every page
    (T-forms-swap-one-fragment: 422 means exactly one thing here). */
 htmx.config.responseHandling.unshift({code: "422", swap: true});
+
+/* Pool's trip panels (#120): the show-more/fewer toggle is pure client
+   state, attached once here rather than re-attached from inside
+   `#pool-body` on every swap -- a listener on `document` survives an
+   `outerHTML` swap of a *descendant* without ever duplicating itself.
+   Delegated so it works on trips that do not exist yet at page load, and
+   attached to `document` rather than `document.body` because this script
+   runs in `<head>`, before `<body>` itself exists. */
+document.addEventListener("click", function (event) {
+  var toggle = event.target.closest(".trip-more-toggle");
+  if (!toggle) return;
+  var trip = toggle.closest(".trip");
+  var expanding = !trip.classList.contains("expanded");
+  trip.classList.toggle("expanded", expanding);
+  toggle.textContent = expanding
+    ? "Show fewer"
+    : toggle.dataset.collapsedLabel || "Show fewer";
+});
+
+/* An expanded trip survives a checkbox tick (#120,
+   D-a-trip-survives-being-worked arriving through a different door): every
+   request `#pool-body` issues rides along with which trips are currently
+   expanded, read live off the DOM, so the server can render the swapped-in
+   fragment already expanded. Nothing is stored -- this is echoed back for
+   the one response it arrives with and forgotten the moment a fresh page
+   loads. Appended to the request's own path (a query string) rather than
+   `event.detail.parameters`, which htmx would otherwise fold into a POST's
+   body instead -- the server reads it as a query parameter regardless of
+   method, the same way it would for a GET. */
+document.addEventListener("htmx:configRequest", function (event) {
+  var poolBody = document.getElementById("pool-body");
+  if (!poolBody || !poolBody.contains(event.detail.elt)) return;
+  var expandedTags = Array.from(document.querySelectorAll(".trip.expanded .trip-tag"))
+    .map(function (el) { return el.textContent.trim(); })
+    .filter(Boolean);
+  if (!expandedTags.length) return;
+  var query = "expanded=" + expandedTags.map(encodeURIComponent).join(",");
+  event.detail.path += (event.detail.path.indexOf("?") === -1 ? "?" : "&") + query;
+});
 </script>
 </head>
 <body>

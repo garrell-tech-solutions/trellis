@@ -151,7 +151,7 @@ Five tiers, and the useful column is the last one.
 | Property | `cargo test --workspace -- --include-ignored` | **yes, since `#101`** |
 | Acceptance (Gherkin) | `scripts/acceptance/run.sh` | yes (`quality`) |
 | Analyzers | coverage · CRAP · complexity baseline · DRY | yes (`quality`) |
-| QA suite | `scripts/qa/run.sh` | **no — two of seventeen** |
+| QA suite | `scripts/qa/run.sh` | **partly — four of twenty-three** |
 | Mutation | `scripts/analyzers/mutation.sh` | no — the hardener's pass |
 
 **Property tests were skipped by every CI run until `#101`.** All 37 are
@@ -208,19 +208,23 @@ same sentence was true one tier down. Now a step runs them; 38s warm.
 > third time, because fixing it quietly is how a process problem stops being
 > visible.
 
-> **The QA suite is the tier CI does not gate.** `ci.yml` names
-> `scheduler_core_purity.sh` and `release_binary.sh` and does not glob the
-> directory, so fifteen procedures — including `phone_layout`, the first
-> real-browser check in this project (`#101`: playwright-core driving Chrome
-> headless at 390×844, verified to fail when the CSS bug is reverted and to
-> fail closed when Chrome is missing) — run locally and gate nothing.
+> **The QA suite is the tier CI gates least, and the gap is closing from
+> the QA side.** `ci.yml` names each script by hand and does not glob the
+> directory. It named two of seventeen when this row was written; it now
+> names four of twenty-three, and **both browser-driven checks are among
+> them** — `phone_layout` (`#101`, gated at `#106`) and `colour` (`#124`,
+> gated by QA in the same commit that added it). Nineteen procedures still
+> gate nothing.
 >
-> **Stated rather than fixed here, and QA stated it first**, in the commit
-> that added the check: CI ownership sits outside that role. It sits outside
-> this one too, for the QA suite specifically (the constitution puts the QA
-> suite off this role's ledger entirely). Recorded so it is a decision
-> somebody makes rather than a thing nobody looks at — which is exactly how
-> `#101` shipped three times unseen.
+> **The pattern worth keeping is who closed it.** This row first recorded
+> `phone_layout` shipping ungated, stated rather than fixed because CI
+> ownership sits outside this role and the QA suite sits outside it
+> entirely. Both were then wired by the role that owns them, unprompted, and
+> `colour`'s check went in gated from the start with its five assertions
+> each proved able to fail (`T-a-check-must-be-seen-to-fail`) — including
+> one found broken *inside the check itself*, an `rgb()`-only parser that
+> could not resolve `color()`. Recording a gap and naming its owner turned
+> out to be the thing that closed it.
 
 ## Two things are called "layers". They are unrelated.
 

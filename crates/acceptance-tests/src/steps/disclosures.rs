@@ -71,20 +71,6 @@ fn resolve(example: &BTreeMap<String, String>, raw: &str) -> Result<String, Stri
     }
 }
 
-/// The capture id for `raw_text`, looked up directly rather than trusted
-/// from `world.last_capture_id` -- a scenario with two captures in the
-/// inbox (05, the row-independence trap) sets that field to whichever was
-/// created *last*, not necessarily the one this step names.
-async fn capture_id_by_text(world: &World, raw_text: &str) -> Result<i64, String> {
-    let pool = world.pool()?;
-    sqlx::query_scalar("SELECT id FROM captures WHERE raw_text = ? ORDER BY id DESC LIMIT 1")
-        .bind(raw_text)
-        .fetch_optional(pool)
-        .await
-        .map_err(|e| format!("query capture by text: {e}"))?
-        .ok_or_else(|| format!("no capture found with raw text {raw_text:?}"))
-}
-
 /// The row for `raw_text`, scoped within the last response's captures
 /// section -- whatever that response was, a full inbox view or a
 /// `choose_kind` fragment swap, both carry the same `<ul id="captures">`
@@ -128,8 +114,14 @@ fn buttons_in_order(row: &str, expected_csv: &str) -> Result<(), String> {
     let expected: Vec<&str> = expected_csv.split(", ").collect();
     let mut positions = Vec::with_capacity(expected.len());
     for label in &expected {
+        // Scoped to `>{label}</button>` rather than a bare substring search:
+        // the kind buttons' own hidden `<input name="kind" value="pool">`
+        // carries the same word as the button label, lowercased, so an
+        // unscoped search matches the attribute instead of failing to find
+        // a differently-cased label.
+        let needle = format!(">{label}</button>");
         let pos = row
-            .find(label)
+            .find(&needle)
             .ok_or_else(|| format!("expected the button {label:?} in the row, got:\n{row}"))?;
         positions.push(pos);
     }
@@ -292,6 +284,16 @@ mod tests {
     fn buttons_in_order_errors_when_reversed() {
         let markup = row(false, false, "");
         assert!(buttons_in_order(&markup, "Quota, Committed, Pool").is_err());
+    }
+
+    #[test]
+    fn buttons_in_order_does_not_match_a_hidden_inputs_value_attribute() {
+        // The pool button's own hidden input carries value="pool"
+        // (lowercase); the visible button text is "Pool". A lowercase
+        // needle must fail to find the differently-cased label rather than
+        // matching the attribute instead.
+        let markup = row(false, false, "");
+        assert!(buttons_in_order(&markup, "pool, Committed, Quota").is_err());
     }
 
     #[test]

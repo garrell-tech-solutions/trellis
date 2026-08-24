@@ -7,9 +7,10 @@
 //! to be `life_areas.rs`'s own step (`life_area_triage.feature`'s), reused
 //! here rather than duplicated; #88 deleted `life_areas.feature` and its step
 //! module along with the whole life-areas capability, and this is now the
-//! only surviving feature that wrote the phrase down, so the step -- and the
-//! `capture_id_by_text` helper `life_areas.rs` also owned -- moved here
-//! rather than dying with it. The life area name in the phrase is
+//! only surviving feature that wrote the phrase down, so the step moved here
+//! rather than dying with it. (Its `capture_id_by_text` helper moved on again
+//! to [`super::capture_id_by_text`] once `disclosures.rs` needed the same
+//! lookup.) The life area name in the phrase is
 //! historical: the server no longer has a `life_area` concept to reject or
 //! resolve it against, so the triage it drives succeeds as pool regardless
 //! of what is named, the same as if the field were omitted.
@@ -88,16 +89,6 @@ pub async fn dispatch(
         return Some(then_html_body_contains(world, &caps[1]));
     }
     None
-}
-
-async fn capture_id_by_text(world: &World, raw_text: &str) -> Result<i64, String> {
-    let pool = world.pool()?;
-    sqlx::query_scalar("SELECT id FROM captures WHERE raw_text = ? ORDER BY id DESC LIMIT 1")
-        .bind(raw_text)
-        .fetch_optional(pool)
-        .await
-        .map_err(|e| format!("query capture by text: {e}"))?
-        .ok_or_else(|| format!("no capture found with raw text {raw_text:?}"))
 }
 
 /// The life area named in the Gherkin phrase is vestigial (see the module

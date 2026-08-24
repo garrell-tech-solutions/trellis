@@ -48,10 +48,16 @@ qa_set_timezone() {
 
 # Triages capture_id as committed through the page's own "At a time" or
 # "By a day" disclosure (never a raw deadline= field, which the page no
-# longer sends) and sets STATUS/BODY.
+# longer sends) and sets STATUS/BODY. #119 moved committed's fields behind
+# a kind button: the fields-form doesn't exist in the row's markup until
+# POST .../kind (read from the row's own kind-choice button) has opened
+# the panel, so this is a two-step dance now -- open, then find and submit
+# to the fields-form's own endpoint from what comes back.
 qa_committed_via_page() {
-  local capture_id="$1" commitment="$2" date="$3" time="${4:-}" endpoint data
-  endpoint="$(qa_block_control_endpoint "$(qa_capture_row_block "$(qa_get_inbox)" "$capture_id")" 'value="committed"')"
+  local capture_id="$1" commitment="$2" date="$3" time="${4:-}" kind_endpoint endpoint data
+  kind_endpoint="$(qa_block_control_endpoint "$(qa_capture_row_block "$(qa_get_inbox)" "$capture_id")" 'value="committed"')"
+  qa_triage_form "$kind_endpoint" "kind=committed"
+  endpoint="$(qa_open_panel_endpoint "$(qa_capture_row_block "$BODY" "$capture_id")" committed)"
   data="kind=committed&deadline_date=$date&commitment=$commitment&priority=P1&estimated_minutes=30"
   if [[ -n "$time" ]]; then
     data="$data&deadline_time=$time"
@@ -189,7 +195,9 @@ if qa_start_server "$BIN" "$TMP_DIR/$name.sqlite" "$TMP_DIR/$name.log"; then
   # Page, deadline_date omitted -- still reported as "deadline", the core
   # field name, not the page's own field name.
   cid="$(qa_submit_capture "call the dentist 3")"
-  endpoint="$(qa_block_control_endpoint "$(qa_capture_row_block "$(qa_get_inbox)" "$cid")" 'value="committed"')"
+  kind_endpoint="$(qa_block_control_endpoint "$(qa_capture_row_block "$(qa_get_inbox)" "$cid")" 'value="committed"')"
+  qa_triage_form "$kind_endpoint" "kind=committed"
+  endpoint="$(qa_open_panel_endpoint "$(qa_capture_row_block "$BODY" "$cid")" committed)"
   qa_triage_form "$endpoint" "kind=committed&commitment=by&priority=P1&estimated_minutes=30"
   if [[ "$STATUS" != "422" ]]; then
     echo "FAIL: [$name-page-deadline] expected 422, got $STATUS" >&2
@@ -203,7 +211,9 @@ $BODY" >&2
 
   # Page, commitment omitted.
   cid="$(qa_submit_capture "call the dentist 4")"
-  endpoint="$(qa_block_control_endpoint "$(qa_capture_row_block "$(qa_get_inbox)" "$cid")" 'value="committed"')"
+  kind_endpoint="$(qa_block_control_endpoint "$(qa_capture_row_block "$(qa_get_inbox)" "$cid")" 'value="committed"')"
+  qa_triage_form "$kind_endpoint" "kind=committed"
+  endpoint="$(qa_open_panel_endpoint "$(qa_capture_row_block "$BODY" "$cid")" committed)"
   qa_triage_form "$endpoint" "kind=committed&deadline_date=2026-08-27&priority=P1&estimated_minutes=30"
   if [[ "$STATUS" != "422" ]]; then
     echo "FAIL: [$name-page-commitment] expected 422, got $STATUS" >&2

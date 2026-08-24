@@ -43,3 +43,17 @@ pub(crate) async fn mark_task_done(
 pub(crate) async fn unmark_task_done(pool: &SqlitePool, task_id: i64) -> Result<bool, sqlx::Error> {
     store::unmark_task_done(pool, task_id).await
 }
+
+/// Marks every not-yet-done task of `kind` at `tag` done at `done_at_ms`, in
+/// one statement (#125, `T-set-operations-execute-in-the-store`). Returns
+/// how many rows actually changed. The only entry point a group completion
+/// may use (`T-cross-capability-invariants-need-an-owner`: this capability
+/// is the one place `archived_at` is written from).
+pub(crate) async fn mark_group_done(
+    pool: &SqlitePool,
+    kind: &str,
+    tag: &str,
+    done_at_ms: i64,
+) -> Result<u64, sqlx::Error> {
+    store::mark_group_done(pool, kind, tag, done_at_ms).await
+}

@@ -12,6 +12,7 @@ use askama::Template;
 use axum::http::StatusCode;
 use axum::response::Response;
 use sqlx::SqlitePool;
+use std::collections::HashSet;
 
 /// The `#pool-body` fragment on its own -- what marking a task done swaps
 /// in. Kept separate from the full-page template for the same reason
@@ -28,10 +29,14 @@ pub(super) struct PoolBodyTemplate {
 
 /// Fetches the current pool and builds the `#pool-body` fragment. Shared by
 /// the pool page and [`respond`]: both need the identical view, built the
-/// identical way.
-pub(super) async fn build(pool: &SqlitePool) -> Result<PoolBodyTemplate, sqlx::Error> {
+/// identical way. `expanded_tags` names which trips render already expanded
+/// (#120) -- ridden along on this one request, never stored.
+pub(super) async fn build(
+    pool: &SqlitePool,
+    expanded_tags: &HashSet<String>,
+) -> Result<PoolBodyTemplate, sqlx::Error> {
     let rows = store::list_pool_tasks(pool).await?;
-    let built = view::build(rows);
+    let built = view::build(rows, expanded_tags);
     Ok(PoolBodyTemplate {
         meta: built.meta,
         empty: built.empty,
@@ -43,7 +48,10 @@ pub(super) async fn build(pool: &SqlitePool) -> Result<PoolBodyTemplate, sqlx::E
 /// The `#pool-body` fragment, re-rendered from current state --
 /// `T-forms-swap-one-fragment`'s response contract, for marking a task
 /// done.
-pub(super) async fn respond(pool: &SqlitePool) -> Result<Response, StatusCode> {
-    let body = build(pool).await.map_err(write_failed)?;
+pub(super) async fn respond(
+    pool: &SqlitePool,
+    expanded_tags: &HashSet<String>,
+) -> Result<Response, StatusCode> {
+    let body = build(pool, expanded_tags).await.map_err(write_failed)?;
     Ok(render_template(StatusCode::OK, &body))
 }

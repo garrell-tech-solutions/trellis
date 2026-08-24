@@ -9,10 +9,35 @@ use crate::platform::response::render_template;
 use crate::platform::response::write_failed;
 use crate::pool::view::{LooseItemView, TripView};
 use askama::Template;
-use axum::extract::{Path, State};
+use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::Response;
+use serde::Deserialize;
 use sqlx::SqlitePool;
+use std::collections::HashSet;
+
+/// Which trips render already expanded (#120): client state the browser
+/// echoes back on every request from inside `#pool-body`, so a trip you
+/// opened stays open across the `outerHTML` swap a checkbox tick causes --
+/// riding along with the request, never stored (`docs/plans/2026-08-24-
+/// trip-controls-brief.md`'s own steer: this is a thing you did with your
+/// thumb, not a durable consequence of one). Comma-separated tags; absent
+/// or empty means nothing is expanded, which is every request this slice
+/// did not originate (`GET /pool` never sends one).
+#[derive(Deserialize, Default)]
+pub struct ExpandedQuery {
+    #[serde(default)]
+    expanded: String,
+}
+
+fn expanded_tags(query: &ExpandedQuery) -> HashSet<String> {
+    query
+        .expanded
+        .split(',')
+        .filter(|tag| !tag.is_empty())
+        .map(str::to_string)
+        .collect()
+}
 
 /// The full page is the only thing that is not the `#pool-body` fragment,
 /// so it is the only caller that takes `body::build`'s fields apart instead
@@ -30,7 +55,9 @@ struct PoolTemplate {
 }
 
 pub async fn show_pool(State(pool): State<SqlitePool>) -> Result<Response, StatusCode> {
-    let built = body::build(&pool).await.map_err(write_failed)?;
+    let built = body::build(&pool, &HashSet::new())
+        .await
+        .map_err(write_failed)?;
     Ok(render_template(
         StatusCode::OK,
         &PoolTemplate {
@@ -54,11 +81,12 @@ pub async fn mark_pool_task_done(
     State(pool): State<SqlitePool>,
     State(clock): State<Clock>,
     Path(task_id): Path<i64>,
+    Query(expanded): Query<ExpandedQuery>,
 ) -> Result<Response, StatusCode> {
     crate::mark_done::mark_task_done(&pool, task_id, clock.now_ms())
         .await
         .map_err(write_failed)?;
-    body::respond(&pool).await
+    body::respond(&pool, &expanded_tags(&expanded)).await
 }
 
 /// Unchecks `task_id` (#122: the direct inverse of the tap that struck it)
@@ -69,11 +97,12 @@ pub async fn mark_pool_task_done(
 pub async fn unmark_pool_task_done(
     State(pool): State<SqlitePool>,
     Path(task_id): Path<i64>,
+    Query(expanded): Query<ExpandedQuery>,
 ) -> Result<Response, StatusCode> {
     crate::mark_done::unmark_task_done(&pool, task_id)
         .await
         .map_err(write_failed)?;
-    body::respond(&pool).await
+    body::respond(&pool, &expanded_tags(&expanded)).await
 }
 
 /// Clears every struck-through, not-yet-cleared task at `tag` (#122's
@@ -85,11 +114,30 @@ pub async fn clear_pool_trip_done(
     State(pool): State<SqlitePool>,
     State(clock): State<Clock>,
     Path(tag): Path<String>,
+    Query(expanded): Query<ExpandedQuery>,
 ) -> Result<Response, StatusCode> {
     crate::pool::store::clear_done(&pool, &tag, clock.now_ms())
         .await
         .map_err(write_failed)?;
-    body::respond(&pool).await
+    body::respond(&pool, &expanded_tags(&expanded)).await
+}
+
+/// Marks every open task in the trip tagged `tag` done, in one statement
+/// (#125), and swaps in the current `#pool-body` fragment. Goes through
+/// `mark_done`'s front door like every other completion
+/// (`T-cross-capability-invariants-need-an-owner`) rather than a second
+/// write path -- `kind = "pool"` is the only thing this handler adds that
+/// the front door itself does not already know.
+pub async fn complete_pool_trip(
+    State(pool): State<SqlitePool>,
+    State(clock): State<Clock>,
+    Path(tag): Path<String>,
+    Query(expanded): Query<ExpandedQuery>,
+) -> Result<Response, StatusCode> {
+    crate::mark_done::mark_group_done(&pool, "pool", &tag, clock.now_ms())
+        .await
+        .map_err(write_failed)?;
+    body::respond(&pool, &expanded_tags(&expanded)).await
 }
 
 #[cfg(test)]
@@ -397,5 +445,147 @@ mod tests {
         let (_, body) = post_clear(&pool, "@homedepot").await;
 
         assert!(!body.contains("@homedepot"), "got:\n{body}");
+    }
+
+    // --- #125: the complete-group control ---------------------------------
+
+    async fn given_n_pool_tasks(pool: &SqlitePool, tag: &str, n: usize) -> Vec<i64> {
+        let mut ids = Vec::new();
+        for i in 0..n {
+            let capture_id = given_a_pool_task(pool, &format!("item {i}"), Some(tag)).await;
+            ids.push(task_id_for_capture(pool, capture_id).await);
+        }
+        ids
+    }
+
+    async fn post_complete(pool: &SqlitePool, tag: &str) -> (StatusCode, String) {
+        http_request(
+            pool,
+            Clock::pinned_at(4242),
+            "POST",
+            &format!("/pool/trips/{}/complete", urlencoding_placeholder(tag)),
+        )
+        .await
+    }
+
+    #[tokio::test]
+    async fn completing_a_group_strikes_every_open_item_including_hidden_ones() {
+        let (_dir, pool) = test_pool().await;
+        given_n_pool_tasks(&pool, "@homedepot", 8).await;
+
+        let (status, body) = post_complete(&pool, "@homedepot").await;
+
+        assert_eq!(status, StatusCode::OK);
+        assert!(body.contains("8 of 8 done"), "got:\n{body}");
+        for i in 0..8 {
+            assert!(
+                body.contains(&format!("item {i}")),
+                "missing item {i}, got:\n{body}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn completing_a_group_leaves_a_different_group_and_loose_ends_alone() {
+        let (_dir, pool) = test_pool().await;
+        given_n_pool_tasks(&pool, "@homedepot", 4).await;
+        given_n_pool_tasks(&pool, "@supermarket", 3).await;
+        given_a_pool_task(&pool, "fix the door latch", None).await;
+
+        let (_, body) = post_complete(&pool, "@homedepot").await;
+
+        assert!(body.contains("4 of 4 done"), "got:\n{body}");
+        assert!(
+            !body.contains("0 of 3 done"),
+            "the other group must not be touched"
+        );
+        assert!(
+            body.contains("fix the door latch"),
+            "the loose end must be untouched, got:\n{body}"
+        );
+    }
+
+    #[tokio::test]
+    async fn completing_a_group_goes_through_the_route_and_leaves_it_reversible() {
+        let (_dir, pool) = test_pool().await;
+        let ids = given_n_pool_tasks(&pool, "@homedepot", 4).await;
+
+        post_complete(&pool, "@homedepot").await;
+        let (status, body) = post_undone(&pool, ids[0]).await;
+
+        assert_eq!(status, StatusCode::OK);
+        assert!(body.contains("3 of 4 done"), "got:\n{body}");
+    }
+
+    #[tokio::test]
+    async fn a_fully_done_group_offers_no_complete_control() {
+        let (_dir, pool) = test_pool().await;
+        given_n_pool_tasks(&pool, "@homedepot", 3).await;
+
+        let (_, body) = post_complete(&pool, "@homedepot").await;
+
+        assert!(
+            !body.contains("trip-complete"),
+            "expected no complete-group control once nothing is left open, got:\n{body}"
+        );
+    }
+
+    // --- #120: expand state rides along the request, never stored --------
+
+    async fn post_mark_done_expanded(
+        pool: &SqlitePool,
+        task_id: i64,
+        expanded_tag: &str,
+    ) -> (StatusCode, String) {
+        http_request(
+            pool,
+            Clock::pinned_at(4242),
+            "POST",
+            &format!(
+                "/pool/tasks/{task_id}/done?expanded={}",
+                urlencoding_placeholder(expanded_tag)
+            ),
+        )
+        .await
+    }
+
+    #[tokio::test]
+    async fn a_trip_named_in_the_expanded_query_renders_expanded_after_a_tick() {
+        let (_dir, pool) = test_pool().await;
+        let ids = given_five_pool_tasks(&pool, "@homedepot").await;
+
+        let (status, body) = post_mark_done_expanded(&pool, ids[0], "@homedepot").await;
+
+        assert_eq!(status, StatusCode::OK);
+        assert!(
+            body.contains(r#"class="trip panel expanded""#),
+            "got:\n{body}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_plain_tick_with_no_expanded_query_renders_collapsed() {
+        let (_dir, pool) = test_pool().await;
+        let ids = given_five_pool_tasks(&pool, "@homedepot").await;
+
+        let (_, body) = post_mark_done(&pool, ids[0]).await;
+
+        assert!(
+            !body.contains(r#"class="trip panel expanded""#),
+            "expected no trip rendered expanded, got:\n{body}"
+        );
+    }
+
+    #[tokio::test]
+    async fn the_pool_screen_never_renders_expanded_on_a_fresh_get() {
+        let (_dir, pool) = test_pool().await;
+        given_five_pool_tasks(&pool, "@homedepot").await;
+
+        let (_, body) = get_pool(&pool).await;
+
+        assert!(
+            !body.contains(r#"class="trip panel expanded""#),
+            "a fresh GET must always start collapsed, got:\n{body}"
+        );
     }
 }

@@ -36,6 +36,7 @@ mod pool_screen;
 mod quota_triage_validation;
 mod triage;
 mod triage_from_page;
+mod trip_controls;
 mod trip_progress;
 mod unknown_kind_rejection;
 
@@ -288,6 +289,9 @@ pub async fn dispatch(
         return outcome;
     }
     if let Some(outcome) = colour::dispatch(world, text, example).await {
+        return outcome;
+    }
+    if let Some(outcome) = trip_controls::dispatch(world, text, example).await {
         return outcome;
     }
 

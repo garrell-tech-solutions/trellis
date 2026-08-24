@@ -25,7 +25,7 @@ use crate::platform::assets::{
 };
 use crate::platform::clock::Clock;
 use crate::pool::http::{
-    clear_pool_trip_done, mark_pool_task_done, show_pool, unmark_pool_task_done,
+    clear_pool_trip_done, complete_pool_trip, mark_pool_task_done, show_pool, unmark_pool_task_done,
 };
 use crate::settings::http::set_timezone;
 use crate::triage::http::create_triage;
@@ -76,6 +76,7 @@ pub fn build_app(pool: SqlitePool, clock: Clock) -> Router {
         .route("/pool/tasks/{id}/done", post(mark_pool_task_done))
         .route("/pool/tasks/{id}/undone", post(unmark_pool_task_done))
         .route("/pool/trips/{tag}/clear", post(clear_pool_trip_done))
+        .route("/pool/trips/{tag}/complete", post(complete_pool_trip))
         .route("/committed", get(show_committed))
         .route("/committed/tasks/{id}/done", post(mark_committed_task_done))
         .with_state(AppState { pool, clock })

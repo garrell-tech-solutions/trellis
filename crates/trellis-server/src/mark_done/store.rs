@@ -26,6 +26,22 @@ pub(super) async fn mark_task_done(
     Ok(result.rows_affected() > 0)
 }
 
+/// The direct inverse of [`mark_task_done`] (#122,
+/// `D-a-trip-survives-being-worked`: unchecking a struck item puts it
+/// back). Guarded by `cleared_at IS NULL` -- a cleared task has no control
+/// on screen to trigger this from, but the guard keeps the invariant true
+/// in the database regardless of what a caller might attempt.
+pub(super) async fn unmark_task_done(pool: &SqlitePool, task_id: i64) -> Result<bool, sqlx::Error> {
+    let result = sqlx::query(
+        "UPDATE tasks SET archived_at = NULL \
+         WHERE id = ? AND archived_at IS NOT NULL AND cleared_at IS NULL",
+    )
+    .bind(task_id)
+    .execute(pool)
+    .await?;
+    Ok(result.rows_affected() > 0)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -90,5 +106,65 @@ mod tests {
         let changed = mark_task_done(&pool, 999, 1).await.unwrap();
 
         assert!(!changed);
+    }
+
+    #[tokio::test]
+    async fn unmark_task_done_clears_archived_at() {
+        let (_dir, pool) = test_pool().await;
+        let task_id = given_a_pool_task(&pool, "buy screws").await;
+        mark_task_done(&pool, task_id, 4242).await.unwrap();
+
+        let changed = unmark_task_done(&pool, task_id).await.unwrap();
+
+        assert!(changed);
+        let archived_at: Option<i64> =
+            sqlx::query_scalar("SELECT archived_at FROM tasks WHERE id = ?")
+                .bind(task_id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(archived_at, None);
+    }
+
+    #[tokio::test]
+    async fn unmark_task_done_is_a_no_op_on_a_task_that_was_never_done() {
+        let (_dir, pool) = test_pool().await;
+        let task_id = given_a_pool_task(&pool, "buy screws").await;
+
+        let changed = unmark_task_done(&pool, task_id).await.unwrap();
+
+        assert!(!changed);
+    }
+
+    #[tokio::test]
+    async fn unmark_task_done_reports_no_change_for_an_unknown_id() {
+        let (_dir, pool) = test_pool().await;
+
+        let changed = unmark_task_done(&pool, 999).await.unwrap();
+
+        assert!(!changed);
+    }
+
+    #[tokio::test]
+    async fn unmark_task_done_leaves_a_cleared_task_alone() {
+        let (_dir, pool) = test_pool().await;
+        let task_id = given_a_pool_task(&pool, "buy screws").await;
+        mark_task_done(&pool, task_id, 1).await.unwrap();
+        sqlx::query("UPDATE tasks SET cleared_at = 2 WHERE id = ?")
+            .bind(task_id)
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let changed = unmark_task_done(&pool, task_id).await.unwrap();
+
+        assert!(!changed);
+        let archived_at: Option<i64> =
+            sqlx::query_scalar("SELECT archived_at FROM tasks WHERE id = ?")
+                .bind(task_id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(archived_at, Some(1));
     }
 }

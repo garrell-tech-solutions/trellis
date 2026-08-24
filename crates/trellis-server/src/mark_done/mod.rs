@@ -36,3 +36,10 @@ pub(crate) async fn mark_task_done(
 ) -> Result<bool, sqlx::Error> {
     store::mark_task_done(pool, task_id, done_at_ms).await
 }
+
+/// The direct inverse of [`mark_task_done`] (#122): unchecking a struck
+/// item puts it back. Returns whether a row actually changed — `false`
+/// when the task was already open, already cleared, or does not exist.
+pub(crate) async fn unmark_task_done(pool: &SqlitePool, task_id: i64) -> Result<bool, sqlx::Error> {
+    store::unmark_task_done(pool, task_id).await
+}

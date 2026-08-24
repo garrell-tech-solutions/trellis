@@ -5,10 +5,10 @@
 //! so this query's `WHERE tasks.kind = 'pool'` is the whole of what keeps
 //! committed and quota work off this screen (`pool-screen-only-pool-04`).
 //!
-//! `AND tasks.archived_at IS NULL` keeps a task you marked done off this
-//! screen and out of its count (`mark-done-counts-exclude-04`) -- #97's
-//! whole point, since `T-trips-are-derived-not-ranked` means a done task
-//! left in would still count toward the trip threshold.
+//! `AND tasks.cleared_at IS NULL` (#122) is the only exclusion left: a
+//! task marked done stays in this list -- struck through, not removed --
+//! until its trip's "Clear done" control sweeps it out. `archived_at` alone
+//! no longer keeps a row off this screen; see [`PoolTaskRow::done`].
 
 use sqlx::SqlitePool;
 
@@ -18,20 +18,49 @@ pub struct PoolTaskRow {
     pub task_id: i64,
     pub raw_text: String,
     pub context_tag: Option<String>,
+    /// Struck-through (#122): `archived_at IS NOT NULL`. A row this query
+    /// returns is never *cleared* -- that is what excludes it -- so `done`
+    /// alone is enough for the view to decide open-vs-struck.
+    pub done: bool,
 }
 
-/// Every pool task, alongside the text and context tag of the capture it
-/// was triaged from. Unordered on purpose: `scheduler_core::pool::group`
-/// establishes newest-first itself rather than trusting a caller to have
-/// sorted already.
+/// Every pool task not yet cleared, alongside the text and context tag of
+/// the capture it was triaged from. Unordered on purpose:
+/// `scheduler_core::pool::group` establishes newest-first itself rather
+/// than trusting a caller to have sorted already.
 pub async fn list_pool_tasks(pool: &SqlitePool) -> Result<Vec<PoolTaskRow>, sqlx::Error> {
     sqlx::query_as(
-        "SELECT tasks.id AS task_id, captures.raw_text, captures.context_tag FROM tasks \
+        "SELECT tasks.id AS task_id, captures.raw_text, captures.context_tag, \
+         (tasks.archived_at IS NOT NULL) AS done FROM tasks \
          JOIN captures ON captures.id = tasks.capture_id \
-         WHERE tasks.kind = 'pool' AND tasks.archived_at IS NULL",
+         WHERE tasks.kind = 'pool' AND tasks.cleared_at IS NULL",
     )
     .fetch_all(pool)
     .await
+}
+
+/// Sweeps every struck-through (`archived_at IS NOT NULL`), not-yet-cleared
+/// pool task at `tag` off the screen (#122's "Clear done") -- scoped to the
+/// tag rather than a caller-supplied id list, since the control acts on a
+/// whole trip at once and the row never carries its own "still open" flag
+/// for a caller to check first. Never touches an open task: the `WHERE`
+/// makes clearing a no-op on anything not already done, the same shape the
+/// mark-done write's own guard takes.
+pub async fn clear_done(
+    pool: &SqlitePool,
+    tag: &str,
+    cleared_at_ms: i64,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "UPDATE tasks SET cleared_at = ? \
+         WHERE kind = 'pool' AND archived_at IS NOT NULL AND cleared_at IS NULL \
+         AND capture_id IN (SELECT id FROM captures WHERE context_tag = ?)",
+    )
+    .bind(cleared_at_ms)
+    .bind(tag)
+    .execute(pool)
+    .await?;
+    Ok(())
 }
 
 #[cfg(test)]
@@ -127,7 +156,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn list_pool_tasks_excludes_a_task_marked_done() {
+    async fn list_pool_tasks_still_reports_a_task_marked_done_but_not_cleared() {
         let (_dir, pool) = test_pool().await;
         let tasks = given_a_pool_task(&pool, "buy screws", Some("@homedepot")).await;
         let task_id = tasks[0].task_id;
@@ -137,6 +166,102 @@ mod tests {
             .await
             .unwrap();
 
+        let tasks = list_pool_tasks(&pool).await.unwrap();
+        assert_eq!(tasks.len(), 1);
+        assert!(tasks[0].done);
+    }
+
+    #[tokio::test]
+    async fn list_pool_tasks_reports_an_open_task_as_not_done() {
+        let (_dir, pool) = test_pool().await;
+
+        let tasks = given_a_pool_task(&pool, "buy screws", Some("@homedepot")).await;
+
+        assert!(!tasks[0].done);
+    }
+
+    #[tokio::test]
+    async fn list_pool_tasks_excludes_a_cleared_task() {
+        let (_dir, pool) = test_pool().await;
+        let tasks = given_a_pool_task(&pool, "buy screws", Some("@homedepot")).await;
+        let task_id = tasks[0].task_id;
+        sqlx::query("UPDATE tasks SET archived_at = 1, cleared_at = 2 WHERE id = ?")
+            .bind(task_id)
+            .execute(&pool)
+            .await
+            .unwrap();
+
         assert_eq!(list_pool_tasks(&pool).await.unwrap(), Vec::new());
+    }
+
+    #[tokio::test]
+    async fn clear_done_stamps_cleared_at_on_a_done_task_at_the_named_tag() {
+        let (_dir, pool) = test_pool().await;
+        let tasks = given_a_pool_task(&pool, "buy screws", Some("@homedepot")).await;
+        let task_id = tasks[0].task_id;
+        sqlx::query("UPDATE tasks SET archived_at = 1 WHERE id = ?")
+            .bind(task_id)
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        clear_done(&pool, "@homedepot", 42).await.unwrap();
+
+        assert_eq!(list_pool_tasks(&pool).await.unwrap(), Vec::new());
+        let cleared_at: Option<i64> =
+            sqlx::query_scalar("SELECT cleared_at FROM tasks WHERE id = ?")
+                .bind(task_id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(cleared_at, Some(42));
+    }
+
+    #[tokio::test]
+    async fn clear_done_leaves_an_open_task_at_the_same_tag_alone() {
+        let (_dir, pool) = test_pool().await;
+        let done_capture = insert_capture(&pool, "buy screws", Some("@homedepot")).await;
+        crate::triage::store::insert_task(&pool, done_capture, &TaskKind::Pool, 0)
+            .await
+            .unwrap();
+        let open_capture = insert_capture(&pool, "return the drill", Some("@homedepot")).await;
+        crate::triage::store::insert_task(&pool, open_capture, &TaskKind::Pool, 0)
+            .await
+            .unwrap();
+        let done_task_id: i64 = sqlx::query_scalar("SELECT id FROM tasks WHERE capture_id = ?")
+            .bind(done_capture)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        sqlx::query("UPDATE tasks SET archived_at = 1 WHERE id = ?")
+            .bind(done_task_id)
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        clear_done(&pool, "@homedepot", 42).await.unwrap();
+
+        let remaining = list_pool_tasks(&pool).await.unwrap();
+        assert_eq!(remaining.len(), 1);
+        assert_eq!(remaining[0].raw_text, "return the drill");
+        assert!(!remaining[0].done);
+    }
+
+    #[tokio::test]
+    async fn clear_done_leaves_a_done_task_at_a_different_tag_alone() {
+        let (_dir, pool) = test_pool().await;
+        let tasks = given_a_pool_task(&pool, "buy screws", Some("@homedepot")).await;
+        let task_id = tasks[0].task_id;
+        sqlx::query("UPDATE tasks SET archived_at = 1 WHERE id = ?")
+            .bind(task_id)
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        clear_done(&pool, "@supermarket", 42).await.unwrap();
+
+        let remaining = list_pool_tasks(&pool).await.unwrap();
+        assert_eq!(remaining.len(), 1);
+        assert!(remaining[0].done);
     }
 }

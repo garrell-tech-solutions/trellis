@@ -750,6 +750,13 @@ td {
   color: var(--color-primary-800);
 }
 
+.trip-progress {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex: none;
+}
+
 .trip-count {
   font-size: 11px;
   color: var(--color-gray-600);
@@ -765,6 +772,35 @@ td {
   border-bottom: none;
   font-size: 13.5px;
   color: var(--color-gray-800);
+}
+
+/* A struck-through item stays in place rather than vanishing (#122,
+   D-a-trip-survives-being-worked) -- the label carries the state, the
+   checkbox's own `checked` attribute is what makes unchecking it the
+   direct inverse of the tap that struck it. */
+.trip-items > li.done .trip-item-text {
+  text-decoration: line-through;
+  color: var(--color-gray-400);
+}
+
+/* "Clear done" (#122): a bare glyph placed directly after the progress
+   label it depends on for meaning -- there is no conventional icon for
+   "clear completed", so position is what makes X read as this rather than
+   "close this group". Appears only once something in the trip is struck. */
+.clear-done {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  margin-left: 2px;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--color-gray-500);
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
 }
 
 .trip-more {
@@ -798,10 +834,13 @@ td {
 
 /* --- Mark done -----------------------------------------------------------
  *
- * A task you did leaves the screen it lives on, permanently (#97). The
- * canvas draws no such control -- this checkbox at each row's leading edge
- * was the owner's call, not the design's. One rule on both screens: ticking
- * down a column rather than reaching across a row.
+ * A task you did leaves the screen it lives on (#97) -- permanently on
+ * Committed, and on Pool for a loose end (no panel to hold it in place).
+ * A trip's own struck items stay in place until "Clear done" sweeps them
+ * (#122, D-a-trip-survives-being-worked). The canvas draws no such
+ * control -- this checkbox at each row's leading edge was the owner's
+ * call, not the design's. One rule on both screens: ticking down a
+ * column rather than reaching across a row.
  */
 
 .done-check {

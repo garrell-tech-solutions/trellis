@@ -81,6 +81,16 @@ No Rust tool emits the contract natively. Each `Run` is a wrapper under
   Install:     `npm i -g jscpd`
   Run:         `scripts/analyzers/dry.sh <path>`
   Threshold:   3   # max % duplicated tokens
+  Scope:       product code only -- the acceptance harness is excluded.
+               Settled by the owner 2026-08-24. The gate exists to catch
+               copy-pasted product logic; 62% of what it was flagging was
+               duplication *between* per-screen step modules in
+               `crates/acceptance-tests/src/steps/`, which is structural to a
+               per-feature harness and not extractable. Measured at the time:
+               2.09% product-only against 3.54% including the harness, so the
+               threshold keeps biting and did not need moving. Inline
+               `#[cfg(test)]` tests stay measured -- they live in product
+               files.
 
 - Lint:        clippy
   Install:     `rustup component add clippy`

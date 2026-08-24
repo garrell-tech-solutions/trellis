@@ -260,6 +260,10 @@ mod tests {
     fn a_trip_with_nothing_hidden_has_no_more_label() {
         let view = build(three_task_trip());
         assert_eq!(view.trips[0].more_label, None);
+        assert_eq!(
+            view.trips[0].collapsed_label, None,
+            "nothing is hidden, so there is nothing to show once collapsed either"
+        );
     }
 
     #[test]

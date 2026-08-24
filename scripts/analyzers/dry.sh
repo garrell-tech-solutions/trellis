@@ -87,6 +87,14 @@ IGNORE_MECHANICAL="$IGNORE_MECHANICAL,**/.worktrees/**,**/.claude/**,**/.git/**"
 #                               because the decision excludes the acceptance
 #                               harness, not because it grows.
 #
+# Out for a different reason, and stated rather than left to luck: `swarm`
+# and swarmforge/ are the pipeline that writes the product, not the product,
+# and the scripts are synced from an upstream fork rather than written here.
+# Most of them are already invisible because .gitignore lists
+# swarmforge/scripts/ -- which is the same one-line-away-from-reversing
+# dependency the .worktrees/ and .claude/ entries above refuse to rely on, and
+# here it would drop twenty upstream shell scripts into a product number.
+#
 # Deliberately still measured, because neither grows per feature and both
 # have duplication that can actually be removed:
 #
@@ -106,6 +114,7 @@ IGNORE_MECHANICAL="$IGNORE_MECHANICAL,**/.worktrees/**,**/.claude/**,**/.git/**"
 # the generated entrypoint directory and is covered by the crate-wide entry
 # above.
 IGNORE_SCOPE="crates/acceptance-tests/**,scripts/acceptance/**,scripts/qa/**"
+IGNORE_SCOPE="$IGNORE_SCOPE,swarmforge/**,swarm"
 
 # A scope stated as --ignore rather than as an opt-in list of product paths,
 # for the reason given against FORMATS: an opt-in list drops a new crate out

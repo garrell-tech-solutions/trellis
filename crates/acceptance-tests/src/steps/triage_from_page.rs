@@ -91,23 +91,16 @@ pub async fn dispatch(
         return Some(then_task_list_contains(world, &caps[1]));
     }
     if let Some(caps) = WHEN_TRIAGED_AS_COMMITTED_THROUGH_PAGE_OMITTING.captures(text) {
-        return Some(dispatch_committed_omitting(world, &caps).await);
+        return Some(dispatch_committed_omitting(world, example, &caps).await);
     }
     if let Some(caps) = WHEN_TRIAGED_AS_QUOTA_THROUGH_PAGE_OMITTING.captures(text) {
-        return Some(dispatch_quota_omitting(world, &caps).await);
+        return Some(dispatch_quota_omitting(world, example, &caps).await);
     }
     if THEN_OFFERS_COMMITMENT_CHOICES.is_match(text) {
-        return Some(then_commitment_choices_offered_exactly(
-            world,
-            &["at", "by"],
-        ));
+        return Some(dispatch_offers_commitment_choices(world).await);
     }
     if THEN_OFFERS_PRIORITY_CHOICES.is_match(text) {
-        return Some(then_select_offers_exactly(
-            world,
-            "priority",
-            &["P1", "P2", "P3", "P4"],
-        ));
+        return Some(dispatch_offers_priority_choices(world).await);
     }
     if THEN_TASK_LIST_NO_UNESCAPED_SCRIPT.is_match(text) {
         return Some(then_task_list_excludes(world, "<script>"));
@@ -119,7 +112,7 @@ pub async fn dispatch(
         return Some(then_pool_not_behind_control(world));
     }
     if let Some(caps) = THEN_POOL_FEWER_INPUTS.captures(text) {
-        return Some(dispatch_pool_fewer_inputs(world, example, &caps));
+        return Some(dispatch_pool_fewer_inputs(world, example, &caps).await);
     }
     None
 }
@@ -128,6 +121,23 @@ fn capture_id(world: &World) -> Result<i64, String> {
     world
         .last_capture_id
         .ok_or_else(|| "no capture set up for this scenario".to_string())
+}
+
+/// Which kind's fields panel a row shows is a display preference the
+/// server remembers (#119, `inbox::set_shown_kind`), not something a
+/// `<details>` toggles client-side -- so the two scenarios that inspect a
+/// panel's own fields (committed's closed choices, and the pool-is-cheapest
+/// comparison) must actually choose the kind first, the same POST a click on
+/// its button sends, before there is a panel in the response to inspect.
+pub(super) async fn choose_kind(world: &mut World, kind: &str) -> Result<(), String> {
+    let capture_id = capture_id(world)?;
+    let request = Request::builder()
+        .method("POST")
+        .uri(format!("/captures/{capture_id}/kind"))
+        .header("content-type", "application/x-www-form-urlencoded")
+        .body(Body::from(format!("kind={kind}")))
+        .map_err(|e| format!("build request: {e}"))?;
+    html_response(world, request).await
 }
 
 pub(super) async fn when_triaged_through_page(
@@ -173,15 +183,28 @@ pub(super) fn quota_form_fields() -> [(&'static str, &'static str); 5] {
     ]
 }
 
-/// This scenario has no Examples table — the omitted field's name is
-/// written literally in the step text (`with "deadline" omitted`), not as a
-/// `<placeholder>` — so `&caps[1]` is the field name itself, not something
-/// to resolve against an example row.
+/// Resolves a captured value that may be a literal or an `Examples`
+/// placeholder (`<missing_field>`) written down verbatim in the step text.
+/// `triage_from_page.feature`'s own two omitting scenarios write the field
+/// literally (no Examples table); `disclosures.feature`'s reuses the same
+/// step wording with a genuine `<missing_field>` placeholder over an
+/// Examples table (#119, `disclosures-submissions-unchanged-06`), so both
+/// dispatch sites below must resolve rather than assume literal text. See
+/// `pool_screen.rs`'s own copy of this function for the full reasoning.
+fn resolve(example: &BTreeMap<String, String>, raw: &str) -> Result<String, String> {
+    static PLACEHOLDER: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^<(\w+)>$").unwrap());
+    match PLACEHOLDER.captures(raw) {
+        Some(caps) => Ok(example_value(example, &caps[1])?.to_string()),
+        None => Ok(raw.to_string()),
+    }
+}
+
 async fn dispatch_committed_omitting(
     world: &mut World,
+    example: &BTreeMap<String, String>,
     caps: &regex::Captures<'_>,
 ) -> Result<(), String> {
-    let missing_field = &caps[1];
+    let missing_field = resolve(example, &caps[1])?;
     let fields: Vec<(&str, &str)> = committed_form_fields()
         .into_iter()
         .filter(|(name, _)| *name != missing_field)
@@ -191,9 +214,10 @@ async fn dispatch_committed_omitting(
 
 async fn dispatch_quota_omitting(
     world: &mut World,
+    example: &BTreeMap<String, String>,
     caps: &regex::Captures<'_>,
 ) -> Result<(), String> {
-    let missing_field = &caps[1];
+    let missing_field = resolve(example, &caps[1])?;
     let fields: Vec<(&str, &str)> = quota_form_fields()
         .into_iter()
         .filter(|(name, _)| *name != missing_field)
@@ -291,31 +315,34 @@ pub(super) fn select_option_values(section: &str, field_name: &str) -> Result<Ve
         .collect())
 }
 
-/// One triage form's own markup within `section`: pool's is everything
-/// before the row's first `<details>` (D-pool-is-default keeps it outside
-/// any expanding control), committed's and quota's are each scoped to their
-/// own `<details>` block by its `<summary>` text.
+/// Pool's own form (#119: three sibling `<form>`s in `.kinds`, not a
+/// `<details>` among them -- `D-pool-is-default` keeps it a plain form
+/// regardless of which other kind's panel is open).
 fn pool_form_section(section: &str) -> Result<&str, String> {
-    let end = section
-        .find("<details")
-        .ok_or_else(|| format!("no <details> found in:\n{section}"))?;
-    Ok(&section[..end])
+    html::between(section, r#"<form class="kind-choice kind-wide""#, "</form>")
 }
 
-/// Committed's own section spans two nested `<details>` disclosures --
-/// "At a time" and "By a day" (#110, `committed-date-still-explicit-04`) --
-/// so it needs [`html::details_section_after`]'s nesting-aware scoping
-/// rather than [`html::between`]'s first-`</details>`-wins scan, which
-/// would stop at the inner "At a time" block's own close.
-fn committed_form_section(section: &str) -> Result<&str, String> {
-    html::details_section_after(section, "<summary>Committed</summary>")
+/// The one panel a row shows, whichever kind it is (#119): at most one of
+/// `.fields-panel` exists in a row at a time, so this does not need to tell
+/// committed's apart from quota's by name -- the caller is what ensures the
+/// right one was chosen first (see [`choose_kind`]). Scoped to the next
+/// `<form class="dismiss"` rather than counting nested `<div>`s: the panel's
+/// own content nests a `<div class="actions">`, so a naive first-`</div>`
+/// scope would truncate before the panel's own close, and `<form
+/// class="dismiss"` is the row's own stable, always-present next sibling
+/// regardless of which panel (or none) is open.
+fn open_panel_section(section: &str) -> Result<&str, String> {
+    html::between(
+        section,
+        r#"<div class="fields-panel">"#,
+        r#"<form class="dismiss""#,
+    )
 }
 
 pub(super) fn form_section<'a>(section: &'a str, kind: &str) -> Result<&'a str, String> {
     match kind {
         "pool" => pool_form_section(section),
-        "committed" => committed_form_section(section),
-        "quota" => html::between(section, "<summary>Quota</summary>", "</details>"),
+        "committed" | "quota" => open_panel_section(section),
         other => Err(format!("unknown triage kind {other:?}")),
     }
 }
@@ -354,19 +381,20 @@ fn then_pool_not_behind_control(world: &mut World) -> Result<(), String> {
     }
 }
 
-fn dispatch_pool_fewer_inputs(
+async fn dispatch_pool_fewer_inputs(
     world: &mut World,
     example: &BTreeMap<String, String>,
     caps: &regex::Captures<'_>,
 ) -> Result<(), String> {
-    let other_kind = example_value(example, &caps[1])?;
-    then_pool_fewer_inputs(world, other_kind)
+    let other_kind = example_value(example, &caps[1])?.to_string();
+    then_pool_fewer_inputs(world, &other_kind).await
 }
 
-fn then_pool_fewer_inputs(world: &mut World, other_kind: &str) -> Result<(), String> {
-    let section = captures_list_section(world)?;
-    let pool_count = field_count(form_section(section, "pool")?);
-    let other_count = field_count(form_section(section, other_kind)?);
+fn fewer_inputs_result(
+    pool_count: usize,
+    other_count: usize,
+    other_kind: &str,
+) -> Result<(), String> {
     if pool_count < other_count {
         Ok(())
     } else {
@@ -375,6 +403,18 @@ fn then_pool_fewer_inputs(world: &mut World, other_kind: &str) -> Result<(), Str
              {other_kind} ({other_count} fields)"
         ))
     }
+}
+
+/// Pool's own count comes from the row as already viewed -- its form is
+/// present whether or not another kind's panel is open, so nothing needs to
+/// change to read it. `other_kind`'s count needs its panel actually open
+/// first ([`choose_kind`]), which re-renders `#lists` and is read from that
+/// fresh response instead.
+async fn then_pool_fewer_inputs(world: &mut World, other_kind: &str) -> Result<(), String> {
+    let pool_count = field_count(form_section(captures_list_section(world)?, "pool")?);
+    choose_kind(world, other_kind).await?;
+    let other_count = field_count(form_section(captures_list_section(world)?, other_kind)?);
+    fewer_inputs_result(pool_count, other_count, other_kind)
 }
 
 /// [`then_select_offers_exactly`]'s counterpart for committed's at/by
@@ -394,6 +434,21 @@ fn then_commitment_choices_offered_exactly(
             "expected the commitment choices {expected:?}, got {actual:?}"
         ))
     }
+}
+
+/// Committed's panel (#119) only exists in the response once committed has
+/// been chosen for this row -- both `THEN_OFFERS_COMMITMENT_CHOICES` and
+/// `THEN_OFFERS_PRIORITY_CHOICES` inspect that same panel, each choosing it
+/// fresh rather than relying on the other having already done so, since
+/// nothing in the Gherkin orders them relative to each other.
+async fn dispatch_offers_commitment_choices(world: &mut World) -> Result<(), String> {
+    choose_kind(world, "committed").await?;
+    then_commitment_choices_offered_exactly(world, &["at", "by"])
+}
+
+async fn dispatch_offers_priority_choices(world: &mut World) -> Result<(), String> {
+    choose_kind(world, "committed").await?;
+    then_select_offers_exactly(world, "priority", &["P1", "P2", "P3", "P4"])
 }
 
 fn then_select_offers_exactly(
@@ -507,15 +562,38 @@ mod tests {
         );
     }
 
-    /// A capture row with two form fields on the pool form and committed's
-    /// own nested at/by disclosures, standing in for the real template's
-    /// shape without depending on it (#110: committed no longer offers its
-    /// commitment choice through a `<select>`).
-    fn row_with_forms() -> String {
+    /// Pool's own form (#119): the three sibling `<form>`s a row now offers,
+    /// standing in for the real template's shape without depending on it.
+    /// `.kind-choice.kind-wide` is the marker [`pool_form_section`] scopes
+    /// by; the other two are plain `.kind-choice` buttons, no panel open.
+    fn row_with_no_panel_open() -> String {
         concat!(
             r#"<li id="capture-row-1">buy milk"#,
-            r#"<form><input type="hidden" name="kind" value="pool"><select name="life_area"></select></form>"#,
-            r#"<details><summary>Committed</summary>"#,
+            r#"<div class="kinds">"#,
+            r#"<form class="kind-choice kind-wide"><input type="hidden" name="kind" value="pool"><select name="life_area"></select></form>"#,
+            r#"<form class="kind-choice"><input type="hidden" name="kind" value="committed"><button>Committed</button></form>"#,
+            r#"<form class="kind-choice"><input type="hidden" name="kind" value="quota"><button>Quota</button></form>"#,
+            r#"</div>"#,
+            r#"<form class="dismiss"><button type="submit">Dismiss</button></form>"#,
+            r#"</li>"#,
+        )
+        .to_string()
+    }
+
+    /// The same row with committed's panel open (#119) -- what the response
+    /// to [`choose_kind`]`(world, "committed")` looks like: its own nested
+    /// at/by disclosures (#110: committed no longer offers its commitment
+    /// choice through a `<select>`), wrapped in `.fields-panel`, followed by
+    /// the row's own stable `<form class="dismiss"` sibling.
+    fn row_with_committed_panel_open() -> String {
+        concat!(
+            r#"<li id="capture-row-1">buy milk"#,
+            r#"<div class="kinds">"#,
+            r#"<form class="kind-choice kind-wide"><input type="hidden" name="kind" value="pool"><select name="life_area"></select></form>"#,
+            r#"<form class="kind-choice chosen"><input type="hidden" name="kind" value="committed"><button>Committed</button></form>"#,
+            r#"<form class="kind-choice"><input type="hidden" name="kind" value="quota"><button>Quota</button></form>"#,
+            r#"</div>"#,
+            r#"<div class="fields-panel">"#,
             r#"<details><summary>At a time</summary>"#,
             r#"<form><input type="hidden" name="kind" value="committed">"#,
             r#"<input type="hidden" name="commitment" value="at">"#,
@@ -527,35 +605,55 @@ mod tests {
             r#"<input type="hidden" name="commitment" value="by">"#,
             r#"<input type="date" name="deadline_date">"#,
             r#"<select name="priority"></select></form></details>"#,
-            r#"</details>"#,
-            r#"<details><summary>Quota</summary>"#,
+            r#"</div>"#,
+            r#"<form class="dismiss"><button type="submit">Dismiss</button></form>"#,
+            r#"</li>"#,
+        )
+        .to_string()
+    }
+
+    /// The same row with quota's panel open instead (#119) -- only one panel
+    /// is ever open at a time, so this and
+    /// [`row_with_committed_panel_open`] are deliberately separate fixtures
+    /// rather than one row combining both.
+    fn row_with_quota_panel_open() -> String {
+        concat!(
+            r#"<li id="capture-row-1">buy milk"#,
+            r#"<div class="kinds">"#,
+            r#"<form class="kind-choice kind-wide"><input type="hidden" name="kind" value="pool"><select name="life_area"></select></form>"#,
+            r#"<form class="kind-choice"><input type="hidden" name="kind" value="committed"><button>Committed</button></form>"#,
+            r#"<form class="kind-choice chosen"><input type="hidden" name="kind" value="quota"><button>Quota</button></form>"#,
+            r#"</div>"#,
+            r#"<div class="fields-panel">"#,
             r#"<form><input type="hidden" name="kind" value="quota">"#,
             r#"<input type="number" name="target_count">"#,
-            r#"<input type="number" name="target_minutes_each"></form></details>"#,
+            r#"<input type="number" name="target_minutes_each"></form>"#,
+            r#"</div>"#,
+            r#"<form class="dismiss"><button type="submit">Dismiss</button></form>"#,
             r#"</li>"#,
         )
         .to_string()
     }
 
     #[test]
-    fn form_section_scopes_pool_to_everything_before_the_first_details() {
-        let row = row_with_forms();
+    fn form_section_scopes_pool_to_its_own_form_regardless_of_which_panel_is_open() {
+        let row = row_with_committed_panel_open();
         let section = form_section(&row, "pool").unwrap();
         assert!(section.contains(r#"value="pool""#));
-        assert!(!section.contains("Committed"));
+        assert!(!section.contains("At a time"));
     }
 
     #[test]
-    fn form_section_scopes_committed_to_its_own_details_block() {
-        let row = row_with_forms();
+    fn form_section_scopes_committed_to_the_open_panel() {
+        let row = row_with_committed_panel_open();
         let section = form_section(&row, "committed").unwrap();
         assert!(section.contains(r#"value="committed""#));
-        assert!(!section.contains(r#"value="quota""#));
+        assert!(!section.contains("Dismiss"));
     }
 
     #[test]
     fn form_section_scopes_committed_past_its_own_nested_at_and_by_disclosures() {
-        let row = row_with_forms();
+        let row = row_with_committed_panel_open();
         let section = form_section(&row, "committed").unwrap();
         assert!(section.contains("At a time"));
         assert!(section.contains("By a day"));
@@ -583,7 +681,7 @@ mod tests {
 
     #[test]
     fn then_commitment_choices_offered_exactly_passes_for_the_templates_at_and_by_shape() {
-        let mut world = world_with_row(&row_with_forms());
+        let mut world = world_with_row(&row_with_committed_panel_open());
         assert_eq!(
             then_commitment_choices_offered_exactly(&mut world, &["at", "by"]),
             Ok(())
@@ -591,11 +689,11 @@ mod tests {
     }
 
     #[test]
-    fn form_section_scopes_quota_to_its_own_details_block() {
-        let row = row_with_forms();
+    fn form_section_scopes_quota_to_the_open_panel() {
+        let row = row_with_quota_panel_open();
         let section = form_section(&row, "quota").unwrap();
         assert!(section.contains(r#"value="quota""#));
-        assert!(!section.contains(r#"value="committed""#));
+        assert!(!section.contains("At a time"));
     }
 
     #[test]
@@ -618,35 +716,38 @@ mod tests {
     }
 
     #[test]
-    fn then_pool_not_behind_control_passes_when_pool_precedes_any_details() {
-        let mut world = world_with_row(&row_with_forms());
+    fn then_pool_not_behind_control_passes_when_pool_precedes_any_panel() {
+        let mut world = world_with_row(&row_with_no_panel_open());
         assert_eq!(then_pool_not_behind_control(&mut world), Ok(()));
     }
 
     #[test]
     fn then_pool_not_behind_control_errors_when_pool_is_missing() {
-        let mut world = world_with_row("<details><summary>Committed</summary></details>");
+        let mut world =
+            world_with_row(r#"<div class="fields-panel"></div><form class="dismiss"></form>"#);
         assert!(then_pool_not_behind_control(&mut world).is_err());
     }
 
     #[test]
-    fn then_pool_fewer_inputs_passes_against_committed_and_quota() {
-        let mut world = world_with_row(&row_with_forms());
-        assert_eq!(then_pool_fewer_inputs(&mut world, "committed"), Ok(()));
-        assert_eq!(then_pool_fewer_inputs(&mut world, "quota"), Ok(()));
+    fn fewer_inputs_result_passes_when_pool_asks_for_fewer() {
+        assert_eq!(fewer_inputs_result(2, 5, "committed"), Ok(()));
     }
 
     #[test]
-    fn then_pool_fewer_inputs_errors_when_pool_does_not_ask_for_fewer() {
-        let row = concat!(
-            r#"<li>"#,
-            r#"<form><input type="hidden" name="kind" value="pool">"#,
-            r#"<input type="text"><input type="text"><input type="text"></form>"#,
-            r#"<details><summary>Committed</summary>"#,
-            r#"<form><input type="hidden" name="kind" value="committed"></form></details>"#,
-            r#"</li>"#,
-        );
-        let mut world = world_with_row(row);
-        assert!(then_pool_fewer_inputs(&mut world, "committed").is_err());
+    fn fewer_inputs_result_errors_when_pool_does_not_ask_for_fewer() {
+        assert!(fewer_inputs_result(5, 1, "committed").is_err());
+    }
+
+    #[tokio::test]
+    async fn then_pool_fewer_inputs_passes_against_committed_and_quota() {
+        let mut world = migrated_world().await;
+        given_capture_waiting(&mut world, "buy milk").await.unwrap();
+        let request = Request::builder().uri("/").body(Body::empty()).unwrap();
+        html_response(&mut world, request).await.unwrap();
+
+        then_pool_fewer_inputs(&mut world, "committed")
+            .await
+            .unwrap();
+        then_pool_fewer_inputs(&mut world, "quota").await.unwrap();
     }
 }

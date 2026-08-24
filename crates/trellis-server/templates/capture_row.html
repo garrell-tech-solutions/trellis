@@ -1,13 +1,22 @@
 <li id="capture-row-{{ capture.id }}" class="row">
 <div class="row-text">{{ capture.text }}{% if let Some(tag) = capture.context_tag %} {{ tag }}{% endif %}</div>
 <div class="kinds">
-<form class="kind kind-wide" hx-post="/captures/{{ capture.id }}/triage" hx-target="#lists" hx-swap="outerHTML">
+<form class="kind-choice kind-wide" hx-post="/captures/{{ capture.id }}/triage" hx-target="#lists" hx-swap="outerHTML">
 <input type="hidden" name="kind" value="pool">
 <label>Tag <input type="text" name="context_tag" list="context-tag-suggestions" placeholder="@homedepot"></label>
 <button type="submit">Pool</button>
 </form>
-<details class="kind">
-<summary>Committed</summary>
+<form class="kind-choice{% if capture.committed_open %} chosen{% endif %}" hx-post="/captures/{{ capture.id }}/kind" hx-target="#lists" hx-swap="outerHTML">
+<input type="hidden" name="kind" value="committed">
+<button type="submit">Committed</button>
+</form>
+<form class="kind-choice{% if capture.quota_open %} chosen{% endif %}" hx-post="/captures/{{ capture.id }}/kind" hx-target="#lists" hx-swap="outerHTML">
+<input type="hidden" name="kind" value="quota">
+<button type="submit">Quota</button>
+</form>
+</div>
+{% if capture.committed_open %}
+<div class="fields-panel">
 <details class="commitment-choice">
 <summary>At a time</summary>
 <form class="fields" hx-post="/captures/{{ capture.id }}/triage" hx-target="#lists" hx-swap="outerHTML">
@@ -47,9 +56,10 @@
 <div class="actions"><button type="submit">Add</button></div>
 </form>
 </details>
-</details>
-<details class="kind">
-<summary>Quota</summary>
+</div>
+{% endif %}
+{% if capture.quota_open %}
+<div class="fields-panel">
 <form class="fields" hx-post="/captures/{{ capture.id }}/triage" hx-target="#lists" hx-swap="outerHTML">
 <input type="hidden" name="kind" value="quota">
 <label>Sessions <input type="number" name="target_count" placeholder="3"></label>
@@ -63,8 +73,8 @@
 <label>Tag <input type="text" name="context_tag" list="context-tag-suggestions" placeholder="@homedepot"></label>
 <div class="actions"><button type="submit">Add</button></div>
 </form>
-</details>
 </div>
+{% endif %}
 <form class="dismiss" hx-post="/captures/{{ capture.id }}/dismiss" hx-target="#lists" hx-swap="outerHTML">
 <button type="submit">Dismiss</button>
 </form>

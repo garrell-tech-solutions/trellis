@@ -22,6 +22,7 @@ mod committed_empty_fields;
 mod committed_field_domains;
 mod committed_screen;
 mod context_tags;
+mod disclosures;
 mod dismiss;
 mod html;
 mod inbox_view;
@@ -137,6 +138,20 @@ pub(super) fn then_html_body_excludes(
     } else {
         Ok(())
     }
+}
+
+/// The id of the capture whose raw text is `raw_text`, newest first --
+/// shared by every step module that names a capture by its text rather than
+/// tracking `world.last_capture_id`, which a scenario with two captures in
+/// the inbox can leave pointing at the wrong one.
+pub(super) async fn capture_id_by_text(world: &World, raw_text: &str) -> Result<i64, String> {
+    let pool = world.pool()?;
+    sqlx::query_scalar("SELECT id FROM captures WHERE raw_text = ? ORDER BY id DESC LIMIT 1")
+        .bind(raw_text)
+        .fetch_optional(pool)
+        .await
+        .map_err(|e| format!("query capture by text: {e}"))?
+        .ok_or_else(|| format!("no capture found with raw text {raw_text:?}"))
 }
 
 fn workspace_root() -> PathBuf {
@@ -262,6 +277,9 @@ pub async fn dispatch(
         return outcome;
     }
     if let Some(outcome) = installable::dispatch(world, text, example).await {
+        return outcome;
+    }
+    if let Some(outcome) = disclosures::dispatch(world, text, example).await {
         return outcome;
     }
 

@@ -14,15 +14,38 @@ pub struct UntriagedCapture {
     pub id: i64,
     pub raw_text: String,
     pub context_tag: Option<String>,
+    /// Which kind's fields panel the row is currently showing (#119),
+    /// `NULL` meaning none — read straight through to the view; see
+    /// `inbox::view::CaptureRow` for what the page does with it.
+    pub shown_kind: Option<String>,
 }
 
 /// Untriaged captures, newest first — the inbox's contents.
 pub async fn list_untriaged(pool: &SqlitePool) -> Result<Vec<UntriagedCapture>, sqlx::Error> {
     sqlx::query_as(
-        "SELECT id, raw_text, context_tag FROM captures WHERE left_inbox_at IS NULL ORDER BY id DESC",
+        "SELECT id, raw_text, context_tag, shown_kind FROM captures \
+         WHERE left_inbox_at IS NULL ORDER BY id DESC",
     )
     .fetch_all(pool)
     .await
+}
+
+/// Records which kind's panel `capture_id`'s row should show (#119) —
+/// presentation only, never read by triage validation. `kind` is the
+/// caller's job to have already checked against the closed domain the
+/// column itself also enforces (`committed` or `quota`); this function
+/// does not re-validate it.
+pub(super) async fn set_shown_kind(
+    pool: &SqlitePool,
+    capture_id: i64,
+    kind: &str,
+) -> Result<(), sqlx::Error> {
+    sqlx::query("UPDATE captures SET shown_kind = ? WHERE id = ? AND left_inbox_at IS NULL")
+        .bind(kind)
+        .bind(capture_id)
+        .execute(pool)
+        .await?;
+    Ok(())
 }
 
 /// [`list_untriaged`]'s `WHERE` clause asked about one row: is this capture
@@ -115,6 +138,52 @@ mod tests {
         let (_dir, pool) = test_pool().await;
 
         assert_eq!(list_untriaged(&pool).await.unwrap(), Vec::new());
+    }
+
+    #[tokio::test]
+    async fn a_freshly_inserted_capture_shows_no_kind() {
+        let (_dir, pool) = test_pool().await;
+        insert_capture(&pool, "buy milk", None).await;
+
+        let captures = list_untriaged(&pool).await.unwrap();
+
+        assert_eq!(captures[0].shown_kind, None);
+    }
+
+    #[tokio::test]
+    async fn set_shown_kind_records_which_kind_the_row_shows() {
+        let (_dir, pool) = test_pool().await;
+        let id = insert_capture(&pool, "buy milk", None).await;
+
+        set_shown_kind(&pool, id, "committed").await.unwrap();
+
+        let captures = list_untriaged(&pool).await.unwrap();
+        assert_eq!(captures[0].shown_kind.as_deref(), Some("committed"));
+    }
+
+    #[tokio::test]
+    async fn set_shown_kind_replaces_a_prior_choice_rather_than_adding_to_it() {
+        let (_dir, pool) = test_pool().await;
+        let id = insert_capture(&pool, "buy milk", None).await;
+        set_shown_kind(&pool, id, "committed").await.unwrap();
+
+        set_shown_kind(&pool, id, "quota").await.unwrap();
+
+        let captures = list_untriaged(&pool).await.unwrap();
+        assert_eq!(captures[0].shown_kind.as_deref(), Some("quota"));
+    }
+
+    #[tokio::test]
+    async fn set_shown_kind_leaves_other_captures_alone() {
+        let (_dir, pool) = test_pool().await;
+        let chosen = insert_capture(&pool, "buy milk", None).await;
+        let other = insert_capture(&pool, "call the dentist", None).await;
+
+        set_shown_kind(&pool, chosen, "committed").await.unwrap();
+
+        let captures = list_untriaged(&pool).await.unwrap();
+        let other_row = captures.iter().find(|c| c.id == other).unwrap();
+        assert_eq!(other_row.shown_kind, None);
     }
 
     #[tokio::test]

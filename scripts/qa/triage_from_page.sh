@@ -65,38 +65,6 @@ print(json.dumps(result))
 ' "$block"
 }
 
-# For capture_id's pool/committed/quota triage forms: whether the form sits
-# inside a <details> (something that must be opened first), and how many
-# fields a user must touch to submit it -- every non-hidden <input> and
-# <select>, excluding the hidden kind input and the submit button, which
-# qa/triage_from_page.md's "pool is the cheapest path" explicitly says not
-# to count.
-qa_extract_form_shapes() {
-  local page="$1" capture_id="$2" block
-  block="$(qa_capture_row_block "$page" "$capture_id")"
-  python3 -c '
-import re, json, sys
-block = sys.argv[1]
-details_blocks = re.findall(r"<details\b.*?</details>", block, re.S)
-
-result = {}
-for kind in ("pool", "committed", "quota"):
-    form_m = re.search(r"<form\b[^>]*>(?:(?!</form>).)*?value=\"" + kind + r"\"(?:(?!</form>).)*?</form>", block, re.S)
-    if not form_m:
-        result[kind] = {"in_details": None, "field_count": None}
-        continue
-    form = form_m.group(0)
-    inputs = [i for i in re.findall(r"<input\b[^>]*>", form) if "type=\"hidden\"" not in i]
-    selects = re.findall(r"<select\b[^>]*>", form)
-    result[kind] = {
-        "in_details": any(form in details for details in details_blocks),
-        "field_count": len(inputs) + len(selects),
-    }
-
-print(json.dumps(result))
-' "$block"
-}
-
 # --- Procedure: the inbox offers all three kinds ---
 name="offers-all-kinds"
 if qa_start_server "$BIN" "$TMP_DIR/$name.sqlite" "$TMP_DIR/$name.log"; then
@@ -147,36 +115,47 @@ fi
 qa_stop_server
 
 # --- Procedure: committed rejection through the page ---
+# #119 moved committed's fields behind a kind button: they no longer exist
+# in the row's markup until POST .../kind has opened the panel (read from
+# the row's kind-choice button, not assumed), so every procedure below that
+# needs the committed or quota triage form now opens the panel first and
+# re-reads the form's own endpoint from what comes back.
 name="committed-rejected"
 if qa_start_server "$BIN" "$TMP_DIR/$name.sqlite" "$TMP_DIR/$name.log"; then
   capture_id="$(qa_submit_capture "call the dentist")"
-  controls="$(qa_extract_controls "$(qa_get_inbox)" "$capture_id")"
-  endpoint="$(qa_json_field "$controls" committed_endpoint)"
-  if [[ -z "$endpoint" ]]; then
-    echo "FAIL: [$name] could not find the committed-triage control" >&2
+  kind_endpoint="$(qa_row_control_endpoint "$(qa_get_inbox)" "$capture_id" 'value="committed"')"
+  if [[ -z "$kind_endpoint" ]]; then
+    echo "FAIL: [$name] could not find the committed kind-choice control" >&2
     FAILURES=1
   else
-    # deadline omitted; commitment and priority supplied.
-    qa_triage_form "$endpoint" "kind=committed&commitment=at&priority=P1"
-    if [[ "$STATUS" -lt 400 || "$STATUS" -ge 500 ]]; then
-      echo "FAIL: [$name] expected a client error, got status $STATUS" >&2
+    qa_triage_form "$kind_endpoint" "kind=committed"
+    endpoint="$(qa_open_panel_endpoint "$(qa_capture_row_block "$BODY" "$capture_id")" committed)"
+    if [[ -z "$endpoint" ]]; then
+      echo "FAIL: [$name] could not find the committed-triage control once the panel was open" >&2
       FAILURES=1
-    fi
-    if [[ "$BODY" != *"deadline is required"* ]]; then
-      echo "FAIL: [$name] expected the response to name deadline as required, got:
-$BODY" >&2
-      FAILURES=1
-    fi
-    task_count="$(qa_task_count)"
-    if [[ "$task_count" != "0" ]]; then
-      echo "FAIL: [$name] expected the task list to still be empty, found $task_count row(s)" >&2
-      FAILURES=1
-    fi
-    if qa_capture_untriaged "$capture_id"; then
-      : # expected: still untriaged
     else
-      echo "FAIL: [$name] expected the capture to still be untriaged" >&2
-      FAILURES=1
+      # deadline omitted; commitment and priority supplied.
+      qa_triage_form "$endpoint" "kind=committed&commitment=at&priority=P1"
+      if [[ "$STATUS" -lt 400 || "$STATUS" -ge 500 ]]; then
+        echo "FAIL: [$name] expected a client error, got status $STATUS" >&2
+        FAILURES=1
+      fi
+      if [[ "$BODY" != *"deadline is required"* ]]; then
+        echo "FAIL: [$name] expected the response to name deadline as required, got:
+$BODY" >&2
+        FAILURES=1
+      fi
+      task_count="$(qa_task_count)"
+      if [[ "$task_count" != "0" ]]; then
+        echo "FAIL: [$name] expected the task list to still be empty, found $task_count row(s)" >&2
+        FAILURES=1
+      fi
+      if qa_capture_untriaged "$capture_id"; then
+        : # expected: still untriaged
+      else
+        echo "FAIL: [$name] expected the capture to still be untriaged" >&2
+        FAILURES=1
+      fi
     fi
   fi
 else
@@ -191,35 +170,19 @@ qa_stop_server
 # (T-commitment-is-chosen-not-derived). Bound to the hidden commitment
 # input each disclosure's own form carries, in document order -- the same
 # thing crates/acceptance-tests/src/steps/triage_from_page.rs's
-# hidden_input_values checks.
+# hidden_input_values checks. #119 moved this pair out from under an outer
+# "Committed" <details> into a plain <div class="fields-panel"> that only
+# exists once the kind button has opened it -- both details are still
+# unnamed siblings within it (commitment-choice exclusivity is untouched
+# by #119 and remains a known, separately-tracked gap; see the handoff
+# commit message).
 name="committed-closed-choices"
 if qa_start_server "$BIN" "$TMP_DIR/$name.sqlite" "$TMP_DIR/$name.log"; then
   capture_id="$(qa_submit_capture "call the dentist")"
-  block="$(qa_capture_row_block "$(qa_get_inbox)" "$capture_id")"
-  committed_section="$(python3 -c '
-import re, sys
-block = sys.argv[1]
-start_m = re.search(r"<summary>Committed</summary>", block)
-if not start_m:
-    print("")
-    sys.exit()
-pos = start_m.end()
-depth = 1  # the outer <details> that already opened before this <summary>
-i = pos
-while i < len(block) and depth > 0:
-    open_m = re.compile(r"<details\b").search(block, i)
-    close_m = re.compile(r"</details>").search(block, i)
-    if close_m and (not open_m or close_m.start() < open_m.start()):
-        depth -= 1
-        i = close_m.end()
-        end = i
-    elif open_m:
-        depth += 1
-        i = open_m.end()
-    else:
-        break
-print(block[pos:end] if depth == 0 else "")
-' "$block")"
+  kind_endpoint="$(qa_row_control_endpoint "$(qa_get_inbox)" "$capture_id" 'value="committed"')"
+  qa_triage_form "$kind_endpoint" "kind=committed"
+  block="$(qa_capture_row_block "$BODY" "$capture_id")"
+  committed_section="$(qa_between "$block" '<div class="fields-panel">' '<form class="dismiss"')"
 
   commitment_choices="$(python3 -c '
 import re, sys
@@ -270,27 +233,33 @@ qa_stop_server
 name="quota-rejected"
 if qa_start_server "$BIN" "$TMP_DIR/$name.sqlite" "$TMP_DIR/$name.log"; then
   capture_id="$(qa_submit_capture "go to the gym")"
-  controls="$(qa_extract_controls "$(qa_get_inbox)" "$capture_id")"
-  endpoint="$(qa_json_field "$controls" quota_endpoint)"
-  if [[ -z "$endpoint" ]]; then
-    echo "FAIL: [$name] could not find the quota-triage control" >&2
+  kind_endpoint="$(qa_row_control_endpoint "$(qa_get_inbox)" "$capture_id" 'value="quota"')"
+  if [[ -z "$kind_endpoint" ]]; then
+    echo "FAIL: [$name] could not find the quota kind-choice control" >&2
     FAILURES=1
   else
-    # target_count omitted; target_minutes_each and period supplied.
-    qa_triage_form "$endpoint" "kind=quota&target_minutes_each=45&period=week"
-    if [[ "$STATUS" -lt 400 || "$STATUS" -ge 500 ]]; then
-      echo "FAIL: [$name] expected a client error, got status $STATUS" >&2
+    qa_triage_form "$kind_endpoint" "kind=quota"
+    endpoint="$(qa_open_panel_endpoint "$(qa_capture_row_block "$BODY" "$capture_id")" quota)"
+    if [[ -z "$endpoint" ]]; then
+      echo "FAIL: [$name] could not find the quota-triage control once the panel was open" >&2
       FAILURES=1
-    fi
-    if [[ "$BODY" != *"target_count is required"* ]]; then
-      echo "FAIL: [$name] expected the response to name target_count as required, got:
+    else
+      # target_count omitted; target_minutes_each and period supplied.
+      qa_triage_form "$endpoint" "kind=quota&target_minutes_each=45&period=week"
+      if [[ "$STATUS" -lt 400 || "$STATUS" -ge 500 ]]; then
+        echo "FAIL: [$name] expected a client error, got status $STATUS" >&2
+        FAILURES=1
+      fi
+      if [[ "$BODY" != *"target_count is required"* ]]; then
+        echo "FAIL: [$name] expected the response to name target_count as required, got:
 $BODY" >&2
-      FAILURES=1
-    fi
-    task_count="$(qa_task_count)"
-    if [[ "$task_count" != "0" ]]; then
-      echo "FAIL: [$name] expected the task list to still be empty, found $task_count row(s)" >&2
-      FAILURES=1
+        FAILURES=1
+      fi
+      task_count="$(qa_task_count)"
+      if [[ "$task_count" != "0" ]]; then
+        echo "FAIL: [$name] expected the task list to still be empty, found $task_count row(s)" >&2
+        FAILURES=1
+      fi
     fi
   fi
 else
@@ -328,19 +297,44 @@ else
 fi
 qa_stop_server
 
+# The non-hidden <input>/<select> count in section -- pool's own count
+# comes straight from the row as viewed (D-pool-is-default: its form is
+# present whether or not another kind's panel is open, and is never itself
+# a <details>); committed/quota's count comes from the fields-panel once
+# open, which is intentionally the whole open panel (committed's counts
+# both its "at" and "by" forms together, matching the acceptance suite's
+# own field_count/open_panel_section, which does not scope to a single
+# nested form either).
+qa_panel_field_count() {
+  local section="$1"
+  python3 -c '
+import re, sys
+section = sys.argv[1]
+inputs = [i for i in re.findall(r"<input\b[^>]*>", section) if "type=\"hidden\"" not in i]
+selects = re.findall(r"<select\b[^>]*>", section)
+print(len(inputs) + len(selects))
+' "$section"
+}
+
 # --- Procedure: pool is the cheapest path ---
 name="pool-is-cheapest"
 if qa_start_server "$BIN" "$TMP_DIR/$name.sqlite" "$TMP_DIR/$name.log"; then
   capture_id="$(qa_submit_capture "buy milk")"
-  shapes="$(qa_extract_form_shapes "$(qa_get_inbox)" "$capture_id")"
-  pool_in_details="$(python3 -c 'import json,sys; print(json.loads(sys.argv[1])["pool"]["in_details"])' "$shapes")"
-  if [[ "$pool_in_details" != "False" ]]; then
-    echo "FAIL: [$name] expected the pool control to be submittable straight from the row, not behind a control that must be opened first" >&2
+  page="$(qa_get_inbox)"
+  block="$(qa_capture_row_block "$page" "$capture_id")"
+  pool_section="$(qa_between "$block" '<form class="kind-choice kind-wide"' '</form>')"
+  if [[ "$pool_section" == *"<details"* ]]; then
+    echo "FAIL: [$name] expected the pool control to be submittable straight from the row, not behind a <details> that must be opened first" >&2
     FAILURES=1
   fi
-  pool_count="$(python3 -c 'import json,sys; print(json.loads(sys.argv[1])["pool"]["field_count"])' "$shapes")"
+  pool_count="$(qa_panel_field_count "$pool_section")"
+
   for kind in committed quota; do
-    kind_count="$(python3 -c 'import json,sys; print(json.loads(sys.argv[1])["'"$kind"'"]["field_count"])' "$shapes")"
+    kind_endpoint="$(qa_row_control_endpoint "$page" "$capture_id" "value=\"$kind\"")"
+    qa_triage_form "$kind_endpoint" "kind=$kind"
+    panel_block="$(qa_capture_row_block "$BODY" "$capture_id")"
+    panel_section="$(qa_between "$panel_block" '<div class="fields-panel">' '<form class="dismiss"')"
+    kind_count="$(qa_panel_field_count "$panel_section")"
     if [[ -z "$pool_count" || -z "$kind_count" || "$pool_count" -ge "$kind_count" ]]; then
       echo "FAIL: [$name] expected pool ($pool_count inputs) to ask for strictly fewer inputs than $kind ($kind_count inputs)" >&2
       FAILURES=1

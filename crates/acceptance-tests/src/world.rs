@@ -40,6 +40,10 @@ pub struct World {
     /// The theme colour a "the page declares a theme colour" step read off
     /// the current page, for a later step to compare against the manifest's.
     pub last_theme_colour: Option<String>,
+    /// The trip tag a "offers a show-more control named ..." step most
+    /// recently checked (#120), for "that control issues no request"
+    /// immediately after it to re-locate the same control.
+    pub last_show_more_control_tag: Option<String>,
 }
 
 impl World {

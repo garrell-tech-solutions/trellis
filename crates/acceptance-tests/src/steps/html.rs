@@ -65,58 +65,6 @@ pub fn row_containing<'a>(section: &'a str, needle: &str) -> Result<&'a str, Str
     Ok(&section[start..end])
 }
 
-/// The text strictly between `start_tag` and the `</details>` that balances
-/// the `<details>` element already open when `start_tag` appears --
-/// depth starts at 1 for that already-open element, so a nested
-/// `<details>...</details>` block after `start_tag` (the committed
-/// sub-form's own at/by disclosures, #110) is skipped rather than mistaken
-/// for the section's own close. [`between`] can't do this: it stops at the
-/// first `</details>` regardless of nesting.
-/// Which side of a `<details>`/`</details>` pair comes next in a scan, and
-/// where -- [`details_section_after`]'s own nesting decision, named so the
-/// scan loop reads as a match, not a four-way tuple guard.
-enum DetailsBoundary {
-    Open(usize),
-    Close(usize),
-}
-
-/// Whichever of `<details` or `</details>` appears first in `remaining`.
-fn next_details_boundary(remaining: &str) -> Option<DetailsBoundary> {
-    let next_open = remaining.find("<details");
-    let next_close = remaining.find("</details>");
-    match (next_open, next_close) {
-        (Some(open), Some(close)) if open < close => Some(DetailsBoundary::Open(open)),
-        (_, Some(close)) => Some(DetailsBoundary::Close(close)),
-        (Some(open), None) => Some(DetailsBoundary::Open(open)),
-        (None, None) => None,
-    }
-}
-
-pub fn details_section_after<'a>(body: &'a str, start_tag: &str) -> Result<&'a str, String> {
-    let start = body
-        .find(start_tag)
-        .ok_or_else(|| format!("expected {start_tag:?} in the response, got:\n{body}"))?;
-    let content = &body[start + start_tag.len()..];
-    let mut depth: i32 = 1;
-    let mut pos = 0usize;
-    loop {
-        match next_details_boundary(&content[pos..]) {
-            Some(DetailsBoundary::Open(offset)) => {
-                depth += 1;
-                pos += offset + "<details".len();
-            }
-            Some(DetailsBoundary::Close(offset)) => {
-                depth -= 1;
-                if depth == 0 {
-                    return Ok(&content[..pos + offset]);
-                }
-                pos += offset + "</details>".len();
-            }
-            None => return Err(format!("no closing </details> balancing {start_tag:?}")),
-        }
-    }
-}
-
 /// A comma-separated example value, compared against what a screen actually
 /// listed, in order.
 ///
@@ -212,37 +160,5 @@ mod tests {
         let section = header_section(body).unwrap();
         assert!(section.contains("Pool"));
         assert!(!section.contains("buy milk"));
-    }
-
-    #[test]
-    fn details_section_after_skips_a_nested_details_block_to_find_the_true_close() {
-        let body = concat!(
-            r#"<details class="kind"><summary>Committed</summary>"#,
-            r#"<details class="commitment-choice"><summary>At a time</summary>inner-at</details>"#,
-            r#"<details class="commitment-choice"><summary>By a day</summary>inner-by</details>"#,
-            r#"</details><details><summary>Quota</summary>outer-quota</details>"#,
-        );
-        let section = details_section_after(body, "<summary>Committed</summary>").unwrap();
-        assert!(section.contains("inner-at"));
-        assert!(section.contains("inner-by"));
-        assert!(!section.contains("outer-quota"));
-    }
-
-    #[test]
-    fn details_section_after_works_with_no_nesting_at_all() {
-        let body = r#"<details><summary>Quota</summary>plain</details><p>after</p>"#;
-        let section = details_section_after(body, "<summary>Quota</summary>").unwrap();
-        assert_eq!(section, "plain");
-    }
-
-    #[test]
-    fn details_section_after_errors_when_the_start_tag_is_missing() {
-        assert!(details_section_after("nothing here", "<summary>Committed</summary>").is_err());
-    }
-
-    #[test]
-    fn details_section_after_errors_when_no_closing_tag_balances_it() {
-        let body = r#"<summary>Committed</summary><details>unbalanced"#;
-        assert!(details_section_after(body, "<summary>Committed</summary>").is_err());
     }
 }

@@ -374,13 +374,17 @@ main > h1 {
 
 /* --- Triage -------------------------------------------------------------
  *
- * Three equal chips across the row. Pool is a bare form and the other two are
- * `<details>`, so the chips are a `<button>` and two `<summary>` elements
- * dressed alike; `.kinds` is the flex row they share.
+ * Three equal chips across the row (#119): the canvas draws three 44px kind
+ * buttons, none of them a `<details>` -- `capture_row.html`'s own comment on
+ * `.fields-panel` below has the reasoning. Each is its own tiny `<form>`;
+ * Pool's `hx-post`s straight to `/captures/{id}/triage` (one tap, no fields,
+ * `D-pool-is-default`), Committed's and Quota's `hx-post` to
+ * `/captures/{id}/kind`, which only ever changes which panel this row shows.
+ * `.kinds` is the flex row all three share.
  *
  * The canvas orders them Commit, Pool, Quota. Here Pool leads, because
- * `D-pool-is-default` keeps the pool form outside any expanding control and
- * therefore ahead of the first `<details>` in the source.
+ * `D-pool-is-default` keeps the pool form the cheapest path and therefore
+ * first in the source.
  */
 
 .kinds {
@@ -390,15 +394,13 @@ main > h1 {
   margin-top: 10px;
 }
 
-.kind {
+.kind-choice {
   flex: 1 1 0;
   min-width: 0;
   margin: 0;
 }
 
-
-.kind > summary,
-.kind > button {
+.kind-choice > button {
   display: flex;
   align-items: center;
   justify-content: center;
@@ -410,27 +412,15 @@ main > h1 {
   color: var(--color-gray-700);
   font-size: 12px;
   letter-spacing: 0.06em;
-  list-style: none;
   cursor: pointer;
 }
 
-.kind > summary::-webkit-details-marker {
-  display: none;
-}
-
-.kind[open] > summary {
+/* The chosen kind, filled primary-800 -- the canvas's own "chosen one
+   filled" (#119, disclosures-one-panel-at-a-time-03's "marks as chosen"). */
+.kind-choice.chosen > button {
   border-color: var(--color-primary-800);
   background: var(--color-primary-800);
   color: #fff;
-}
-
-/* An opened kind's fields drop out of the chip row and span it. */
-.kind[open] {
-  flex: 1 0 100%;
-}
-
-.kind[open] > summary {
-  width: auto;
 }
 
 /* Pool takes the whole line: it is the default path, and until the
@@ -472,6 +462,14 @@ main > h1 {
 .kinds .kind-wide > button {
   width: 96px;
   flex: none;
+}
+
+/* The one panel a row shows at a time (#119) -- a bare layout wrapper, not
+   its own bordered box: Committed's `.commitment-choice` summaries and
+   Quota's `.fields` form each already carry the canvas's bordered gray-50
+   treatment, and a second border here would double-box them. */
+.fields-panel {
+  margin-top: 4px;
 }
 
 /* Committed's own at/by choice (#110): which of these two disclosures the

@@ -19,7 +19,7 @@ use sqlx::SqlitePool;
 use crate::capture::http::create_capture;
 use crate::committed::http::{mark_committed_task_done, show_committed};
 use crate::dismiss::http::dismiss_capture;
-use crate::inbox::http::show_inbox;
+use crate::inbox::http::{set_shown_kind, show_inbox};
 use crate::platform::assets::{
     htmx_js, icon_192, icon_512, icon_maskable_512, manifest, space_grotesk_woff2, trellis_css,
 };
@@ -68,6 +68,7 @@ pub fn build_app(pool: SqlitePool, clock: Clock) -> Router {
         .route("/captures", post(create_capture))
         .route("/captures/{id}/triage", post(create_triage))
         .route("/captures/{id}/dismiss", post(dismiss_capture))
+        .route("/captures/{id}/kind", post(set_shown_kind))
         .route("/timezone", post(set_timezone))
         .route("/pool", get(show_pool))
         .route("/pool/tasks/{id}/done", post(mark_pool_task_done))

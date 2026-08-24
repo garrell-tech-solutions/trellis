@@ -19,11 +19,20 @@
 
 /// One capture as the inbox lists it, with room for the rejection message a
 /// failed triage attempt against it leaves behind.
+///
+/// `committed_open`/`quota_open` are the view's own reading of the store's
+/// `shown_kind` text column (#119) -- a boolean per kind rather than the raw
+/// string, the same shift `row.past`/`life_area.pool_only` already made
+/// elsewhere so a template compares a flag, never a literal. Mutually
+/// exclusive by construction: [`set_shown_kind`](super::store::set_shown_kind)
+/// only ever writes one of the two kinds it's given.
 pub struct CaptureRow {
     pub id: i64,
     pub text: String,
     pub context_tag: Option<String>,
     pub error: Option<String>,
+    pub committed_open: bool,
+    pub quota_open: bool,
 }
 
 /// One task as the task list shows it. `context_tag` is the capture's, read
@@ -47,11 +56,27 @@ mod tests {
             text: "buy milk".to_string(),
             context_tag: Some("@homedepot".to_string()),
             error: Some("deadline is required".to_string()),
+            committed_open: false,
+            quota_open: false,
         };
         assert_eq!(row.id, 7);
         assert_eq!(row.text, "buy milk");
         assert_eq!(row.context_tag.as_deref(), Some("@homedepot"));
         assert_eq!(row.error.as_deref(), Some("deadline is required"));
+    }
+
+    #[test]
+    fn a_capture_row_carries_which_kinds_panel_is_open() {
+        let row = CaptureRow {
+            id: 7,
+            text: "buy milk".to_string(),
+            context_tag: None,
+            error: None,
+            committed_open: true,
+            quota_open: false,
+        };
+        assert!(row.committed_open);
+        assert!(!row.quota_open);
     }
 
     #[test]

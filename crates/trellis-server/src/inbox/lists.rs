@@ -86,6 +86,8 @@ async fn build_capture_rows(
                 .as_ref()
                 .filter(|(id, _)| *id == capture.id)
                 .map(|(_, message)| message.clone()),
+            committed_open: capture.shown_kind.as_deref() == Some("committed"),
+            quota_open: capture.shown_kind.as_deref() == Some("quota"),
             text: capture.raw_text,
         })
         .collect())
@@ -179,5 +181,32 @@ mod tests {
         let (_dir, lists) = lists_after_a_tagged_capture("@homedepot").await;
 
         assert_eq!(lists.captures[0].context_tag.as_deref(), Some("@homedepot"));
+    }
+
+    #[tokio::test]
+    async fn a_freshly_captured_row_shows_no_kinds_panel() {
+        let (_dir, pool) = test_pool().await;
+        insert_capture(&pool, "buy milk", "web", None, 0)
+            .await
+            .unwrap();
+
+        let lists = build_lists(&pool, None).await.unwrap();
+
+        assert!(!lists.captures[0].committed_open);
+        assert!(!lists.captures[0].quota_open);
+    }
+
+    #[tokio::test]
+    async fn a_row_with_committed_chosen_shows_the_committed_panel_and_not_quotas() {
+        let (_dir, pool) = test_pool().await;
+        let id = insert_capture(&pool, "buy milk", "web", None, 0)
+            .await
+            .unwrap();
+        store::set_shown_kind(&pool, id, "committed").await.unwrap();
+
+        let lists = build_lists(&pool, None).await.unwrap();
+
+        assert!(lists.captures[0].committed_open);
+        assert!(!lists.captures[0].quota_open);
     }
 }

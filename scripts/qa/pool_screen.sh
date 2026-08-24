@@ -239,26 +239,36 @@ fi
 qa_stop_server
 
 # --- Procedure: a long trip ---
+# #120 (pool-screen-truncation-06, revised): the old <details> nested the
+# hidden items in a second list, and "3 shown" was answered by reading only
+# the first <ul class="trip-items">. That two-list shape was the defect
+# #120 removes -- one list holds every item now, and CSS alone decides how
+# many paint. Over HTTP the trip holds all five; which three are actually
+# visible on screen is a rendered-page fact and lives in
+# scripts/qa/trip_controls.sh, not here.
 name="a-long-trip"
 if qa_start_server "$BIN" "$TMP_DIR/$name.sqlite" "$TMP_DIR/$name.log"; then
   for i in 1 2 3 4 5; do qa_pool_task "item $i" "@homedepot"; done
 
   page="$(qa_get_pool)"
   trip="$(qa_trip_section "$page" "@homedepot")"
-  visible_items="$(qa_between "$trip" '<ul class="trip-items">' '</ul>')"
-  visible_count="$(python3 -c 'import re,sys; print(len(re.findall(r"<li\b", sys.argv[1])))' "$visible_items")"
-  if [[ "$visible_count" != "3" ]]; then
-    echo "FAIL: [$name] expected 3 items shown before revealing more, got $visible_count" >&2
+  items="$(qa_between "$trip" '<ul class="trip-items">' '</ul>')"
+  item_count="$(python3 -c 'import re,sys; print(len(re.findall(r"<li\b", sys.argv[1])))' "$items")"
+  if [[ "$item_count" != "5" ]]; then
+    echo "FAIL: [$name] expected the one list to hold all 5 items, got $item_count" >&2
+    FAILURES=1
+  fi
+  if [[ "$trip" == *"<details"* || "$trip" == *"<summary"* ]]; then
+    echo "FAIL: [$name] expected a plain button, not a <details>/<summary> disclosure, got: $trip" >&2
+    FAILURES=1
+  fi
+  more_endpoint_marker='<button type="button" class="trip-more-toggle"'
+  if [[ "$trip" != *"$more_endpoint_marker"* ]]; then
+    echo "FAIL: [$name] expected a trip-more-toggle button, got: $trip" >&2
     FAILURES=1
   fi
   if [[ "$trip" != *"Show 2 more"* ]]; then
-    echo "FAIL: [$name] expected a \"Show 2 more\" control, got: $trip" >&2
-    FAILURES=1
-  fi
-  hidden="$(qa_between "$trip" '<summary>Show 2 more</summary>' '</details>')"
-  hidden_count="$(python3 -c 'import re,sys; print(len(re.findall(r"<li\b", sys.argv[1])))' "$hidden")"
-  if [[ "$hidden_count" != "2" ]]; then
-    echo "FAIL: [$name] expected the disclosure to already carry the remaining 2 items (a native <details>, no extra request), got $hidden_count" >&2
+    echo "FAIL: [$name] expected the show-more control to read \"Show 2 more\", got: $trip" >&2
     FAILURES=1
   fi
   count_label="$(qa_between "$trip" '<div class="trip-count">' '</div>')"

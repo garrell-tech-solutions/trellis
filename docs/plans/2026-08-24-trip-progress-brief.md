@@ -63,7 +63,7 @@ PR #103 rejected counting done items toward the threshold as the **half-pass tra
 | | |
 |---|---|
 | `D-a-trip-survives-being-worked` | **The whole model. Read the row.** |
-| `T-trips-are-derived-not-ranked` | Order stays derived — most items first, alphabetical tiebreak. **No reorder control appears here.** The canvas draws priority arrows on pool items and they are **not approved**; `pool-screen-nothing-reorders-05` is what stands between the design and a feature nobody asked for. |
+| `T-trips-are-derived-not-ranked` | Order stays derived — most items first, alphabetical tiebreak — **so a trip carries no reorder control, here or in any later slice.** **Correction to this brief, 2026-08-24:** an earlier draft said the canvas's *"Raise priority"* / *"Lower priority"* controls are *"not approved"*. **That is wrong and overbroad.** `D-menu-is-a-worklist` names manual priority and the canvas draws six of those controls — **they are approved, for loose ends** (**#95**, *"Reordering belongs to loose ends alone"*). The split is the point: **a trip is a unit you clear in one stop, so its item order is noise; a loose end is a thing you decide about, so it earns a control.** What must not arrive *here* is a reorder control **on a trip**, and `pool-screen-nothing-reorders-05` asserts that absence. |
 | `T-archived-at-only` | One nullable timestamp, no discriminator. **This is why the slice is cheap.** |
 | `D-bulk-completion-is-explicit` | A complete-group button is settled and is **#125**, not this. |
 | `T-set-operations-execute-in-the-store` | The store carries its own `WHERE`/`ORDER BY`. **#108 is open on this exact query and is not yours** — do not absorb it, do not make it worse. |

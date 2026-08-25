@@ -66,6 +66,40 @@ fn resolve(example: &BTreeMap<String, String>, raw: &str) -> Result<String, Stri
     }
 }
 
+/// The `<button ...>` opening tag and text carrying `class_marker`, within
+/// the trip panel labelled `tag` -- the "fetch the recorded page, scope to
+/// the trip, find the button" chain every step in this module needs before
+/// it can ask its own question of that button.
+fn trip_button<'a>(
+    world: &'a World,
+    tag: &str,
+    class_marker: &str,
+) -> Result<(&'a str, &'a str), String> {
+    let body = super::html_body(world, "no pool screen response recorded")?;
+    let section = html::trip_section(body, tag)?;
+    html::button(section, class_marker)
+}
+
+/// [`trip_button`]'s text alone, owned -- what every "offers a ... control
+/// named" step actually compares.
+fn button_label(world: &World, tag: &str, class_marker: &str) -> Result<String, String> {
+    let (_, label) = trip_button(world, tag, class_marker)?;
+    Ok(label.to_string())
+}
+
+/// The shared verdict behind "offers a show-more/complete-group control
+/// named": same comparison, same sentence shape, differing only in which
+/// control `what` names.
+fn expect_button_label(label: &str, expected: &str, tag: &str, what: &str) -> Result<(), String> {
+    if label == expected {
+        Ok(())
+    } else {
+        Err(format!(
+            "expected the trip {tag:?} to offer a {what} named {expected:?}, got {label:?}"
+        ))
+    }
+}
+
 fn dispatch_show_more_named(
     world: &mut World,
     example: &BTreeMap<String, String>,
@@ -73,17 +107,10 @@ fn dispatch_show_more_named(
 ) -> Result<(), String> {
     let tag = resolve(example, &caps[1])?;
     let expected = resolve(example, &caps[2])?;
-    let body = super::html_body(world, "no pool screen response recorded")?;
-    let section = html::trip_section(body, &tag)?;
-    let (_, label) = html::button(section, r#"class="trip-more-toggle""#)?;
-    if label == expected {
-        world.last_show_more_control_tag = Some(tag);
-        Ok(())
-    } else {
-        Err(format!(
-            "expected the trip {tag:?} to offer a show-more control named {expected:?}, got {label:?}"
-        ))
-    }
+    let label = button_label(world, &tag, r#"class="trip-more-toggle""#)?;
+    expect_button_label(&label, &expected, &tag, "show-more control")?;
+    world.last_show_more_control_tag = Some(tag);
+    Ok(())
 }
 
 /// A control's opening tag carries no request-triggering attribute -- the
@@ -101,9 +128,7 @@ fn then_issues_no_request(world: &mut World) -> Result<(), String> {
         .last_show_more_control_tag
         .clone()
         .ok_or_else(|| "no show-more control recorded -- expected a prior \"offers a show-more control named\" step".to_string())?;
-    let body = super::html_body(world, "no pool screen response recorded")?;
-    let section = html::trip_section(body, &tag)?;
-    let (opening_tag, _) = html::button(section, r#"class="trip-more-toggle""#)?;
+    let (opening_tag, _) = trip_button(world, &tag, r#"class="trip-more-toggle""#)?;
     if issues_no_request(opening_tag) {
         Ok(())
     } else {
@@ -120,16 +145,8 @@ fn dispatch_complete_named(
 ) -> Result<(), String> {
     let tag = resolve(example, &caps[1])?;
     let expected = resolve(example, &caps[2])?;
-    let body = super::html_body(world, "no pool screen response recorded")?;
-    let section = html::trip_section(body, &tag)?;
-    let (_, label) = html::button(section, r#"class="trip-complete""#)?;
-    if label == expected {
-        Ok(())
-    } else {
-        Err(format!(
-            "expected the trip {tag:?} to offer a complete-group control named {expected:?}, got {label:?}"
-        ))
-    }
+    let label = button_label(world, &tag, r#"class="trip-complete""#)?;
+    expect_button_label(&label, &expected, &tag, "complete-group control")
 }
 
 fn dispatch_no_complete(

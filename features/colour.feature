@@ -1,3 +1,8 @@
+# mutation-stamp: sha256=b694a87e0c4a7eea65bc921771a7367941ef325556137c1cd8854114cae37091
+# acceptance-mutation-manifest-begin
+# {"version":1,"tested_at":"2026-08-24T19:20:48.128567043Z","feature_name":"Trellis follows the device's colour scheme","feature_path":"features/colour.feature","background_hash":"304f93e93e2b217b49069c091950b87589f0c7e789e2d0dc3aaa8d845450cb64","implementation_hash":"sha256:8d72a3ab6751e821b8d1fd0fb3e10830e641f11d879c7c9a4d878088249b8f6d","scenarios":[{"index":0,"name":"Every screen tells the browser it supports both colour schemes","scenario_hash":"3daf166a509ac810af9566b408123d67113a720140d43f62904c587d20e3cb7d","mutation_count":6,"result":{"Total":6,"Killed":6,"Survived":0,"Errors":0},"tested_at":"2026-08-24T19:20:48.128567043Z"},{"index":1,"name":"A screen offers the browser a theme colour for each colour scheme","scenario_hash":"4a933412bb4f4bc55a6bf98541b07fe50b6a698d0ae53b836815e691101737c0","mutation_count":6,"result":{"Total":6,"Killed":6,"Survived":0,"Errors":0},"tested_at":"2026-08-24T19:20:48.128567043Z"},{"index":2,"name":"The manifest's colours are the app's own surface, no longer provisional","scenario_hash":"37cc3a8ab00c527af516b9b1c62ddc11f29d1ea9069c05ec99c8d89380f5e0ab","mutation_count":4,"result":{"Total":4,"Killed":4,"Survived":0,"Errors":0},"tested_at":"2026-08-24T19:20:48.128567043Z"}]}
+# acceptance-mutation-manifest-end
+
 # colour-both-schemes-declared-01: every screen tells the browser it supports both colour schemes
 # colour-theme-colour-per-scheme-02: a screen offers the browser a theme colour for each colour scheme
 # colour-manifest-colours-03: the manifest's colours are the app's own surface, no longer provisional
@@ -35,9 +40,9 @@
 # it -- and Trellis has one surface, so they are the same value. It stops
 # being a brand block above a white app: a dark green strip over a near-white
 # page was two-tone, and in dark mode a brand-coloured strip is a bright bar
-# above a dark screen. `#f9fafb` is `--color-gray-50` in light, which is what
+# above a dark screen. `#fafdfe` is `--color-gray-50` in light, which is what
 # `background_color` has always been; the change is that `theme_color` joins
-# it and that the page adds `#0b0f14`, `--color-gray-50` in dark, for a dark
+# it and that the page adds `#091014`, `--color-gray-50` in dark, for a dark
 # device.
 #
 # `installable.feature` IS NOT EDITED. Its scenario 05 already asserts that
@@ -145,8 +150,8 @@ Feature: Trellis follows the device's colour scheme
 
     Examples:
       | screen  | scheme | colour  |
-      | capture | light  | #f9fafb |
-      | capture | dark   | #0b0f14 |
+      | capture | light  | #fafdfe |
+      | capture | dark   | #091014 |
 
   # colour-manifest-colours-03: the manifest's colours are the app's own surface, no longer provisional
   Scenario: The manifest's colours are the app's own surface, no longer provisional
@@ -155,5 +160,5 @@ Feature: Trellis follows the device's colour scheme
 
     Examples:
       | member           | value   |
-      | theme_color      | #f9fafb |
-      | background_color | #f9fafb |
+      | theme_color      | #fafdfe |
+      | background_color | #fafdfe |

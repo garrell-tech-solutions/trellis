@@ -103,17 +103,24 @@ pub fn trip_section<'a>(body: &'a str, tag: &str) -> Result<&'a str, String> {
 /// `pool_screen.rs` and `trip_controls.rs`, the same "second caller earns a
 /// shared home" reasoning [`trip_section`] and [`listed_in_order`] already
 /// follow.
+/// The byte offset where the `<button ...>` opening tag carrying
+/// `class_marker` starts -- found by locating the class marker and walking
+/// back to its enclosing `<button`.
+fn button_tag_start(section: &str, class_marker: &str) -> Result<usize, String> {
+    let class_at = section
+        .find(class_marker)
+        .ok_or_else(|| format!("expected a button with {class_marker}, got:\n{section}"))?;
+    section[..class_at]
+        .rfind("<button")
+        .ok_or_else(|| format!("malformed button markup near {class_marker}"))
+}
+
 /// The `(start, end)` byte offsets of the `<button ...>` opening tag whose
 /// attributes contain `class_marker` -- split out of [`button`] itself so
 /// that function's own three sequential lookups (the tag, then its own
 /// text) do not all live behind one cyclomatic count.
 fn button_opening_tag_span(section: &str, class_marker: &str) -> Result<(usize, usize), String> {
-    let class_at = section
-        .find(class_marker)
-        .ok_or_else(|| format!("expected a button with {class_marker}, got:\n{section}"))?;
-    let tag_start = section[..class_at]
-        .rfind("<button")
-        .ok_or_else(|| format!("malformed button markup near {class_marker}"))?;
+    let tag_start = button_tag_start(section, class_marker)?;
     let rel_tag_close = section[tag_start..]
         .find('>')
         .ok_or_else(|| format!("no closing '>' on the button carrying {class_marker}"))?;

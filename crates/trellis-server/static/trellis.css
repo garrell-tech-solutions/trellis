@@ -1,10 +1,11 @@
 /* Trellis, as designed.
  *
- * Every token below is lifted verbatim from the GTS design system bundle the
- * owner's design canvas is built on, and every component rule is one of that
- * canvas's inline styles given a name. Nothing here is invented: if a value
- * has no counterpart in `Trellis.dc.html`, it is a browser default being
- * neutralised, not a new decision.
+ * Every component rule is one of the design canvas's inline styles given a
+ * name, and none of that has moved: layout, spacing and the type scale are
+ * still `Trellis.dc.html`'s. What HAS moved is the palette and the typeface,
+ * revised on the `Trellis Design System` canvas (2026-08-25) and recorded in
+ * the token blocks below. If a value has no counterpart on either canvas, it
+ * is a browser default being neutralised, not a new decision.
  *
  * The canvas draws a 390x844 phone frame with rounded corners. That frame is
  * the mockup's way of saying "this is a phone", not a component -- so the app
@@ -12,72 +13,104 @@
  * screen, which is the same picture without pretending to be a device.
  */
 
+/* The typeface, revised 2026-08-25: Space Grotesk's geometric quirks were
+   losing definition at the sizes this product actually leans on -- the 9.5px
+   tab labels and the 10px tracked field labels. IBM Plex Sans holds its
+   apertures open down there. Same delivery as before: one variable woff2,
+   Google's latin subset, embedded in the binary (see platform::assets). */
 @font-face {
-  font-family: 'Space Grotesk';
+  font-family: 'IBM Plex Sans';
   font-style: normal;
   font-weight: 300 700;
+  font-stretch: 100%;
   font-display: swap;
-  src: url('/static/fonts/space-grotesk-variable.woff2') format('woff2');
+  src: url('/static/fonts/ibm-plex-sans-variable.woff2') format('woff2');
   unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA,
     U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193,
     U+2212, U+2215, U+FEFF, U+FFFD;
 }
 
-/* Colour tokens (#124, #128): the `Trellis Design System` design-system
- * project (`de98a7ad-1291-4326-b43a-5c9af1f94798`), reproduced verbatim --
- * every token name this file already consumed is still here, in both
- * modes, and none was renamed.
+/* Colour tokens, revised 2026-08-25 on the `Trellis Design System` canvas,
+ * replacing the hue-255 palette #124 and #128 left behind. The brief was
+ * "white and light blue". Two rules kept it from costing any contrast:
  *
- * NEUTRALS keep their light values exactly; the primary ramp keeps its
- * lightness and chroma exactly and rotates hue 142.9 -> 255 (blue, the
- * midpoint of the neutrals' own 247.8-264.7 hue band); mint folds into
- * gold's hue family (90.89) at the design system's own lightness/chroma,
- * replacing the old cyan (183.19). See `docs/decisions.md` for why (the
- * warning panel and the trip panel share `.panel`, so both move together)
- * and `qa/colour.md` for what was measured against which surface.
+ * 1. EVERY NEUTRAL TEXT TOKEN KEEPS ITS EXACT LIGHTNESS. `gray-400`
+ *    through `gray-950` carry most of the text in this stylesheet, and
+ *    their L values are unchanged to the digit.
+ * 2. SURFACE TOKENS ONLY GET LIGHTER. `gray-50` through `gray-300` lift
+ *    toward white (0.985 -> 0.992 at the top), so neutral text on them
+ *    gains a little: `gray-500` on `gray-50` goes 4.63 -> 4.69.
  *
- * `--color-on-primary` and `--color-on-gold` are new: the text colours for
- * a `--color-primary-800` fill and the gold Save button, since both flip
- * lightness between modes and their labels must flip with them.
+ * The primary ramp keeps its lightness and chroma to the digit and rotates
+ * hue 255 -> 232, the light blue the brief asked for. Every neutral now
+ * shares that hue too, so the palette is one hue throughout, in both modes.
+ *
+ * A HUE ROTATION IS NOT FREE, and this is the one number worth writing
+ * down: equal L and C at a different hue is not equal relative luminance,
+ * so the primary pairs lose a little in light. `primary-800` on `gray-50`
+ * (h1, h2, the trip tag, and the chosen chip's label read the other way)
+ * goes 10.02 -> 9.54; `primary-600` as link text goes 5.30 -> 5.15. Both
+ * still clear 4.5:1 with room, and in dark both move the other way. The
+ * full recomputed table -- twelve pairs, both modes -- is what
+ * `qa/colour.md`'s browser check measures for real; nothing here drops
+ * below 4.5 that was not already below it (`gray-500` on `gray-100`, which
+ * no text in this product actually sits on, improves 4.39 -> 4.46).
+ *
+ * `--color-gold` and `--color-mint` are RENAMED, not merely recoloured: a
+ * token called `gold` holding a sky blue is a trap for the next reader.
+ * They are now `--color-accent` (hue 215 -- brighter and cooler than
+ * primary, so the Save key still separates from a `primary-800` fill by
+ * LIGHTNESS rather than by warmth) and `--color-panel`.
+ *
+ * `--color-on-primary` and `--color-on-accent` keep their roles unchanged:
+ * the text colours for a `primary-800` fill and for the accent Save button,
+ * since both flip lightness between modes and their labels flip with them.
  */
 :root {
-  --color-gray-50: oklch(0.985 0.002 247.839);
-  --color-gray-100: oklch(0.967 0.003 264.542);
-  --color-gray-200: oklch(0.928 0.006 264.531);
-  --color-gray-300: oklch(0.872 0.01 258.338);
-  --color-gray-400: oklch(0.707 0.022 261.325);
-  --color-gray-500: oklch(0.551 0.027 264.364);
-  --color-gray-600: oklch(0.446 0.03 256.802);
-  --color-gray-700: oklch(0.373 0.034 259.733);
-  --color-gray-800: oklch(0.278 0.033 256.848);
-  --color-gray-900: oklch(0.21 0.034 264.665);
-  --color-gray-950: oklch(0.13 0.028 261.692);
+  --color-gray-50: oklch(0.992 0.003 232);
+  --color-gray-100: oklch(0.974 0.006 232);
+  --color-gray-200: oklch(0.936 0.011 232);
+  --color-gray-300: oklch(0.878 0.017 232);
+  --color-gray-400: oklch(0.707 0.022 232);
+  --color-gray-500: oklch(0.551 0.027 232);
+  --color-gray-600: oklch(0.446 0.030 232);
+  --color-gray-700: oklch(0.373 0.034 232);
+  --color-gray-800: oklch(0.278 0.033 232);
+  --color-gray-900: oklch(0.210 0.034 232);
+  --color-gray-950: oklch(0.130 0.028 232);
 
-  --color-primary-50: oklch(0.975 0.015 255);
-  --color-primary-100: oklch(0.95 0.035 255);
-  --color-primary-200: oklch(0.895 0.06 255);
-  --color-primary-300: oklch(0.815 0.085 255);
-  --color-primary-400: oklch(0.72 0.105 255);
-  --color-primary-500: oklch(0.61 0.12 255);
-  --color-primary-600: oklch(0.52 0.122 255);
-  --color-primary-700: oklch(0.43 0.118 255);
-  --color-primary-800: oklch(0.3714 0.1122 255);
-  --color-primary-900: oklch(0.28 0.09 255);
-  --color-primary-950: oklch(0.19 0.065 255);
+  --color-primary-50: oklch(0.975 0.015 232);
+  --color-primary-100: oklch(0.950 0.035 232);
+  --color-primary-200: oklch(0.895 0.060 232);
+  --color-primary-300: oklch(0.815 0.085 232);
+  --color-primary-400: oklch(0.720 0.105 232);
+  --color-primary-500: oklch(0.610 0.120 232);
+  --color-primary-600: oklch(0.520 0.122 232);
+  --color-primary-700: oklch(0.430 0.118 232);
+  --color-primary-800: oklch(0.3714 0.1122 232);
+  --color-primary-900: oklch(0.280 0.090 232);
+  --color-primary-950: oklch(0.190 0.065 232);
 
-  --color-gold: oklch(0.7461 0.1447 90.89);
-  --color-mint: oklch(0.965 0.032 90.89);
+  --color-accent: oklch(0.780 0.115 215);
+  --color-panel: oklch(0.972 0.018 225);
 
-  --color-on-primary: oklch(0.985 0.002 247.839);
-  --color-on-gold: oklch(0.28 0.09 255);
+  --color-on-primary: oklch(0.992 0.003 232);
+  --color-on-accent: oklch(0.260 0.075 232);
 
-  --font-sans: 'Space Grotesk', ui-sans-serif, system-ui, sans-serif,
+  --font-sans: 'IBM Plex Sans', ui-sans-serif, system-ui, sans-serif,
     'Apple Color Emoji', 'Segoe UI Emoji';
 
   /* The canvas pads every screen's content to 18px and its rows to 44px --
      the two numbers repeated most often across the file. */
   --gutter: 18px;
   --tap: 44px;
+
+  /* Shape, revised 2026-08-25 ("soft fills"): the product stops drawing
+     lines and starts drawing shapes. A surface is a rounded tinted fill;
+     a control is a slightly tighter one. There is no third radius, and
+     no borders left to round -- see the note above `.row`. */
+  --radius: 12px;
+  --radius-control: 10px;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -86,47 +119,47 @@
        400-950 expand into text (0.600-0.988), and nothing is authored
        between -- the two tokens that carry muted and secondary text never
        land in the mid-grey mud a naive inversion would put them in. All
-       dark neutrals share the primary's hue (255), so the dark palette is
+       dark neutrals share the primary's hue (232), so the dark palette is
        one hue throughout. */
-    --color-gray-50: oklch(0.165 0.012 255);
-    --color-gray-100: oklch(0.205 0.014 255);
-    --color-gray-200: oklch(0.262 0.016 255);
-    --color-gray-300: oklch(0.330 0.018 255);
-    --color-gray-400: oklch(0.600 0.022 255);
-    --color-gray-500: oklch(0.715 0.018 255);
-    --color-gray-600: oklch(0.792 0.014 255);
-    --color-gray-700: oklch(0.855 0.010 255);
-    --color-gray-800: oklch(0.910 0.006 255);
-    --color-gray-900: oklch(0.958 0.004 255);
-    --color-gray-950: oklch(0.988 0.002 255);
+    --color-gray-50: oklch(0.168 0.014 232);
+    --color-gray-100: oklch(0.208 0.016 232);
+    --color-gray-200: oklch(0.265 0.018 232);
+    --color-gray-300: oklch(0.332 0.020 232);
+    --color-gray-400: oklch(0.600 0.022 232);
+    --color-gray-500: oklch(0.715 0.018 232);
+    --color-gray-600: oklch(0.792 0.014 232);
+    --color-gray-700: oklch(0.855 0.010 232);
+    --color-gray-800: oklch(0.910 0.006 232);
+    --color-gray-900: oklch(0.958 0.004 232);
+    --color-gray-950: oklch(0.988 0.002 232);
 
     /* Same split as the neutrals: 50-400 are deep tinted surfaces, 500-950
        are ink bright enough to read on them. primary-900 is held dark
-       (matching --color-on-gold) rather than inverted bright -- it is the
-       Save button's own glyph colour below, and gold stays light in dark
-       mode, so a "correctly" inverted primary-900 would make the product's
-       most-used control unreadable. */
-    --color-primary-50: oklch(0.200 0.048 255);
-    --color-primary-100: oklch(0.250 0.068 255);
-    --color-primary-200: oklch(0.310 0.088 255);
-    --color-primary-300: oklch(0.380 0.105 255);
-    --color-primary-400: oklch(0.460 0.120 255);
-    --color-primary-500: oklch(0.660 0.125 255);
-    --color-primary-600: oklch(0.715 0.115 255);
-    --color-primary-700: oklch(0.755 0.105 255);
-    --color-primary-800: oklch(0.800 0.095 255);
-    --color-primary-900: oklch(0.260 0.085 255);
-    --color-primary-950: oklch(0.900 0.055 255);
+       (matching --color-on-accent) rather than inverted bright -- it is the
+       Save button's own glyph colour below, and the accent stays light in
+       dark mode, so a "correctly" inverted primary-900 would make the
+       product's most-used control unreadable. */
+    --color-primary-50: oklch(0.200 0.048 232);
+    --color-primary-100: oklch(0.250 0.068 232);
+    --color-primary-200: oklch(0.310 0.088 232);
+    --color-primary-300: oklch(0.380 0.105 232);
+    --color-primary-400: oklch(0.460 0.120 232);
+    --color-primary-500: oklch(0.660 0.125 232);
+    --color-primary-600: oklch(0.715 0.115 232);
+    --color-primary-700: oklch(0.755 0.105 232);
+    --color-primary-800: oklch(0.800 0.095 232);
+    --color-primary-900: oklch(0.260 0.085 232);
+    --color-primary-950: oklch(0.900 0.055 232);
 
-    /* gold drops from L 0.746 to 0.715, still the brightest thing on the
-       screen with the glare pulled back; mint becomes a dark warm surface
-       at the same remove from the page it has in light, so the warning and
-       trip panels still read as panels in both modes. */
-    --color-gold: oklch(0.715 0.135 90.89);
-    --color-mint: oklch(0.255 0.030 90.89);
+    /* The accent drops from L 0.780 to 0.760, still the brightest thing on
+       the screen with the glare pulled back; the panel becomes a deep tinted
+       surface at the same remove from the page it has in light, so the
+       warning and trip panels still read as panels in both modes. */
+    --color-accent: oklch(0.760 0.110 215);
+    --color-panel: oklch(0.258 0.032 225);
 
-    --color-on-primary: oklch(0.165 0.012 255);
-    --color-on-gold: oklch(0.260 0.085 255);
+    --color-on-primary: oklch(0.168 0.014 232);
+    --color-on-accent: oklch(0.260 0.085 232);
   }
 }
 
@@ -215,16 +248,16 @@ header {
   flex: none;
   position: sticky;
   bottom: 0;
-  border-top: 1px solid var(--color-gray-200);
   background: var(--color-gray-50);
   padding-bottom: env(safe-area-inset-bottom);
 }
 
 header nav ul {
   margin: 0;
-  padding: 0;
+  padding: 6px var(--gutter);
   list-style: none;
   display: flex;
+  gap: 4px;
 }
 
 header nav li {
@@ -236,7 +269,7 @@ header nav a {
   display: flex;
   align-items: center;
   justify-content: center;
-  height: 58px;
+  height: 46px;
   padding: 0 2px;
   text-align: center;
   font-size: 9.5px;
@@ -247,19 +280,20 @@ header nav a {
      the page background nothing actually sits on). gray-500 clears 4.5:1
      against the header's own surface, where this text actually sits. */
   color: var(--color-gray-500);
+  border-radius: var(--radius-control);
 }
 
 header nav a[aria-current='page'] {
   color: var(--color-primary-800);
   font-weight: 600;
-  box-shadow: inset 0 2px 0 0 var(--color-primary-800);
+  background: var(--color-primary-50);
 }
 
 /* --- Type ---------------------------------------------------------------
  *
  * `h1` is the canvas's screen title: the wordmark on Capture, the screen's
  * own name everywhere else. `h2` is the SectionHeading component -- small
- * caps over a short gold rule.
+ * caps over a short accent rule.
  */
 
 h1 {
@@ -279,15 +313,6 @@ h2 {
   letter-spacing: 0.2em;
   text-transform: uppercase;
   color: var(--color-primary-800);
-}
-
-h2::after {
-  content: '';
-  display: block;
-  width: 48px;
-  height: 1px;
-  margin-top: 8px;
-  background: var(--color-gold);
 }
 
 h3 {
@@ -332,7 +357,7 @@ main > h1 {
 
 /* --- Quick add ----------------------------------------------------------
  *
- * The canvas's one hero control: a flush input with a gold enter key, sitting
+ * The canvas's one hero control: a flush input with an accent enter key, sitting
  * on a hairline box whose bottom edge is the primary rule.
  */
 
@@ -340,9 +365,9 @@ main > h1 {
   display: flex;
   align-items: stretch;
   margin: 0 0 8px;
-  border: 1px solid var(--color-gray-300);
-  border-bottom: 2px solid var(--color-primary-800);
   background: var(--color-gray-100);
+  border-radius: var(--radius);
+  overflow: hidden;
 }
 
 .quick-add-box input[type='text'] {
@@ -367,12 +392,12 @@ main > h1 {
   width: 56px;
   flex: none;
   border: none;
-  background: var(--color-gold);
-  /* --color-on-gold, not primary-900: the semantically correct token for
-     text on a gold fill, byte-identical to primary-900 in both modes
+  background: var(--color-accent);
+  /* --color-on-accent, not primary-900: the semantically correct token for
+     text on an accent fill, byte-identical to primary-900 in both modes
      today (design system NOTE 4) but no longer holding primary-900 out of
      the ramp on this rule's behalf. */
-  color: var(--color-on-gold);
+  color: var(--color-on-accent);
   font-size: 17px;
   font-weight: 600;
   line-height: 1;
@@ -385,16 +410,18 @@ main > h1 {
   height: 36px;
   margin: 6px 0 0;
   padding: 0 10px;
-  border: 1px solid var(--color-gray-300);
+  border: none;
   outline: none;
+  background: var(--color-gray-100);
   font-size: 13px;
   color: var(--color-gray-800);
+  border-radius: var(--radius-control);
 }
 
 .quick-add-tag::placeholder {
   /* #124: this input sits directly on the app surface (a sibling of
      `.quick-add-box`, not nested inside it) -- gray-500 clears 4.5:1 there. */
-  color: var(--color-gray-500);
+  color: var(--color-gray-600);
 }
 
 .hint {
@@ -427,15 +454,35 @@ main > h1 {
 #captures,
 #tasks {
   margin: 0 0 24px;
-  padding: 0;
+  padding: 0 var(--gutter);
   list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 
 .row {
-  padding: 12px var(--gutter) 13px 16px;
-  border-bottom: 1px solid var(--color-gray-200);
-  border-left: 2px solid var(--color-primary-800);
-  background: var(--color-gray-50);
+  padding: 12px 16px 13px 30px;
+  background: var(--color-gray-100);
+  position: relative;
+  border-radius: var(--radius);
+}
+
+/* The untriaged marker (2026-08-25, "soft fills"): a dot, not an edge.
+   The left border this replaces was one of five kinds of line the screen
+   was drawing at once; a card that is already distinct by fill only needs
+   the one mark that says "this one still needs a decision". Positioned
+   rather than laid out so it cannot disturb `.row`'s own content flow --
+   the row's extra left padding is what makes room for it. */
+.row::before {
+  content: '';
+  position: absolute;
+  top: 18px;
+  left: 14px;
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: var(--color-accent);
 }
 
 .row-text {
@@ -452,14 +499,12 @@ main > h1 {
   text-transform: uppercase;
   /* #124: gray-400 fails here (2.36:1, the number this whole slice was
      filed for); gray-500 clears 4.5:1 on this row's own surface. */
-  color: var(--color-gray-500);
+  color: var(--color-gray-600);
 }
 
 /* A task: already sorted, so it recedes -- the canvas's triaged row. */
 #tasks > li {
-  padding: 11px var(--gutter);
-  border-bottom: 1px solid var(--color-gray-200);
-  border-left: 2px solid transparent;
+  padding: 11px 16px;
   background: var(--color-gray-100);
   font-size: 13.5px;
   line-height: 1.35;
@@ -467,6 +512,7 @@ main > h1 {
      gray-600 clears it. */
   color: var(--color-gray-600);
   text-wrap: pretty;
+  border-radius: var(--radius);
 }
 
 /* --- Triage -------------------------------------------------------------
@@ -504,19 +550,18 @@ main > h1 {
   width: 100%;
   height: var(--tap);
   padding: 0 4px;
-  border: 1px solid var(--color-gray-300);
+  border: none;
   background: var(--color-gray-50);
   color: var(--color-gray-700);
   font-size: 12px;
   letter-spacing: 0.06em;
   cursor: pointer;
+  border-radius: var(--radius-control);
 }
 
 /* The chosen kind, filled primary-800 -- the canvas's own "chosen one
    filled" (#119, disclosures-one-panel-at-a-time-03's "marks as chosen"). */
-.kind-choice.chosen > button {
-  border-color: var(--color-primary-800);
-  background: var(--color-primary-800);
+.kind-choice.chosen > button {  background: var(--color-primary-800);
   color: var(--color-on-primary);
 }
 
@@ -537,7 +582,7 @@ main > h1 {
   font-size: 10px;
   letter-spacing: 0.14em;
   text-transform: uppercase;
-  color: var(--color-gray-500);
+  color: var(--color-gray-600);
 }
 
 .kinds .kind-wide > label select,
@@ -547,13 +592,14 @@ main > h1 {
   height: var(--tap);
   margin-top: 4px;
   padding: 0 8px;
-  border: 1px solid var(--color-gray-300);
+  border: none;
   background: var(--color-gray-50);
   outline: none;
   font-size: 13px;
   letter-spacing: normal;
   text-transform: none;
   color: var(--color-gray-800);
+  border-radius: var(--radius-control);
 }
 
 .kinds .kind-wide > button {
@@ -582,30 +628,30 @@ main > h1 {
   align-items: center;
   height: var(--tap);
   padding: 0 10px;
-  border: 1px solid var(--color-gray-300);
+  border: none;
   background: var(--color-gray-50);
   color: var(--color-gray-700);
   font-size: 12px;
   letter-spacing: 0.06em;
   list-style: none;
   cursor: pointer;
+  border-radius: var(--radius-control);
 }
 
 .commitment-choice > summary::-webkit-details-marker {
   display: none;
 }
 
-.commitment-choice[open] > summary {
-  border-color: var(--color-primary-800);
-  background: var(--color-primary-800);
+.commitment-choice[open] > summary {  background: var(--color-primary-800);
   color: var(--color-on-primary);
 }
 
 .fields {
   margin-top: 8px;
   padding: 10px;
-  border: 1px solid var(--color-gray-200);
-  background: var(--color-gray-100);
+  border: none;
+  background: var(--color-gray-50);
+  border-radius: var(--radius);
 }
 
 .fields label {
@@ -628,13 +674,14 @@ main > h1 {
   height: var(--tap);
   margin-top: 4px;
   padding: 0 10px;
-  border: 1px solid var(--color-gray-300);
-  background: var(--color-gray-50);
+  border: none;
+  background: var(--color-gray-100);
   outline: none;
   font-size: 13.5px;
   letter-spacing: normal;
   text-transform: none;
   color: var(--color-gray-900);
+  border-radius: var(--radius-control);
 }
 
 .actions {
@@ -670,22 +717,22 @@ main > h1 {
   letter-spacing: 0.06em;
   /* #124: this sits on `.row`'s app surface -- gray-400 fails (2.49:1),
      gray-500 clears it, and the existing hover state still darkens further. */
-  color: var(--color-gray-500);
+  color: var(--color-gray-600);
   cursor: pointer;
 }
 
 .dismiss button:hover {
-  color: var(--color-gray-600);
+  color: var(--color-gray-700);
 }
 
 .triage-error {
   margin: 9px 0 0;
   padding: 9px 10px;
-  background: var(--color-mint);
-  border-top: 3px solid var(--color-gold);
+  background: var(--color-panel);
   font-size: 12px;
   line-height: 1.5;
   color: var(--color-gray-700);
+  border-radius: var(--radius);
 }
 
 /* --- Shared page furniture ----------------------------------------------
@@ -699,9 +746,8 @@ main > h1 {
 .panel {
   margin: 0 0 16px;
   padding: 20px;
-  border-top: 4px solid var(--color-gold);
-  border-radius: 8px;
-  background: var(--color-mint);
+  border-radius: var(--radius);
+  background: var(--color-panel);
 }
 
 main > form:not(.quick-add) label,
@@ -726,13 +772,14 @@ main > section select {
   height: var(--tap);
   margin-top: 4px;
   padding: 0 10px;
-  border: 1px solid var(--color-gray-300);
-  background: var(--color-gray-50);
+  border: none;
+  background: var(--color-gray-100);
   outline: none;
   font-size: 13.5px;
   letter-spacing: normal;
   text-transform: none;
   color: var(--color-gray-900);
+  border-radius: var(--radius-control);
 }
 
 main > form:not(.quick-add) button,
@@ -740,12 +787,13 @@ main > div button,
 main > section button {
   height: var(--tap);
   padding: 0 14px;
-  border: 1px solid var(--color-primary-800);
-  background: var(--color-gray-50);
+  border: none;
+  background: var(--color-primary-50);
   color: var(--color-primary-800);
   font-size: 12.5px;
   letter-spacing: 0.06em;
   cursor: pointer;
+  border-radius: var(--radius-control);
 }
 
 main ul:not(#captures):not(#tasks) {
@@ -756,7 +804,6 @@ main ul:not(#captures):not(#tasks) {
 
 main ul:not(#captures):not(#tasks) > li {
   padding: 11px 0;
-  border-bottom: 1px solid var(--color-gray-200);
   font-size: 14.5px;
   line-height: 1.3;
   color: var(--color-gray-700);
@@ -771,7 +818,6 @@ table {
 
 th {
   padding: 8px 0;
-  border-bottom: 1px solid var(--color-gray-300);
   text-align: left;
   font-size: 10px;
   font-weight: 600;
@@ -782,7 +828,6 @@ th {
 
 td {
   padding: 10px 0;
-  border-bottom: 1px solid var(--color-gray-200);
   font-size: 13.5px;
   color: var(--color-gray-700);
 }
@@ -881,13 +926,14 @@ td {
   width: 100%;
   height: var(--tap);
   padding: 0 12px;
-  border: 1px solid var(--color-primary-800);
+  border: none;
   background: var(--color-gray-50);
   color: var(--color-primary-800);
   font-size: 12.5px;
   font-weight: 600;
   letter-spacing: 0.04em;
   cursor: pointer;
+  border-radius: var(--radius-control);
 }
 
 .trip-items > li {
@@ -915,7 +961,7 @@ td {
    direct inverse of the tap that struck it. */
 .trip-items > li.done .trip-item-text {
   text-decoration: line-through;
-  /* #124: gray-400 fails hardest here (mint panel, the one surface dark
+  /* #124: gray-400 fails hardest here (the panel surface, the one dark
      mode also fails on as authored -- qa/colour.md); gray-600 clears both
      modes on this surface. */
   color: var(--color-gray-600);
@@ -935,8 +981,8 @@ td {
   padding: 0;
   border: none;
   background: none;
-  /* #124: gray-500 fails on the mint panel this control sits on (4.37:1);
-     gray-600 clears it. */
+  /* #124: gray-500 fails on the panel surface this control sits on
+     (4.37:1); gray-600 clears it. */
   color: var(--color-gray-600);
   font-size: 15px;
   line-height: 1;
@@ -1040,7 +1086,6 @@ td {
   align-items: baseline;
   gap: 10px;
   padding: 8px 0;
-  border-bottom: 1px solid var(--color-gray-100);
 }
 
 .committed-date {
@@ -1050,10 +1095,12 @@ td {
   color: var(--color-gray-600);
 }
 
-/* #124: gold as text is 2.17:1, worse than the gray-400 failure this slice
-   was filed for (qa/colour.md). A past date fades to gray-500 instead --
-   still legible, and "faded" reads as "already gone by" on its own; the
-   PAST badge beside it carries the rest of the signal. */
+/* #124: the warm accent as text was 2.17:1, worse than the gray-400
+   failure this slice was filed for (qa/colour.md). A past date fades to
+   gray-500 instead -- still legible, and "faded" reads as "already gone by"
+   on its own; the PAST badge beside it carries the rest of the signal. The
+   2026-08-25 revision does not reopen this: --color-accent is lighter still
+   (L 0.780), so it remains a fill and a rule, never text. */
 .committed-row.past .committed-date {
   color: var(--color-gray-500);
 }
@@ -1080,10 +1127,10 @@ td {
   color: var(--color-gray-500);
 }
 
-/* #124: a second gold-as-text failure the two issues never counted, worse
-   than the one this slice was filed for (2.17:1, qa/colour.md) -- fades to
-   gray-500 alongside the past date it labels, rather than staying the
-   product's one warm accent as illegible text. */
+/* #124: a second accent-as-text failure the two issues never counted,
+   worse than the one this slice was filed for (2.17:1, qa/colour.md) --
+   fades to gray-500 alongside the past date it labels, rather than staying
+   the product's one bright accent as illegible text. */
 .committed-past-badge {
   font-size: 10px;
   letter-spacing: 0.08em;

@@ -161,6 +161,7 @@ lifetime this slice changed.
 3. Tap it once. Read the screen.
 4. **Untick one.** Read the screen.
 5. Tap `✕`. Read the screen.
+6. Tick the last item, then tap `✕` again. Read the screen.
 
 ### Expected Observable Outcomes
 - Step 2: it reads **"Complete all 2"** — the open items, not the run's size
@@ -171,7 +172,19 @@ lifetime this slice changed.
   trip is still there — **the tag went from nothing-open back to one-open
   without re-earning three**, because the run never ended. **That is the edge
   neither issue mentions**; it works only because the panel stayed.
-- Step 5: **gone entirely.**
+- Step 5: **the panel is still there, reading `1 things`.** The clear swept
+  the one struck item and **the item you unticked is still waiting**, so the
+  run has not ended. **An earlier draft of this document said "gone entirely"
+  here and was wrong** — it carried the ending over from the procedure above
+  without re-deriving it after the untick at step 4. QA caught it against a
+  running server and scripted the correct behaviour; this is the corrected
+  text. *(The label reads `1 things` rather than `1 thing`; that wording
+  predates this slice and is not its to fix.)*
+- Step 6: **now it is gone entirely** — the last thing waiting has been
+  cleared, so the run ends.
+- **Steps 5 and 6 are the rule stated twice**, and the pair is worth keeping:
+  a clear that leaves something waiting is a tidy, and a clear that leaves
+  nothing waiting is the end of a run.
 - **`trip_controls.feature:176` asserts a trip with nothing open offers no
   complete-group control.** Confirm the two rules do not disagree about which
   state the panel is in between the completion and the render.

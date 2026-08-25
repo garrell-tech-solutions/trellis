@@ -120,35 +120,16 @@ const VISIBLE_TRIP_ITEMS: usize = 3;
 /// the caller to have sorted already, since a caller that forgot would fail
 /// silently rather than loudly (both orders type-check).
 ///
-/// **Three rules that are not the same rule.** FORMATION (#122) needs
-/// [`TRIP_THRESHOLD`] tasks *waiting there* — the same `>= TRIP_THRESHOLD`
-/// count on the (open + struck, not cleared) set that also keeps a trip
-/// standing while it is worked, since a completed task is still waiting
-/// there until it is cleared. PERSISTENCE (#129) is the same comparison
-/// against a different count: a tag whose *run* has already reached
-/// [`TRIP_THRESHOLD`] stays a trip even after clearing drops its
-/// concurrently-waiting count below it, for as long as the run lasts
-/// (`run_member_count`, computed by the adapter from history this bucket's
-/// own concurrently-waiting list cannot see once a clear has erased it). A
-/// below-threshold, un-persisted group's own struck items are dropped
-/// rather than shown as loose ends: a loose end has no panel to hold a
-/// completed item in place, so it leaves at once, exactly as it did before
-/// #122 (`trip-progress-loose-ends-unchanged-08`).
+/// Whether a bucket earns its trip panel is [`classify_group`]'s call, not
+/// this function's -- FORMATION (#122) and PERSISTENCE (#129) are two rules,
+/// not one, and [`is_trip`]'s own doc has both.
 pub fn group(mut tasks: Vec<PoolTask>) -> PoolGroups {
     tasks.sort_by_key(|t| std::cmp::Reverse(t.sequence));
     let (groups, mut loose) = bucket_by_tag(tasks);
 
     let mut trips = Vec::new();
     for (tag, list) in groups {
-        // Every task in one tag's bucket carries the same tag-level
-        // `run_member_count` -- the adapter's fact about the tag, not the
-        // task -- so the first one speaks for the whole bucket.
-        let run_member_count = list.first().map_or(0, |t| t.run_member_count);
-        if list.len() >= TRIP_THRESHOLD || run_member_count >= TRIP_THRESHOLD {
-            trips.push(trip_from_group(tag, list));
-        } else {
-            loose.extend(list.into_iter().filter(|t| !t.done));
-        }
+        classify_group(tag, list, &mut trips, &mut loose);
     }
 
     loose.sort_by_key(|t| std::cmp::Reverse(t.sequence));
@@ -157,28 +138,69 @@ pub fn group(mut tasks: Vec<PoolTask>) -> PoolGroups {
     PoolGroups { trips, loose }
 }
 
+/// Routes one tag's bucket to `trips` once it earns a panel ([`is_trip`]),
+/// or spreads its still-open tasks into `loose` otherwise -- a
+/// below-threshold, un-persisted group's own struck items are dropped here
+/// rather than shown as loose ends: a loose end has no panel to hold a
+/// completed item in place, so it leaves at once, exactly as it did before
+/// #122 (`trip-progress-loose-ends-unchanged-08`).
+fn classify_group(
+    tag: String,
+    list: Vec<PoolTask>,
+    trips: &mut Vec<Trip>,
+    loose: &mut Vec<PoolTask>,
+) {
+    if is_trip(&list) {
+        trips.push(trip_from_group(tag, list));
+    } else {
+        loose.extend(list.into_iter().filter(|t| !t.done));
+    }
+}
+
+/// Whether one tag's bucket has earned a trip panel: FORMATION (#122) needs
+/// [`TRIP_THRESHOLD`] tasks waiting there now; PERSISTENCE (#129) needs the
+/// same threshold met by the tag's *run* instead, which can hold after a
+/// clear has dropped the concurrently-waiting count below it. Every task in
+/// one bucket carries the same tag-level `run_member_count` -- the adapter's
+/// fact about the tag, not the task -- so the first one speaks for the whole
+/// bucket.
+fn is_trip(list: &[PoolTask]) -> bool {
+    let run_member_count = list.first().map_or(0, |t| t.run_member_count);
+    list.len() >= TRIP_THRESHOLD || run_member_count >= TRIP_THRESHOLD
+}
+
 /// Splits `tasks` (already newest-first) into tag buckets, ranked by size
 /// then alphabetically (`pool-screen-trip-order-02`), and the untagged
 /// remainder. Every bucket's own relative order is preserved from `tasks`,
-/// so it stays newest-first without a second sort. A done, untagged task is
-/// dropped here rather than carried into `loose` -- it has no tag to ever
-/// reach [`TRIP_THRESHOLD`] with, so it is unconditionally a loose end, and
-/// a done loose end leaves the screen at once (#122).
+/// so it stays newest-first without a second sort.
 fn bucket_by_tag(tasks: Vec<PoolTask>) -> (Vec<(String, Vec<PoolTask>)>, Vec<PoolTask>) {
     let mut buckets: std::collections::HashMap<String, Vec<PoolTask>> =
         std::collections::HashMap::new();
     let mut loose = Vec::new();
     for task in tasks {
-        match &task.context_tag {
-            Some(tag) => buckets.entry(tag.clone()).or_default().push(task),
-            None if !task.done => loose.push(task),
-            None => {}
-        }
+        bucket_one(task, &mut buckets, &mut loose);
     }
 
     let mut groups: Vec<(String, Vec<PoolTask>)> = buckets.into_iter().collect();
     groups.sort_by(by_size_then_tag);
     (groups, loose)
+}
+
+/// Routes a single task to its tag's bucket, or to `loose` when it is
+/// untagged -- a done, untagged task is dropped here rather than carried
+/// into `loose`: it has no tag to ever reach [`TRIP_THRESHOLD`] with, so it
+/// is unconditionally a loose end, and a done loose end leaves the screen at
+/// once (#122).
+fn bucket_one(
+    task: PoolTask,
+    buckets: &mut std::collections::HashMap<String, Vec<PoolTask>>,
+    loose: &mut Vec<PoolTask>,
+) {
+    match &task.context_tag {
+        Some(tag) => buckets.entry(tag.clone()).or_default().push(task),
+        None if !task.done => loose.push(task),
+        None => {}
+    }
 }
 
 /// Ranks buckets by size then alphabetically (`pool-screen-trip-order-02`).

@@ -107,16 +107,7 @@ fn count_label(count: usize, done_count: usize) -> String {
 pub(super) fn build(rows: Vec<PoolTaskRow>, expanded_tags: &HashSet<String>) -> PoolView {
     let is_empty = rows.is_empty();
     let waiting = rows.iter().filter(|row| !row.done).count();
-    let tasks = rows
-        .into_iter()
-        .map(|row| PoolTask {
-            sequence: row.task_id,
-            text: row.raw_text,
-            context_tag: row.context_tag,
-            done: row.done,
-            run_member_count: row.run_member_count as usize,
-        })
-        .collect();
+    let tasks = rows.into_iter().map(pool_task).collect();
     let groups = pool::group(tasks);
 
     let trips = groups
@@ -127,25 +118,42 @@ pub(super) fn build(rows: Vec<PoolTaskRow>, expanded_tags: &HashSet<String>) -> 
             trip_view(trip, expanded)
         })
         .collect();
-    let loose = groups
-        .loose
-        .into_iter()
-        .map(|task| LooseItemView {
-            id: task.id,
-            text: task.text,
-            context_tag: task.context_tag,
-        })
-        .collect();
+    let loose = groups.loose.into_iter().map(loose_item_view).collect();
 
     PoolView {
-        meta: if is_empty {
-            "empty".to_string()
-        } else {
-            format!("{waiting} waiting")
-        },
+        meta: meta_text(is_empty, waiting),
         empty: is_empty,
         trips,
         loose,
+    }
+}
+
+fn pool_task(row: PoolTaskRow) -> PoolTask {
+    PoolTask {
+        sequence: row.task_id,
+        text: row.raw_text,
+        context_tag: row.context_tag,
+        done: row.done,
+        run_member_count: row.run_member_count as usize,
+    }
+}
+
+fn loose_item_view(task: pool::LooseTask) -> LooseItemView {
+    LooseItemView {
+        id: task.id,
+        text: task.text,
+        context_tag: task.context_tag,
+    }
+}
+
+/// `"empty"` when nothing is pooled, `"N waiting"` otherwise
+/// (`pool-screen-empty-07`) -- see [`build`] for why `waiting` is not just
+/// `is_empty`'s own row count.
+fn meta_text(is_empty: bool, waiting: usize) -> String {
+    if is_empty {
+        "empty".to_string()
+    } else {
+        format!("{waiting} waiting")
     }
 }
 

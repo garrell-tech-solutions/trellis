@@ -36,7 +36,8 @@ pub(super) async fn build(
     expanded_tags: &HashSet<String>,
 ) -> Result<PoolBodyTemplate, sqlx::Error> {
     let rows = store::list_pool_tasks(pool).await?;
-    let built = view::build(rows, expanded_tags);
+    let run_sizes = store::run_member_counts(pool).await?;
+    let built = view::build(rows, run_sizes, expanded_tags);
     Ok(PoolBodyTemplate {
         meta: built.meta,
         empty: built.empty,

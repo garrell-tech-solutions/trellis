@@ -262,8 +262,73 @@ else
 fi
 qa_stop_server
 
-# --- Procedure: clearing can drop a group below the threshold ---
-name="clearing-can-drop-a-group-below-the-threshold"
+# --- Procedure: clearing, and what it does not take with it ---
+# #129 (qa/trip_persistence.md) extended D-a-trip-survives-being-worked:
+# clearing tidies a panel, it does not dissolve it, even when the clear
+# drops the concurrently-waiting count below TRIP_THRESHOLD. This reverses
+# trip-progress-clearing-can-drop-a-group-05, deliberately and in the open --
+# the prior version of this script asserted the defect itself.
+name="clearing-does-not-drop-a-formed-trip-below-threshold"
+if qa_start_server "$BIN" "$TMP_DIR/$name.sqlite" "$TMP_DIR/$name.log"; then
+  for text in "buy screws" "return the drill" "pick up trim" "grab a tarp" "sand the deck"; do
+    qa_pool_task "$text" "@homedepot"
+  done
+  for text in "buy screws" "return the drill" "pick up trim"; do
+    qa_mark_pool_done "$(qa_task_id_for_text "$text")"
+  done
+
+  page="$(qa_get_pool)"
+  trip="$(qa_trip_section "$page" "@homedepot")"
+  if [[ -z "$trip" ]]; then
+    echo "FAIL: [$name] setup expected @homedepot to still be a trip with three struck" >&2
+    FAILURES=1
+  fi
+
+  qa_clear_done "$trip"
+  if [[ "$STATUS" != "200" ]]; then
+    echo "FAIL: [$name] clearing done returned status $STATUS" >&2
+    FAILURES=1
+  fi
+
+  page="$(qa_get_pool)"
+  trip="$(qa_trip_section "$page" "@homedepot")"
+  if [[ -z "$trip" ]]; then
+    echo "FAIL: [$name] expected @homedepot to stay a trip once cleared to two open items, got:
+$page" >&2
+    FAILURES=1
+  fi
+  count_label="$(qa_between "$trip" '<div class="trip-count">' '</div>')"
+  if [[ "$count_label" != "2 things" ]]; then
+    echo "FAIL: [$name] expected \"2 things\" after clearing, got: $count_label" >&2
+    FAILURES=1
+  fi
+  for text in "grab a tarp" "sand the deck"; do
+    row="$(qa_trip_item_row "$trip" "$text")"
+    if [[ -z "$row" ]]; then
+      echo "FAIL: [$name] expected \"$text\" to survive in the panel, got:
+$trip" >&2
+      FAILURES=1
+    elif qa_is_struck "$row"; then
+      echo "FAIL: [$name] expected \"$text\" to remain open, got: $row" >&2
+      FAILURES=1
+    fi
+  done
+  loose="$(qa_loose_section "$page")"
+  if [[ -n "$loose" ]]; then
+    echo "FAIL: [$name] expected no loose ends -- survivors of a formed trip stay in the panel, got:
+$loose" >&2
+    FAILURES=1
+  fi
+else
+  FAILURES=1
+fi
+qa_stop_server
+
+# The interesting case qa/trip_progress.md names explicitly: a three-item
+# fixture with one cleared, which a five-item fixture cannot reach --
+# formation (3 waiting) and persistence (a run that once reached 3) agree
+# here only because the run has already formed before the clear.
+name="a-three-item-trip-also-holds-below-threshold-after-clearing"
 if qa_start_server "$BIN" "$TMP_DIR/$name.sqlite" "$TMP_DIR/$name.log"; then
   for text in "buy screws" "return the drill" "pick up trim"; do
     qa_pool_task "$text" "@homedepot"
@@ -285,23 +350,33 @@ if qa_start_server "$BIN" "$TMP_DIR/$name.sqlite" "$TMP_DIR/$name.log"; then
 
   page="$(qa_get_pool)"
   trip="$(qa_trip_section "$page" "@homedepot")"
-  if [[ -n "$trip" ]]; then
-    echo "FAIL: [$name] expected @homedepot to drop below threshold once cleared to two open items, got:
-$trip" >&2
+  if [[ -z "$trip" ]]; then
+    echo "FAIL: [$name] expected @homedepot to stay a trip once cleared to two open items, got:
+$page" >&2
     FAILURES=1
   fi
-  loose="$(qa_loose_section "$page")"
+  count_label="$(qa_between "$trip" '<div class="trip-count">' '</div>')"
+  if [[ "$count_label" != "2 things" ]]; then
+    echo "FAIL: [$name] expected \"2 things\" after clearing, got: $count_label" >&2
+    FAILURES=1
+  fi
   for text in "return the drill" "pick up trim"; do
-    row="$(qa_loose_row_containing "$loose" "$text")"
+    row="$(qa_trip_item_row "$trip" "$text")"
     if [[ -z "$row" ]]; then
-      echo "FAIL: [$name] expected \"$text\" among loose ends, got:
-$loose" >&2
+      echo "FAIL: [$name] expected \"$text\" to survive in the panel, got:
+$trip" >&2
       FAILURES=1
-    elif [[ "$row" != *"@homedepot"* ]]; then
-      echo "FAIL: [$name] expected \"$text\" to keep its tag in loose ends, got: $row" >&2
+    elif qa_is_struck "$row"; then
+      echo "FAIL: [$name] expected \"$text\" to remain open, got: $row" >&2
       FAILURES=1
     fi
   done
+  loose="$(qa_loose_section "$page")"
+  if [[ -n "$loose" ]]; then
+    echo "FAIL: [$name] expected no loose ends -- the interesting case is that this stays a trip, got:
+$loose" >&2
+    FAILURES=1
+  fi
 else
   FAILURES=1
 fi

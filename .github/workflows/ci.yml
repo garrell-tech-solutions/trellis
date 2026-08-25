@@ -124,8 +124,88 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
+    # The tag the `release` job below will publish under, decided HERE and
+    # handed down, rather than computed twice. It has to be one string in two
+    # places -- baked into the binary at compile time by the step below, and
+    # used as the git tag by `release` -- and the two must agree exactly,
+    # because `release` refuses to publish a binary whose `--version` does not
+    # name the tag it is being published under. Recomputing it there would let
+    # the date component roll over between jobs and turn a correct build into
+    # a self-inconsistent one at midnight UTC, roughly once a year, silently.
+    #
+    # Empty on every trigger except a push to trunk: a pull-request build is
+    # not a release and must not name one.
+    outputs:
+      release-tag: ${{ steps.identity.outputs.release-tag }}
+
     steps:
       - uses: actions/checkout@v5
+
+      # issue #133. `trellis --version` used to print usage; nothing in
+      # main.rs read CARGO_PKG_VERSION, and all three crates are still 0.1.0.
+      # A binary that cannot say what it is makes every other part of a
+      # release story unverifiable -- ops/update.sh can report that it
+      # installed something and nothing can confirm it.
+      #
+      # The version scheme, and why it is not semver:
+      #
+      #   v<commit date>.<run number>, e.g. v2026.08.24.1042
+      #
+      # Semver advertises a compatibility contract. This is a single-user
+      # application with no API, no consumers and no supported upgrade path
+      # between versions; a `0.2.0` here would be a claim about stability
+      # nobody made and nobody could check. A run number is the honest thing:
+      # it says which build this is and which came first, which is the whole
+      # question a rollback asks.
+      #
+      # Monotonic and derivable, which the issue requires because a manual
+      # bump gets forgotten:
+      #
+      #   run number   GITHUB_RUN_NUMBER is a per-workflow counter that only
+      #                ever increases, and re-running a run keeps it. It is
+      #                the part that guarantees ordering. (Renaming this
+      #                workflow file would reset it -- hence the date, which
+      #                would keep the tags ordered through that.)
+      #   commit date  read from the COMMIT, not from `date -u`. A re-run
+      #                days later must produce the same tag for the same
+      #                commit; `date -u` would give it a newer-looking tag
+      #                than commits that came after it.
+      #
+      # The three Cargo.toml versions are deliberately NOT driven from this
+      # and stay at 0.1.0. A version field in a Cargo.toml is a published
+      # crate's identity; none of these three is published and nothing
+      # resolves them by version. Driving them would mean CI committing a
+      # generated number back to trunk on every merge -- a write to the
+      # branch, a second CI run, and a merge conflict on every open branch --
+      # to keep a field in sync that no reader consults. main.rs reads the
+      # tag from the environment instead (option_env!), so there is no file
+      # for it to be stale in. See the comment on `version_line` there.
+      - name: Decide what this build calls itself
+        id: identity
+        run: |
+          if [[ "$GITHUB_EVENT_NAME" == "push" && "$GITHUB_REF" == "refs/heads/trunk" ]]; then
+            DAY="$(TZ=UTC git show -s --format=%cd --date=format-local:%Y.%m.%d HEAD)"
+            TAG="v$DAY.$GITHUB_RUN_NUMBER"
+            # GITHUB_ENV, so every cargo invocation in this job -- including
+            # the musl release build inside scripts/qa/release_binary.sh,
+            # which this workflow does not get to pass arguments to -- sees
+            # them. Cargo tracks `option_env!` reads as build dependencies,
+            # so a restored Swatinem/rust-cache target/ cannot serve a binary
+            # stamped with a previous run's tag; the crate is rebuilt.
+            {
+              echo "TRELLIS_RELEASE=$TAG"
+              echo "TRELLIS_COMMIT=$GITHUB_SHA"
+            } >> "$GITHUB_ENV"
+            echo "release-tag=$TAG" >> "$GITHUB_OUTPUT"
+            echo "this build is $TAG, from $GITHUB_SHA"
+          else
+            # Not a mistake and not a fallback: a pull-request build really
+            # is not a release. main.rs prints "unreleased (unknown-commit)"
+            # when neither variable is set, which is what ops/preview.sh
+            # installs and what a local `cargo run` reports.
+            echo "release-tag=" >> "$GITHUB_OUTPUT"
+            echo "$GITHUB_EVENT_NAME on $GITHUB_REF is not a trunk push: this build reports itself as unreleased"
+          fi
 
       # libsqlite3-sys compiles C against the musl target, so the release
       # build needs a musl C toolchain. The cc crate picks up musl-gcc for
@@ -408,6 +488,16 @@ jobs:
       #                     ops/preview.sh manages -- it never reaches
       #                     trellis.service, which only ever runs what
       #                     ops/update.sh fetched from trunk.
+      # Since #133 this artifact has two consumers and they are not the same
+      # thing. On a pull_request it is what ops/preview.sh installs, and it
+      # is still the only copy -- previews are disposable and 90 days is
+      # generous for one. On a push to trunk it is now a HAND-OFF to the
+      # `release` job below, which attaches this exact file to a GitHub
+      # release; durability for trunk builds comes from the release, which
+      # does not expire, and no longer from this retention window. The
+      # artifact is not the archive any more, so `retention-days` is left
+      # where it was rather than raised to paper over the problem #133
+      # actually fixed.
       - name: Upload release binary
         if: ${{ (github.event_name == 'push' && github.ref == 'refs/heads/trunk') || github.event_name == 'pull_request' }}
         uses: actions/upload-artifact@v4
@@ -667,3 +757,288 @@ jobs:
       - name: DRY (threshold owned by scripts/analyzers/dry.sh)
         if: ${{ !cancelled() }}
         run: ./scripts/analyzers/dry.sh .
+
+  # A durable, identifiable release for every commit that lands on trunk
+  # (issue #133).
+  #
+  # WHY THIS JOB EXISTS. Before it, "the release" was a workflow artifact with
+  # `retention-days: 90` and nothing else: no tag, no release, no second copy.
+  # Nothing installed on the owner's host was recoverable a quarter later, and
+  # `ops/update.sh` could only ever express "the newest green trunk build" --
+  # there was no way to say "the one from before this broke", which is the
+  # only sentence anyone says at the moment they need it. A GitHub release
+  # does not expire, is named, and `gh release download <tag>` is the rollback.
+  #
+  # THE PERMISSION. This workflow declares `permissions: contents: read` at
+  # workflow level on purpose: the repository default is `write` and the
+  # workflow narrows it. Creating a release needs `contents: write`, and this
+  # job is the only place in the file that has it -- declared at JOB level, so
+  # `gate`, `quality`, `decision-slugs` and `migration-immutability` keep the
+  # read-only token they have today. A job-level `permissions:` block replaces
+  # the workflow-level one outright rather than adding to it, so this job's
+  # token carries `contents: write` and NOTHING else -- not `actions`, not
+  # `packages`, not `id-token`.
+  #
+  # Job level is the smallest surface the platform offers. There is no
+  # step-level permission and no way to scope a token to "releases but not
+  # git refs", so the remaining question is which job holds it, and the answer
+  # is: not the one that builds the binary. `gate` runs three third-party
+  # actions on mutable tags (actions/checkout@v5, Swatinem/rust-cache@v2,
+  # actions/setup-node@v4, plus a global `npm install -g`), and it is the job
+  # whose output ends up on the owner's machine; the 2026-08-23 audit and
+  # issue #109 are both about exactly that. Giving `gate` write access would
+  # hand every one of those a token that can move refs. This job runs two
+  # actions (checkout and download-artifact), compiles nothing, installs
+  # nothing from npm or cargo, and does not run the downloaded binary except
+  # to ask it `--version`.
+  #
+  # WHAT BINDS THE ASSET TO A REVIEWED COMMIT. Two things, and it is worth
+  # being exact about what they do and do not cover:
+  #
+  #   - This job cannot run for a fork. `on:` restricts `push` to this
+  #     repository's `trunk`, only the owner can push there, and a fork's
+  #     push runs in the fork with the fork's token. A fork can create
+  #     releases in its own repository and none here -- which is at least as
+  #     strict as the `--event push` guard ops/update.sh already had (#104),
+  #     since a release cannot be created by a `pull_request` run at all.
+  #   - The release body records `sha256(trellis) = <hash>`, and
+  #     ops/update.sh verifies the asset against it before installing.
+  #
+  # That is transport and swapped-asset integrity, not provenance: the hash
+  # travels in the same release the asset does, so anyone who could replace
+  # the asset could edit the note. Closing that needs
+  # `actions/attest-build-provenance` plus `gh attestation verify` in
+  # update.sh -- which is a FOURTH third-party action on a mutable tag, in the
+  # job chain that builds the shipped binary. That trade is #109's to make and
+  # this job deliberately does not make it unilaterally.
+  #
+  # WHAT IT DOES NOT CHANGE. ops/preview.sh still fetches pull-request run
+  # artifacts and still pins to the pull request's headSha. Previews are
+  # per-branch and pre-merge; releases are trunk-only and post-merge. They are
+  # different mechanisms and stay that way.
+  release:
+    name: publish the trunk release
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/trunk' }}
+
+    # Every job that runs on a trunk push, and no others. `gate` because it
+    # built the binary and this job downloads its artifact; `quality` and
+    # `decision-slugs` because ops/update.sh selected on `--status success`,
+    # which is the WHOLE run being green -- installing from a release that a
+    # red analyzer run produced would be a quiet loosening of the bar the
+    # owner's host is held to today.
+    #
+    # `migration-immutability` is absent on purpose. It is `pull_request`
+    # only, GitHub reports it as skipped on push, and a skipped `needs`
+    # dependency skips its dependents -- naming it here would mean trunk
+    # never released at all.
+    needs: [gate, quality, decision-slugs]
+
+    permissions:
+      contents: write
+
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TAG: ${{ needs.gate.outputs.release-tag }}
+      ASSET: dist/trellis
+
+    steps:
+      # fetch-depth: 0 for two reasons the release notes need and a shallow
+      # clone cannot give: the previous tag, and the commits between it and
+      # HEAD.
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      # The binary `gate` already built, proved static and uploaded -- not a
+      # rebuild. What ships has to be the artefact the gate passed on, byte
+      # for byte; a second `cargo build --release` here would produce a
+      # different file that nothing had gated.
+      #
+      # No `actions: read` in this job's token: downloading an artifact from
+      # the CURRENT run uses the runner's own runtime token, not GITHUB_TOKEN.
+      # Reaching into another run would need that scope, and this job never
+      # does.
+      - name: Fetch the binary `gate` proved green
+        uses: actions/download-artifact@v4
+        with:
+          name: trellis-linux-musl
+          path: dist
+
+      - name: A tag must have been decided, and must be free or already ours
+        run: |
+          if [[ -z "$TAG" ]]; then
+            echo "::error::gate handed down no release tag. That job's identity step only sets one for a push to trunk, and this job only runs for a push to trunk, so the two have drifted apart."
+            exit 1
+          fi
+          echo "publishing $TAG from $GITHUB_SHA"
+
+          # A re-run of a trunk run keeps GITHUB_RUN_NUMBER and reads the
+          # date off the same commit, so it computes the same tag -- which is
+          # correct, and means the release may legitimately already exist. A
+          # tag that exists on a DIFFERENT commit is not that: it is the tag
+          # scheme having collided, and republishing over it would move a
+          # name that someone may already have installed.
+          #
+          # `if gh api ...`, not `$(gh api ... || true)`. On a 404 `gh api`
+          # exits non-zero AND prints the error body to stdout, so the
+          # `|| true` form assigns that JSON to EXISTING_SHA and every
+          # first-ever release is refused with "tag already exists and names
+          # commit {"message":"Not Found"...}". Observed doing exactly that.
+          # Testing the exit status instead means an absent tag leaves the
+          # variable empty, which is what "free" means here.
+          EXISTING_SHA=""
+          if REF_SHA="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$TAG" --jq '.object.sha' 2>/dev/null)"; then
+            EXISTING_SHA="$REF_SHA"
+          fi
+          if [[ -n "$EXISTING_SHA" && "$EXISTING_SHA" != "$GITHUB_SHA" ]]; then
+            echo "::error::tag $TAG already exists and names commit $EXISTING_SHA, but this run is building $GITHUB_SHA. Refusing to move a published tag."
+            exit 1
+          fi
+
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json tagName >/dev/null 2>&1; then
+            echo "RELEASE_EXISTS=yes" >> "$GITHUB_ENV"
+            echo "::notice::release $TAG already exists for this commit; treating this as a re-run and refreshing it"
+          else
+            echo "RELEASE_EXISTS=no" >> "$GITHUB_ENV"
+          fi
+
+      # `file`, not `ldd`, for the reason ops/update.sh spells out at length:
+      # `ldd` answers the question by running the binary under the loader,
+      # and the point of this check is to decide whether to trust the thing
+      # before anything executes it. `gate` already asserted this via
+      # scripts/qa/release_binary.sh; asserting it again on the file that
+      # came back out of the artifact store is the difference between "the
+      # build was static" and "the bytes about to be published are".
+      - name: The asset must be the static binary the gate proved
+        run: |
+          if [[ ! -f "$ASSET" ]]; then
+            echo "::error::gate's artifact contained no $ASSET -- there is nothing to release."
+            ls -laR dist || true
+            exit 1
+          fi
+          chmod +x "$ASSET"
+          FILE_OUTPUT="$(file "$ASSET")"
+          echo "$FILE_OUTPUT"
+          case "$FILE_OUTPUT" in
+            *static*) ;;
+            *)
+              echo "::error::the binary about to be released is not statically linked, refusing to publish it: $FILE_OUTPUT"
+              exit 1
+              ;;
+          esac
+
+      # The check that makes the whole scheme self-verifying, and the reason
+      # `trellis --version` is part of #133 rather than a nicety deferred out
+      # of it. A binary that names a different release than the one it is
+      # being published under is exactly the failure ops/update.sh cannot
+      # detect on its own -- it would install something, report the tag, and
+      # be wrong. Here the two are compared while there is still nothing
+      # published, and the honest outcome of a mismatch is no release at all.
+      #
+      # It also catches the specific way this could rot: if Cargo ever stopped
+      # tracking `option_env!` reads as build dependencies, a restored cache
+      # would serve a binary stamped with a previous run's tag and every other
+      # step here would pass.
+      - name: The binary must already know which release it is
+        run: |
+          ACTUAL="$("$ASSET" --version)"
+          EXPECTED="trellis $TAG ($GITHUB_SHA)"
+          if [[ "$ACTUAL" != "$EXPECTED" ]]; then
+            echo "::error::the built binary reports its identity as \"$ACTUAL\" but this run is publishing \"$EXPECTED\". Refusing to publish a binary that misnames itself."
+            exit 1
+          fi
+          echo "$ACTUAL"
+
+      # Commits since the previous tag, which answers "what landed" but NOT
+      # the question a rollback is actually preceded by -- "what changed
+      # between the one that worked and this one", where the two may be
+      # several releases apart. Nothing generated per-release can answer that
+      # one, because it is a question about a range the release does not know
+      # it is in, so the notes carry the compare command that does answer it
+      # rather than pretending a single-release changelog is the same thing.
+      #
+      # Every commit, not `--first-parent`. Trunk carries merge commits and
+      # direct PM pushes, so first-parent would reduce a merged slice to the
+      # line "Merge pull request #131 from ...", which names the branch and
+      # says nothing about what changed. The commits inside it are the ones
+      # written for a reader.
+      - name: Write the release notes
+        run: |
+          PREVIOUS="$(git tag --list 'v*' --sort=-creatordate | grep -vxF "$TAG" | head -1 || true)"
+          SHA256="$(sha256sum "$ASSET" | cut -d' ' -f1)"
+          echo "SHA256=$SHA256" >> "$GITHUB_ENV"
+
+          {
+            echo "Built from \`$GITHUB_SHA\` by [run $GITHUB_RUN_ID]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID)."
+            echo
+            echo "\`\`\`"
+            echo "sha256(trellis) = $SHA256"
+            echo "\`\`\`"
+            echo
+            echo "The attached \`trellis\` is the exact binary CI built and proved statically linked; it reports \`trellis $TAG ($GITHUB_SHA)\` for \`trellis --version\`."
+            echo
+            echo "## Installing this release"
+            echo
+            echo "\`\`\`"
+            echo "# this release, by name -- this is the rollback command"
+            echo "ops/update.sh $TAG"
+            echo
+            echo "# whichever release is newest"
+            echo "ops/update.sh"
+            echo
+            echo "# what is installable"
+            echo "ops/update.sh --list"
+            echo "\`\`\`"
+            echo
+            echo "\`ops/update.sh\` checks the asset against the hash above, refuses a binary that is not statically linked, refuses a tag whose commit is not on \`trunk\`, and refuses one whose \`--version\` does not match this release before anything is installed."
+            echo
+            if [[ -n "$PREVIOUS" ]]; then
+              echo "## Changes since $PREVIOUS"
+              echo
+              git log --pretty=format:'- %s (`%h`)' "$PREVIOUS..$GITHUB_SHA"
+              echo
+              echo
+              echo "To compare against a release further back -- which is the question a rollback usually asks -- use [\`$PREVIOUS...$TAG\`]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/compare/$PREVIOUS...$TAG) with either tag substituted."
+            else
+              echo "## Changes"
+              echo
+              echo "First release. Nothing before this one was tagged, so there is no range to diff against; \`$GITHUB_SHA\` is where the tagged history starts."
+            fi
+          } > notes.md
+
+          echo "----- notes.md -----"
+          cat notes.md
+
+      - name: Publish
+        run: |
+          if [[ "$RELEASE_EXISTS" == "yes" ]]; then
+            gh release upload "$TAG" "$ASSET" --repo "$GITHUB_REPOSITORY" --clobber
+            gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --notes-file notes.md
+          else
+            gh release create "$TAG" \
+              --repo "$GITHUB_REPOSITORY" \
+              --target "$GITHUB_SHA" \
+              --title "$TAG" \
+              --notes-file notes.md \
+              "$ASSET"
+          fi
+
+      # The published release is what ops/update.sh will fetch, and until
+      # something fetches it nobody knows that it can be. This downloads the
+      # asset back out through the same path update.sh uses and checks it
+      # against the hash the notes now claim -- so a release that published an
+      # empty, truncated or wrongly-named asset fails HERE, on the run that
+      # created it, rather than on the owner's host at the moment they were
+      # trying to roll back.
+      - name: Download it back and check it against its own recorded hash
+        run: |
+          gh release download "$TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --pattern trellis \
+            --dir verify
+          echo "$SHA256  verify/trellis" | sha256sum --check --strict
+          chmod +x verify/trellis
+          verify/trellis --version
+          echo "$TAG is published, downloadable and intact"

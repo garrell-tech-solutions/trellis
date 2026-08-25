@@ -129,6 +129,21 @@ fn html_body(world: &World) -> Result<&str, String> {
     super::html_body(world, "no quota screen response recorded")
 }
 
+/// The shared "does the extracted text match" verdict every comparison
+/// dispatcher in this module ends on -- same condition, differing only in
+/// `mismatch`, each call site's own description of what it was comparing.
+/// Built eagerly rather than lazily (a plain `String`, not a closure): a
+/// closure defined inline counts as a nested space whose own complexity
+/// rolls back into the caller that defines it, so it would not have moved
+/// the branch out of the dispatcher at all.
+fn expect_eq(actual: &str, expected: &str, mismatch: String) -> Result<(), String> {
+    if actual == expected {
+        Ok(())
+    } else {
+        Err(mismatch)
+    }
+}
+
 fn dispatch_meta(
     world: &mut World,
     example: &BTreeMap<String, String>,
@@ -136,15 +151,12 @@ fn dispatch_meta(
 ) -> Result<(), String> {
     let expected = resolve(example, &caps[1])?;
     let body = html_body(world)?;
-    let meta = html::between(body, r#"<div class="quota-meta">"#, "</div>")?;
-    if meta.trim() == expected {
-        Ok(())
-    } else {
-        Err(format!(
-            "expected the quota screen to report {expected:?}, got {:?}",
-            meta.trim()
-        ))
-    }
+    let meta = html::between(body, r#"<div class="quota-meta">"#, "</div>")?.trim();
+    expect_eq(
+        meta,
+        &expected,
+        format!("expected the quota screen to report {expected:?}, got {meta:?}"),
+    )
 }
 
 fn quota_rows_section(body: &str) -> Option<&str> {
@@ -153,10 +165,9 @@ fn quota_rows_section(body: &str) -> Option<&str> {
 
 fn then_offers_no_quotas(world: &mut World) -> Result<(), String> {
     let body = html_body(world)?;
-    match quota_rows_section(body) {
-        None => Ok(()),
-        Some(section) if section.trim().is_empty() => Ok(()),
+    match quota_rows_section(body).filter(|section| !section.trim().is_empty()) {
         Some(section) => Err(format!("expected no quotas, got:\n{section}")),
+        None => Ok(()),
     }
 }
 
@@ -168,15 +179,12 @@ fn dispatch_screen_notes(
     let expected = resolve(example, &caps[1])?;
     let body = html_body(world)?;
     let note = html::between(body, r#"<div class="quota-empty">"#, "</div>")?;
-    let note = html::between(note, "<p>", "</p>")?;
-    if note.trim() == expected {
-        Ok(())
-    } else {
-        Err(format!(
-            "expected the quota screen to note {expected:?}, got {:?}",
-            note.trim()
-        ))
-    }
+    let note = html::between(note, "<p>", "</p>")?.trim();
+    expect_eq(
+        note,
+        &expected,
+        format!("expected the quota screen to note {expected:?}, got {note:?}"),
+    )
 }
 
 fn dispatch_define_control(
@@ -187,13 +195,11 @@ fn dispatch_define_control(
     let expected = resolve(example, &caps[1])?;
     let body = html_body(world)?;
     let (_, label) = html::button(body, r#"class="quota-define-submit""#)?;
-    if label == expected {
-        Ok(())
-    } else {
-        Err(format!(
-            "expected the define control named {expected:?}, got {label:?}"
-        ))
-    }
+    expect_eq(
+        label,
+        &expected,
+        format!("expected the define control named {expected:?}, got {label:?}"),
+    )
 }
 
 /// Posts a `application/x-www-form-urlencoded` body to `path` -- the same
@@ -259,23 +265,30 @@ fn quota_row<'a>(body: &'a str, name: &str) -> Result<&'a str, String> {
     html::row_containing(section, name)
 }
 
+/// `caps[1]` and `caps[2]` resolved together -- the "which quota, what do we
+/// expect of it" pair [`dispatch_quota_reads`] and [`dispatch_quota_notes`]
+/// both start with, one `?` in the caller rather than two.
+fn resolve_pair(
+    example: &BTreeMap<String, String>,
+    caps: &regex::Captures<'_>,
+) -> Result<(String, String), String> {
+    Ok((resolve(example, &caps[1])?, resolve(example, &caps[2])?))
+}
+
 fn dispatch_quota_reads(
     world: &mut World,
     example: &BTreeMap<String, String>,
     caps: &regex::Captures<'_>,
 ) -> Result<(), String> {
-    let name = resolve(example, &caps[1])?;
-    let expected = resolve(example, &caps[2])?;
+    let (name, expected) = resolve_pair(example, caps)?;
     let body = html_body(world)?;
     let row = quota_row(body, &name)?;
     let readout = html::between(row, r#"<div class="quota-readout">"#, "</div>")?;
-    if readout == expected {
-        Ok(())
-    } else {
-        Err(format!(
-            "expected the quota {name:?} to read {expected:?}, got {readout:?}"
-        ))
-    }
+    expect_eq(
+        readout,
+        &expected,
+        format!("expected the quota {name:?} to read {expected:?}, got {readout:?}"),
+    )
 }
 
 fn dispatch_quota_notes(
@@ -283,18 +296,15 @@ fn dispatch_quota_notes(
     example: &BTreeMap<String, String>,
     caps: &regex::Captures<'_>,
 ) -> Result<(), String> {
-    let name = resolve(example, &caps[1])?;
-    let expected = resolve(example, &caps[2])?;
+    let (name, expected) = resolve_pair(example, caps)?;
     let body = html_body(world)?;
     let row = quota_row(body, &name)?;
     let note = html::between(row, r#"<div class="quota-note">"#, "</div>")?;
-    if note == expected {
-        Ok(())
-    } else {
-        Err(format!(
-            "expected the quota {name:?} to note {expected:?}, got {note:?}"
-        ))
-    }
+    expect_eq(
+        note,
+        &expected,
+        format!("expected the quota {name:?} to note {expected:?}, got {note:?}"),
+    )
 }
 
 fn dispatch_form_warns(
@@ -305,13 +315,11 @@ fn dispatch_form_warns(
     let expected = resolve(example, &caps[1])?;
     let body = html_body(world)?;
     let warning = html::between(body, r#"<p class="quota-warning">"#, "</p>")?;
-    if warning == expected {
-        Ok(())
-    } else {
-        Err(format!(
-            "expected the new-quota form to warn {expected:?}, got {warning:?}"
-        ))
-    }
+    expect_eq(
+        warning,
+        &expected,
+        format!("expected the new-quota form to warn {expected:?}, got {warning:?}"),
+    )
 }
 
 fn dispatch_form_create_control(
@@ -322,13 +330,11 @@ fn dispatch_form_create_control(
     let expected = resolve(example, &caps[1])?;
     let body = html_body(world)?;
     let (_, label) = html::button(body, r#"class="quota-define-submit""#)?;
-    if label == expected {
-        Ok(())
-    } else {
-        Err(format!(
-            "expected a create control named {expected:?}, got {label:?}"
-        ))
-    }
+    expect_eq(
+        label,
+        &expected,
+        format!("expected a create control named {expected:?}, got {label:?}"),
+    )
 }
 
 /// Every `.quota-name` label's text, in document order — what "the quota

@@ -180,44 +180,93 @@ async fn respond_to_name_match(
 ) -> Result<Response, StatusCode> {
     match name_match {
         Some(NameMatch::Exact(existing_name, existing_minutes)) => {
-            let warning = format!(
-                "\u{201c}{existing_name}\u{201d} already exists at {}. File it there instead of making a second one.",
-                hours_a_week(existing_minutes)
-            );
-            rejected(
+            reject_exact_match(
                 pool,
                 pending_name,
                 pending_hours,
-                Some(warning),
-                DEFAULT_BUTTON_LABEL,
-                None,
+                existing_name,
+                existing_minutes,
             )
             .await
         }
         Some(NameMatch::Similar(existing_name, existing_minutes))
             if !already_confirmed(confirmed, &definition.name) =>
         {
-            let warning = format!(
-                "That reads a lot like \u{201c}{existing_name}\u{201d} ({}). Same thing?",
-                hours_a_week(existing_minutes)
-            );
-            rejected(
+            warn_similar_match(
                 pool,
                 pending_name,
                 pending_hours,
-                Some(warning),
-                "Create anyway",
-                Some(definition.name.clone()),
+                existing_name,
+                existing_minutes,
+                definition.name.clone(),
             )
             .await
         }
-        _ => {
-            super::store::create(pool, &definition, clock.now_ms())
-                .await
-                .map_err(write_failed)?;
-            body::respond(pool, StatusCode::CREATED, DefineFormView::default()).await
-        }
+        _ => create_quota(pool, clock, definition).await,
     }
+}
+
+/// An exact-match candidate is refused outright, never bypassable
+/// (`D-quotas-are-selected-not-typed`): the reset form carries only the
+/// existing quota's own name and target, nothing to confirm past.
+async fn reject_exact_match(
+    pool: &SqlitePool,
+    pending_name: String,
+    pending_hours: String,
+    existing_name: &str,
+    existing_minutes: i64,
+) -> Result<Response, StatusCode> {
+    let warning = format!(
+        "\u{201c}{existing_name}\u{201d} already exists at {}. File it there instead of making a second one.",
+        hours_a_week(existing_minutes)
+    );
+    rejected(
+        pool,
+        pending_name,
+        pending_hours,
+        Some(warning),
+        DEFAULT_BUTTON_LABEL,
+        None,
+    )
+    .await
+}
+
+/// A similar-match candidate is warned once; `candidate_name` rides back on
+/// the reset form's hidden `confirmed` field so a "Create anyway" resubmit
+/// can be told apart from a first attempt (`quota-screen-similar-name-
+/// warns-07`, [`already_confirmed`]).
+async fn warn_similar_match(
+    pool: &SqlitePool,
+    pending_name: String,
+    pending_hours: String,
+    existing_name: &str,
+    existing_minutes: i64,
+    candidate_name: String,
+) -> Result<Response, StatusCode> {
+    let warning = format!(
+        "That reads a lot like \u{201c}{existing_name}\u{201d} ({}). Same thing?",
+        hours_a_week(existing_minutes)
+    );
+    rejected(
+        pool,
+        pending_name,
+        pending_hours,
+        Some(warning),
+        "Create anyway",
+        Some(candidate_name),
+    )
+    .await
+}
+
+async fn create_quota(
+    pool: &SqlitePool,
+    clock: Clock,
+    definition: QuotaDefinition,
+) -> Result<Response, StatusCode> {
+    super::store::create(pool, &definition, clock.now_ms())
+        .await
+        .map_err(write_failed)?;
+    body::respond(pool, StatusCode::CREATED, DefineFormView::default()).await
 }
 
 #[cfg(test)]

@@ -22,15 +22,6 @@ pub enum Field {
     Hours,
 }
 
-impl Field {
-    pub fn name(self) -> &'static str {
-        match self {
-            Field::Name => "name",
-            Field::Hours => "hours",
-        }
-    }
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DefinitionRejection {
     MissingField(Field),
@@ -39,9 +30,7 @@ pub enum DefinitionRejection {
 
 impl QuotaDefinition {
     /// `name` trimmed and non-empty; `hours` a positive number, converted to
-    /// whole minutes. The canvas's own `step="0.5"` on the hours input means
-    /// every value it can submit already lands on a whole minute; rounding
-    /// here is a safety net against float drift, not a domain rule.
+    /// whole minutes ([`to_minutes`]).
     pub fn from_fields(
         name: Option<&str>,
         hours: Option<&str>,
@@ -53,25 +42,42 @@ impl QuotaDefinition {
     }
 }
 
+/// `value` trimmed and non-empty, or the field's own missing-field
+/// rejection -- the same "required" check [`parse_name`] and
+/// [`parse_weekly_target_minutes`] both start with, differing only in which
+/// field is doing the asking.
+fn require_nonblank(value: Option<&str>, field: Field) -> Result<&str, DefinitionRejection> {
+    value
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .ok_or(DefinitionRejection::MissingField(field))
+}
+
 fn parse_name(name: Option<&str>) -> Result<String, DefinitionRejection> {
-    name.map(str::trim)
-        .filter(|n| !n.is_empty())
-        .map(str::to_string)
-        .ok_or(DefinitionRejection::MissingField(Field::Name))
+    require_nonblank(name, Field::Name).map(str::to_string)
 }
 
 fn parse_weekly_target_minutes(hours: Option<&str>) -> Result<i64, DefinitionRejection> {
-    let hours_str = hours
-        .map(str::trim)
-        .filter(|h| !h.is_empty())
-        .ok_or(DefinitionRejection::MissingField(Field::Hours))?;
+    let hours_str = require_nonblank(hours, Field::Hours)?;
+    let hours = parse_positive_hours(hours_str)?;
+    Ok(to_minutes(hours))
+}
+
+fn parse_positive_hours(hours_str: &str) -> Result<f64, DefinitionRejection> {
     let hours: f64 = hours_str
         .parse()
         .map_err(|_| DefinitionRejection::InvalidField(Field::Hours))?;
     if hours.is_nan() || hours <= 0.0 {
         return Err(DefinitionRejection::InvalidField(Field::Hours));
     }
-    Ok((hours * 60.0).round() as i64)
+    Ok(hours)
+}
+
+/// The canvas's own `step="0.5"` on the hours input means every value it can
+/// submit already lands on a whole minute; rounding here is a safety net
+/// against float drift, not a domain rule.
+fn to_minutes(hours: f64) -> i64 {
+    (hours * 60.0).round() as i64
 }
 
 /// Whether `candidate` collides with an existing quota — the two-tier guard

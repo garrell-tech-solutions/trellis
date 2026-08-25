@@ -104,6 +104,13 @@
      the two numbers repeated most often across the file. */
   --gutter: 18px;
   --tap: 44px;
+
+  /* Shape, revised 2026-08-25 ("soft fills"): the product stops drawing
+     lines and starts drawing shapes. A surface is a rounded tinted fill;
+     a control is a slightly tighter one. There is no third radius, and
+     no borders left to round -- see the note above `.row`. */
+  --radius: 12px;
+  --radius-control: 10px;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -241,16 +248,16 @@ header {
   flex: none;
   position: sticky;
   bottom: 0;
-  border-top: 1px solid var(--color-gray-200);
   background: var(--color-gray-50);
   padding-bottom: env(safe-area-inset-bottom);
 }
 
 header nav ul {
   margin: 0;
-  padding: 0;
+  padding: 6px var(--gutter);
   list-style: none;
   display: flex;
+  gap: 4px;
 }
 
 header nav li {
@@ -262,7 +269,7 @@ header nav a {
   display: flex;
   align-items: center;
   justify-content: center;
-  height: 58px;
+  height: 46px;
   padding: 0 2px;
   text-align: center;
   font-size: 9.5px;
@@ -273,12 +280,13 @@ header nav a {
      the page background nothing actually sits on). gray-500 clears 4.5:1
      against the header's own surface, where this text actually sits. */
   color: var(--color-gray-500);
+  border-radius: var(--radius-control);
 }
 
 header nav a[aria-current='page'] {
   color: var(--color-primary-800);
   font-weight: 600;
-  box-shadow: inset 0 2px 0 0 var(--color-primary-800);
+  background: var(--color-primary-50);
 }
 
 /* --- Type ---------------------------------------------------------------
@@ -305,15 +313,6 @@ h2 {
   letter-spacing: 0.2em;
   text-transform: uppercase;
   color: var(--color-primary-800);
-}
-
-h2::after {
-  content: '';
-  display: block;
-  width: 48px;
-  height: 1px;
-  margin-top: 8px;
-  background: var(--color-accent);
 }
 
 h3 {
@@ -366,9 +365,9 @@ main > h1 {
   display: flex;
   align-items: stretch;
   margin: 0 0 8px;
-  border: 1px solid var(--color-gray-300);
-  border-bottom: 2px solid var(--color-primary-800);
   background: var(--color-gray-100);
+  border-radius: var(--radius);
+  overflow: hidden;
 }
 
 .quick-add-box input[type='text'] {
@@ -411,17 +410,18 @@ main > h1 {
   height: 36px;
   margin: 6px 0 0;
   padding: 0 10px;
-  border: 1px solid var(--color-gray-300);
+  border: none;
   outline: none;
-  background: transparent;
+  background: var(--color-gray-100);
   font-size: 13px;
   color: var(--color-gray-800);
+  border-radius: var(--radius-control);
 }
 
 .quick-add-tag::placeholder {
   /* #124: this input sits directly on the app surface (a sibling of
      `.quick-add-box`, not nested inside it) -- gray-500 clears 4.5:1 there. */
-  color: var(--color-gray-500);
+  color: var(--color-gray-600);
 }
 
 .hint {
@@ -454,15 +454,35 @@ main > h1 {
 #captures,
 #tasks {
   margin: 0 0 24px;
-  padding: 0;
+  padding: 0 var(--gutter);
   list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 
 .row {
-  padding: 12px var(--gutter) 13px 16px;
-  border-bottom: 1px solid var(--color-gray-200);
-  border-left: 2px solid var(--color-primary-800);
-  background: var(--color-gray-50);
+  padding: 12px 16px 13px 30px;
+  background: var(--color-gray-100);
+  position: relative;
+  border-radius: var(--radius);
+}
+
+/* The untriaged marker (2026-08-25, "soft fills"): a dot, not an edge.
+   The left border this replaces was one of five kinds of line the screen
+   was drawing at once; a card that is already distinct by fill only needs
+   the one mark that says "this one still needs a decision". Positioned
+   rather than laid out so it cannot disturb `.row`'s own content flow --
+   the row's extra left padding is what makes room for it. */
+.row::before {
+  content: '';
+  position: absolute;
+  top: 18px;
+  left: 14px;
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: var(--color-accent);
 }
 
 .row-text {
@@ -479,14 +499,12 @@ main > h1 {
   text-transform: uppercase;
   /* #124: gray-400 fails here (2.36:1, the number this whole slice was
      filed for); gray-500 clears 4.5:1 on this row's own surface. */
-  color: var(--color-gray-500);
+  color: var(--color-gray-600);
 }
 
 /* A task: already sorted, so it recedes -- the canvas's triaged row. */
 #tasks > li {
-  padding: 11px var(--gutter);
-  border-bottom: 1px solid var(--color-gray-200);
-  border-left: 2px solid transparent;
+  padding: 11px 16px;
   background: var(--color-gray-100);
   font-size: 13.5px;
   line-height: 1.35;
@@ -494,6 +512,7 @@ main > h1 {
      gray-600 clears it. */
   color: var(--color-gray-600);
   text-wrap: pretty;
+  border-radius: var(--radius);
 }
 
 /* --- Triage -------------------------------------------------------------
@@ -531,19 +550,18 @@ main > h1 {
   width: 100%;
   height: var(--tap);
   padding: 0 4px;
-  border: 1px solid var(--color-gray-300);
+  border: none;
   background: var(--color-gray-50);
   color: var(--color-gray-700);
   font-size: 12px;
   letter-spacing: 0.06em;
   cursor: pointer;
+  border-radius: var(--radius-control);
 }
 
 /* The chosen kind, filled primary-800 -- the canvas's own "chosen one
    filled" (#119, disclosures-one-panel-at-a-time-03's "marks as chosen"). */
-.kind-choice.chosen > button {
-  border-color: var(--color-primary-800);
-  background: var(--color-primary-800);
+.kind-choice.chosen > button {  background: var(--color-primary-800);
   color: var(--color-on-primary);
 }
 
@@ -564,7 +582,7 @@ main > h1 {
   font-size: 10px;
   letter-spacing: 0.14em;
   text-transform: uppercase;
-  color: var(--color-gray-500);
+  color: var(--color-gray-600);
 }
 
 .kinds .kind-wide > label select,
@@ -574,13 +592,14 @@ main > h1 {
   height: var(--tap);
   margin-top: 4px;
   padding: 0 8px;
-  border: 1px solid var(--color-gray-300);
+  border: none;
   background: var(--color-gray-50);
   outline: none;
   font-size: 13px;
   letter-spacing: normal;
   text-transform: none;
   color: var(--color-gray-800);
+  border-radius: var(--radius-control);
 }
 
 .kinds .kind-wide > button {
@@ -609,30 +628,30 @@ main > h1 {
   align-items: center;
   height: var(--tap);
   padding: 0 10px;
-  border: 1px solid var(--color-gray-300);
+  border: none;
   background: var(--color-gray-50);
   color: var(--color-gray-700);
   font-size: 12px;
   letter-spacing: 0.06em;
   list-style: none;
   cursor: pointer;
+  border-radius: var(--radius-control);
 }
 
 .commitment-choice > summary::-webkit-details-marker {
   display: none;
 }
 
-.commitment-choice[open] > summary {
-  border-color: var(--color-primary-800);
-  background: var(--color-primary-800);
+.commitment-choice[open] > summary {  background: var(--color-primary-800);
   color: var(--color-on-primary);
 }
 
 .fields {
   margin-top: 8px;
   padding: 10px;
-  border: 1px solid var(--color-gray-200);
-  background: var(--color-gray-100);
+  border: none;
+  background: var(--color-gray-50);
+  border-radius: var(--radius);
 }
 
 .fields label {
@@ -655,13 +674,14 @@ main > h1 {
   height: var(--tap);
   margin-top: 4px;
   padding: 0 10px;
-  border: 1px solid var(--color-gray-300);
-  background: var(--color-gray-50);
+  border: none;
+  background: var(--color-gray-100);
   outline: none;
   font-size: 13.5px;
   letter-spacing: normal;
   text-transform: none;
   color: var(--color-gray-900);
+  border-radius: var(--radius-control);
 }
 
 .actions {
@@ -697,22 +717,22 @@ main > h1 {
   letter-spacing: 0.06em;
   /* #124: this sits on `.row`'s app surface -- gray-400 fails (2.49:1),
      gray-500 clears it, and the existing hover state still darkens further. */
-  color: var(--color-gray-500);
+  color: var(--color-gray-600);
   cursor: pointer;
 }
 
 .dismiss button:hover {
-  color: var(--color-gray-600);
+  color: var(--color-gray-700);
 }
 
 .triage-error {
   margin: 9px 0 0;
   padding: 9px 10px;
   background: var(--color-panel);
-  border-top: 3px solid var(--color-accent);
   font-size: 12px;
   line-height: 1.5;
   color: var(--color-gray-700);
+  border-radius: var(--radius);
 }
 
 /* --- Shared page furniture ----------------------------------------------
@@ -726,8 +746,7 @@ main > h1 {
 .panel {
   margin: 0 0 16px;
   padding: 20px;
-  border-top: 4px solid var(--color-accent);
-  border-radius: 8px;
+  border-radius: var(--radius);
   background: var(--color-panel);
 }
 
@@ -753,13 +772,14 @@ main > section select {
   height: var(--tap);
   margin-top: 4px;
   padding: 0 10px;
-  border: 1px solid var(--color-gray-300);
-  background: var(--color-gray-50);
+  border: none;
+  background: var(--color-gray-100);
   outline: none;
   font-size: 13.5px;
   letter-spacing: normal;
   text-transform: none;
   color: var(--color-gray-900);
+  border-radius: var(--radius-control);
 }
 
 main > form:not(.quick-add) button,
@@ -767,12 +787,13 @@ main > div button,
 main > section button {
   height: var(--tap);
   padding: 0 14px;
-  border: 1px solid var(--color-primary-800);
-  background: var(--color-gray-50);
+  border: none;
+  background: var(--color-primary-50);
   color: var(--color-primary-800);
   font-size: 12.5px;
   letter-spacing: 0.06em;
   cursor: pointer;
+  border-radius: var(--radius-control);
 }
 
 main ul:not(#captures):not(#tasks) {
@@ -783,7 +804,6 @@ main ul:not(#captures):not(#tasks) {
 
 main ul:not(#captures):not(#tasks) > li {
   padding: 11px 0;
-  border-bottom: 1px solid var(--color-gray-200);
   font-size: 14.5px;
   line-height: 1.3;
   color: var(--color-gray-700);
@@ -798,7 +818,6 @@ table {
 
 th {
   padding: 8px 0;
-  border-bottom: 1px solid var(--color-gray-300);
   text-align: left;
   font-size: 10px;
   font-weight: 600;
@@ -809,7 +828,6 @@ th {
 
 td {
   padding: 10px 0;
-  border-bottom: 1px solid var(--color-gray-200);
   font-size: 13.5px;
   color: var(--color-gray-700);
 }
@@ -908,13 +926,14 @@ td {
   width: 100%;
   height: var(--tap);
   padding: 0 12px;
-  border: 1px solid var(--color-primary-800);
+  border: none;
   background: var(--color-gray-50);
   color: var(--color-primary-800);
   font-size: 12.5px;
   font-weight: 600;
   letter-spacing: 0.04em;
   cursor: pointer;
+  border-radius: var(--radius-control);
 }
 
 .trip-items > li {
@@ -1067,7 +1086,6 @@ td {
   align-items: baseline;
   gap: 10px;
   padding: 8px 0;
-  border-bottom: 1px solid var(--color-gray-100);
 }
 
 .committed-date {

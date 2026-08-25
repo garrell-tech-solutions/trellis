@@ -343,6 +343,30 @@ mod tests {
         );
     }
 
+    /// The containing side can be either name -- `"Piano theory"` warns
+    /// against `"Piano"` (candidate contains existing) and this is the other
+    /// direction: an existing `"Piano reading"` warns against a candidate of
+    /// just `"Reading"` (existing contains candidate), too far apart in edit
+    /// distance for that tier to catch it alone.
+    #[test]
+    fn check_name_warns_when_an_existing_name_contains_the_candidate() {
+        let existing = vec![("Piano reading".to_string(), 240)];
+        assert_eq!(
+            check_name("Reading", &existing),
+            Some(NameMatch::Similar("Piano reading", 240))
+        );
+    }
+
+    /// A candidate that is nothing but punctuation normalizes to the empty
+    /// string, and an empty string is a substring of everything -- without
+    /// its own guard, `is_similar` would warn a punctuation-only candidate
+    /// against every existing quota rather than staying silent.
+    #[test]
+    fn check_name_is_silent_on_a_candidate_that_normalizes_to_nothing() {
+        let existing = vec![("Piano".to_string(), 240)];
+        assert_eq!(check_name("---", &existing), None);
+    }
+
     /// The invariant the type exists for: the one value that would make
     /// [`progress`] divide by zero cannot be built at all.
     #[test]
@@ -385,5 +409,53 @@ mod tests {
         let p = progress(target(240), 300);
         assert_eq!(p.remaining_minutes, 0);
         assert_eq!(p.percent, 125);
+    }
+
+    // --- parse_positive_hours and levenshtein: exercised directly ---------
+    //
+    // `parse_weekly_target` re-checks the result through
+    // `WeeklyTarget::from_minutes`, which refuses anything non-positive on
+    // its own -- so every input that reaches `from_fields` gets the same
+    // `InvalidField(Hours)` whether `parse_positive_hours` catches it or the
+    // downstream guard does. That redundancy is exactly why a defect in
+    // `parse_positive_hours` alone needs a direct test to be visible at all.
+    // `levenshtein`'s only external signal is `is_similar`'s `<= 2`
+    // threshold, which likewise hides most wrong distances that still land
+    // on the same side of 2; a direct test on known distances is what
+    // actually pins the arithmetic down.
+
+    #[test]
+    fn parse_positive_hours_rejects_a_value_that_parses_as_not_a_number() {
+        assert_eq!(
+            parse_positive_hours("NaN"),
+            Err(DefinitionRejection::InvalidField(Field::Hours))
+        );
+    }
+
+    #[test]
+    fn levenshtein_of_identical_strings_is_zero() {
+        assert_eq!(levenshtein("piano", "piano"), 0);
+    }
+
+    #[test]
+    fn levenshtein_against_an_empty_string_is_the_others_length() {
+        assert_eq!(levenshtein("abc", ""), 3);
+        assert_eq!(levenshtein("", "abc"), 3);
+    }
+
+    #[test]
+    fn levenshtein_of_the_classic_kitten_sitting_pair_is_three() {
+        assert_eq!(levenshtein("kitten", "sitting"), 3);
+    }
+
+    #[test]
+    fn levenshtein_of_a_single_insertion_is_one() {
+        assert_eq!(levenshtein("ab", "abc"), 1);
+        assert_eq!(levenshtein("abc", "ab"), 1);
+    }
+
+    #[test]
+    fn levenshtein_does_not_credit_a_transposition() {
+        assert_eq!(levenshtein("ab", "ba"), 2);
     }
 }

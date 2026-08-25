@@ -786,6 +786,56 @@ is derived from how many things it clears and must stay derived.
 > _displayed` before #88: two independent statements of one rule, held
 > together by the only thing that can hold them.
 
+## The quota screen — built to its named line (`#93`, `D-quotas-are-selected-not-typed`)
+
+**The fourth screen, and the last dead link `nav.rs` carried a comment for.**
+A quota here is **not** a task: `TaskKind::Quota`'s triaged capture stays
+exactly as it is and does not appear on this screen. This is a new
+first-class entity in its own table, created from the screen without a
+capture, and #138 closes the two concepts into one.
+
+```
+scheduler_core::quota::QuotaDefinition::from_fields(name, hours)
+                       WeeklyTarget          positive minutes, by construction
+                       check_name(candidate, existing) -> Option<NameMatch>
+                       progress(WeeklyTarget, logged) -> Progress
+
+trellis_server::quota/  store.rs · view.rs · body.rs · http.rs   pool's shape
+```
+
+**The slice stopped at the line the brief named** — the entity, the screen,
+the tab and `+ Define a new quota` land; the session surface does not. Every
+row reads its target against zero logged minutes, which is honest rather
+than a placeholder because nothing yet writes a session.
+
+> **A precondition that only a comment enforced.** `progress` divided by the
+> target and explained that no guard was needed because `from_fields`
+> refuses a non-positive one — a rule stated three times (the column's
+> `CHECK`, that constructor, and the comment) and reachable from none of
+> them at the point of use. `progress(0, 30)` does not panic: Rust saturates
+> the float-to-int cast, so it returns **`i64::MAX` percent**, which renders
+> as a number and is wrong. `WeeklyTarget` makes it unrepresentable instead,
+> and `store::list_quotas` is where the column's `CHECK` and the type meet —
+> a row that has broken its own constraint is reported as a value that
+> cannot be decoded, not passed on as a zero. Same shape as `RunSizes` one
+> slice earlier: **the guarantee belongs in the type of the thing it is
+> about, not in a note about whoever built it.**
+
+> **The duplicate-name guard fetches the whole table, and that is a new
+> instance of a tracked violation.** `store::existing_names` returns every
+> quota's name and target so `check_name` can loop in memory — a set
+> operation executing in the application layer, which
+> `T-set-operations-execute-in-the-store` and the company standard's
+> invariant 2 both forbid, and which the decision record explicitly refuses
+> to read as scale-gated. **Half of it could move and half could not:**
+> the exact tier folds punctuation and spaces away, which `COLLATE NOCASE`
+> cannot express, and the similar tier is Levenshtein and containment, which
+> SQLite cannot express at all. Moving the exact tier down means storing a
+> normalized name — a migration and a ruling on what a quota's identity *is*
+> (`T-collation-enforces-name-identity` settled that for tags at the
+> collation). **That is a decision, not a refactor**, so it is recorded below
+> and owned by the specifier rather than taken here.
+
 ## Context tags — built (`D-context-tags-are-the-taxonomy`, #82)
 
 **The product's only taxonomy**, and the only one left after #88. Free text,
@@ -1479,5 +1529,7 @@ schemas are still there. A revival inherits the gap along with the tables.
 | `ScheduleTask` needs `life_area_id` and `deadline_type`; triage writes `NULL` for both | M3 revival | #88 · #94 — needs a decision, not a re-attachment |
 | `scheduler_core::pool` filters and counts in memory; `pool/store.rs`'s task query still has no `ORDER BY` | the company set-operations standard | **#108** — surface grew at `#122`, which added done-filtering and a done-count to `pool::group` after the 2026-08-23 audit. **#129 made it easier, not worse**: `run_member_counts` does its `GROUP BY` in SQL and hands back `RunSizes`, a domain value the core consumes without knowing how it was reached — the shape the specification object #108 needs, now with a working precedent in this module |
 | ~~The committed screen's date cell is always UTC~~ | ~~wrong once the zone is set~~ | **closed** — `#110` reads the owner's zone; `settings::current_timezone` is a front door again |
+| `quota::check_name` runs over every quota fetched into memory; `store::existing_names` has no `WHERE` | the company set-operations standard | **new at #93** — the similar tier (Levenshtein, containment) cannot execute in SQLite at all; the exact tier could, but only against a stored normalized name, which needs a ruling on quota identity. **Specifier's** — same shape as `T-collation-enforces-name-identity` settled for tags |
+| The acceptance pipeline cannot defer a specified-but-unbuilt feature | **mutation coverage, entirely** | **new at #93** — `run.sh` globs `features/*.feature`, so `quota_sessions.feature`, deliberately deferred to slice 2, generates an entrypoint and runs red. `cargo-mutants` aborts on a failed baseline rather than degrading, so a deferred spec costs the *whole* mutation run. The file's own header says deferring means deferring the file; nothing enforces that. **Owner ruled 2026-08-25 to hand off red rather than park it** |
 | U3 — backward-pass input | M3 | #7 · ~~U2~~ `T-hard-refuses-soft-slips` · ~~U4~~ `T-blocks-do-not-cross-guardrail-seams` |
 | ~~Crate layout ratification~~ | ~~nothing; cost grows~~ | **closed** — `T-package-by-business-domain`, #44 |

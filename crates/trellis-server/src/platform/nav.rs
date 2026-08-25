@@ -2,10 +2,10 @@
 //! to itself and to its siblings looks like (`T-nav-is-the-site-map`, the
 //! header is the route table).
 //!
-//! Four pages — Capture, Pool (#92), Quota (#93) and Committed (#94) — the
-//! full set `D-four-screens` draws. `Quota` was the last dead link this
-//! module carried the comment for; [`ALL`] now names every page
-//! [`platform::app`] can route to.
+//! Four pages — Capture, Pool (#92), Committed (#94) and Quota (#93), in
+//! the order [`ALL`] lists them — the full set `D-four-screens` draws.
+//! `Quota` was the last dead link this module carried the comment for;
+//! [`ALL`] now names every page [`platform::app`] can route to.
 
 /// A page the header can link to. Add a variant only alongside the route
 /// it names — [`ALL`] and [`links`] are what keep the header from ever

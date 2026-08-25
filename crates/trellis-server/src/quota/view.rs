@@ -66,13 +66,13 @@ pub(super) fn build(rows: Vec<QuotaRow>) -> QuotaScreenView {
 
 fn quota_row_view(row: QuotaRow) -> QuotaRowView {
     let logged_minutes = 0;
-    let progress = quota::progress(row.weekly_target_minutes, logged_minutes);
+    let progress = quota::progress(row.weekly_target, logged_minutes);
     QuotaRowView {
         id: row.id,
         readout: format!(
             "{} / {}",
             format_duration(logged_minutes),
-            format_duration(row.weekly_target_minutes)
+            format_duration(row.weekly_target.minutes())
         ),
         note: format!(
             "{} left this week · {}%",
@@ -91,7 +91,8 @@ mod tests {
         QuotaRow {
             id,
             name: name.to_string(),
-            weekly_target_minutes,
+            weekly_target: quota::WeeklyTarget::from_minutes(weekly_target_minutes)
+                .expect("a positive target"),
         }
     }
 

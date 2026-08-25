@@ -1,13 +1,13 @@
-# mutation-stamp: sha256=f388e68ff5282ad7dc8910d41ae5b7abed701a806674bf3b0243cbbca7b8527f
+# mutation-stamp: sha256=754e10a236d7a2b51bb0b6264c6b004a9f691a6058a4a51f0f26c03309b4c7fc
 # acceptance-mutation-manifest-begin
-# {"version":1,"tested_at":"2026-08-24T14:44:34.278663555Z","feature_name":"A trip survives being worked","feature_path":"features/trip_progress.feature","background_hash":"304f93e93e2b217b49069c091950b87589f0c7e789e2d0dc3aaa8d845450cb64","implementation_hash":"sha256:7ac8aca68c43027e0ea2725f115e55d73189e6596478bb70f9b56df12acc57a0","scenarios":[{"index":0,"name":"A completed item stays in place, struck through, and the label reports progress","scenario_hash":"070b2d2efdf4c44e3a0a1e188bc4e690c50e9e49cced1a76c1139fc94cd0ec83","mutation_count":5,"result":{"Total":5,"Killed":5,"Survived":0,"Errors":0},"tested_at":"2026-08-24T14:44:34.278663555Z"},{"index":1,"name":"Checking items off never dissolves the panel","scenario_hash":"61b95a86983cd27b25eff6e016e2d3ada53a6c7ae13406609022dd4994c77f5b","mutation_count":4,"result":{"Total":4,"Killed":4,"Survived":0,"Errors":0},"tested_at":"2026-08-24T14:44:34.278663555Z"},{"index":2,"name":"Unchecking a struck item puts it back","scenario_hash":"97d4d37cd53085a3f9d3d2446c4c236e9d4a8af5e8d4ca605079b95778edd85e","mutation_count":2,"result":{"Total":2,"Killed":2,"Survived":0,"Errors":0},"tested_at":"2026-08-24T14:44:34.278663555Z"},{"index":3,"name":"Clear done removes the struck items and only those","scenario_hash":"381418cec6983150822618e795025ff6601f1540236b42b44686ec4352db8fa2","mutation_count":2,"result":{"Total":2,"Killed":2,"Survived":0,"Errors":0},"tested_at":"2026-08-24T14:44:34.278663555Z"},{"index":4,"name":"Clearing can take a group below the threshold, and it drops to loose ends","scenario_hash":"3d218c39b6d7e388cc9edb4e7c5d2d81423cace439bb06b6b0d183ed8d079c8f","mutation_count":2,"result":{"Total":2,"Killed":2,"Survived":0,"Errors":0},"tested_at":"2026-08-24T14:44:34.278663555Z"},{"index":5,"name":"A group with nothing open left says so, and clearing empties it","scenario_hash":"b26fbc522219a937236ba97c6f056696da9f9bc4e837baf67e08dc48545706fb","mutation_count":2,"result":{"Total":2,"Killed":2,"Survived":0,"Errors":0},"tested_at":"2026-08-24T14:44:34.278663555Z"},{"index":6,"name":"The clear control appears only once something is struck, and is named","scenario_hash":"78e7d498eac5c95fa0414398e64c6fe5d0c677f1386e48d0ac4fb674095d5447","mutation_count":1,"result":{"Total":1,"Killed":1,"Survived":0,"Errors":0},"tested_at":"2026-08-24T14:44:34.278663555Z"},{"index":7,"name":"A completed loose end still leaves the screen at once","scenario_hash":"d2f0d36f9d80aa716fe12aa6cc48a94579458856e4bd2b11d9adfaebba2bb0db","mutation_count":1,"result":{"Total":1,"Killed":1,"Survived":0,"Errors":0},"tested_at":"2026-08-24T14:44:34.278663555Z"}]}
+# {"version":1,"tested_at":"2026-08-25T17:19:12.872417336Z","feature_name":"A trip survives being worked","feature_path":"features/trip_progress.feature","background_hash":"304f93e93e2b217b49069c091950b87589f0c7e789e2d0dc3aaa8d845450cb64","implementation_hash":"sha256:7ac8aca68c43027e0ea2725f115e55d73189e6596478bb70f9b56df12acc57a0","scenarios":[{"index":3,"name":"Clear done removes the struck items and only those","scenario_hash":"62b1937640849053478c4c52b849ec279e475a753472a15631552d494ecd27a0","mutation_count":3,"result":{"Total":3,"Killed":3,"Survived":0,"Errors":0},"tested_at":"2026-08-25T17:19:12.872417336Z"},{"index":4,"name":"Clearing can take a group below the threshold, and it stays a trip","scenario_hash":"607b85b4ac4e19c63c75ecfd8d6439c64298de15d2549703320508dbcf306721","mutation_count":3,"result":{"Total":3,"Killed":3,"Survived":0,"Errors":0},"tested_at":"2026-08-25T17:19:12.872417336Z"},{"index":0,"name":"A completed item stays in place, struck through, and the label reports progress","scenario_hash":"070b2d2efdf4c44e3a0a1e188bc4e690c50e9e49cced1a76c1139fc94cd0ec83","mutation_count":5,"result":{"Total":5,"Killed":5,"Survived":0,"Errors":0},"tested_at":"2026-08-24T14:44:34.278663555Z"},{"index":1,"name":"Checking items off never dissolves the panel","scenario_hash":"61b95a86983cd27b25eff6e016e2d3ada53a6c7ae13406609022dd4994c77f5b","mutation_count":4,"result":{"Total":4,"Killed":4,"Survived":0,"Errors":0},"tested_at":"2026-08-24T14:44:34.278663555Z"},{"index":2,"name":"Unchecking a struck item puts it back","scenario_hash":"97d4d37cd53085a3f9d3d2446c4c236e9d4a8af5e8d4ca605079b95778edd85e","mutation_count":2,"result":{"Total":2,"Killed":2,"Survived":0,"Errors":0},"tested_at":"2026-08-24T14:44:34.278663555Z"},{"index":5,"name":"A group with nothing open left says so, and clearing empties it","scenario_hash":"b26fbc522219a937236ba97c6f056696da9f9bc4e837baf67e08dc48545706fb","mutation_count":2,"result":{"Total":2,"Killed":2,"Survived":0,"Errors":0},"tested_at":"2026-08-24T14:44:34.278663555Z"},{"index":6,"name":"The clear control appears only once something is struck, and is named","scenario_hash":"78e7d498eac5c95fa0414398e64c6fe5d0c677f1386e48d0ac4fb674095d5447","mutation_count":1,"result":{"Total":1,"Killed":1,"Survived":0,"Errors":0},"tested_at":"2026-08-24T14:44:34.278663555Z"},{"index":7,"name":"A completed loose end still leaves the screen at once","scenario_hash":"d2f0d36f9d80aa716fe12aa6cc48a94579458856e4bd2b11d9adfaebba2bb0db","mutation_count":1,"result":{"Total":1,"Killed":1,"Survived":0,"Errors":0},"tested_at":"2026-08-24T14:44:34.278663555Z"}]}
 # acceptance-mutation-manifest-end
 
 # trip-progress-struck-in-place-01: a completed item stays in place, struck through, and the label reports progress
 # trip-progress-panel-holds-02: checking items off never dissolves the panel
 # trip-progress-uncheck-restores-03: unchecking a struck item puts it back
 # trip-progress-clear-done-04: clear done removes the struck items and only those
-# trip-progress-clearing-can-drop-a-group-05: clearing can take a group below the threshold, and it drops to loose ends
+# trip-progress-clearing-holds-the-group-05: clearing can take a group below the threshold, and it stays a trip
 # trip-progress-fully-done-06: a group with nothing open left says so, and clearing empties it
 # trip-progress-clear-control-appears-with-work-07: the clear control appears only once something is struck, and is named
 # trip-progress-loose-ends-unchanged-08: a completed loose end still leaves the screen at once
@@ -66,6 +66,22 @@
 # means archived and still displayed, cleared means archived and no longer
 # displayed, and "no longer displayed" is a consequence of the clear tap
 # rather than a stored fact.
+#
+# --- TWO SCENARIOS HERE CHANGED IN #129 (`trip_persistence.feature`) ------
+# THE WORD THAT FAILED WAS "DISPLAYED", four lines up. Persistence counting
+# "everything displayed" is right until CLEARING is the thing that stops
+# something being displayed -- so five with three cleared counted as two and
+# fell to loose ends, with the owner still standing in the shop. The owner
+# EXTENDED `D-a-trip-survives-being-worked` on 2026-08-24: once a tag has
+# formed a trip it stays one for the rest of the run, and clearing tidies the
+# panel rather than dissolving it.
+#
+# `-05` ASSERTED THAT DEFECT and is REVERSED, deliberately and in the open --
+# it was green, it had to go red, and it is neither deleted nor weakened.
+# `-04` is the consequence: its two survivors used to land in loose ends and
+# now stay in the panel, so its `loose` count is zero. Everything else in
+# this file, `-06` above all, stands exactly as written. The rule that
+# replaces the single predicate is in `trip_persistence.feature`'s header.
 Feature: A trip survives being worked
 
   Background:
@@ -116,26 +132,28 @@ Feature: A trip survives being worked
     When the done items are cleared from "@homedepot"
     And the pool screen is viewed
     Then the trip "@homedepot" shows "<struck>" struck items
+    And the trip "@homedepot" shows "<open>" open items
     And the loose ends list shows "<loose>" items
 
     Examples:
-      | struck | loose |
-      | 0      | 2     |
+      | struck | open | loose |
+      | 0      | 2    | 0     |
 
-  # trip-progress-clearing-can-drop-a-group-05: clearing can take a group below the threshold, and it drops to loose ends
-  Scenario: Clearing can take a group below the threshold, and it drops to loose ends
+  # trip-progress-clearing-holds-the-group-05: clearing can take a group below the threshold, and it stays a trip
+  Scenario: Clearing can take a group below the threshold, and it stays a trip
     Given "3" pool tasks tagged "@homedepot"
     And "1" of them are marked done
     When the pool screen is viewed
     Then the pool screen offers the trips "<trips>"
     When the done items are cleared from "@homedepot"
     And the pool screen is viewed
-    Then the pool screen offers no trips
+    Then the pool screen offers the trips "<trips>"
+    And the trip "@homedepot" reads "<label>"
     And the loose ends list shows "<loose>" items
 
     Examples:
-      | trips      | loose |
-      | @homedepot | 2     |
+      | trips      | label    | loose |
+      | @homedepot | 2 things | 0     |
 
   # trip-progress-fully-done-06: a group with nothing open left says so, and clearing empties it
   Scenario: A group with nothing open left says so, and clearing empties it

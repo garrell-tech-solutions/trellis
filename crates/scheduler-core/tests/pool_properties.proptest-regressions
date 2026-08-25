@@ -1,0 +1,9 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc adf9098721719071c9eec9d0d6def346d7377f20af07ab01c6c6cf395ddacddc # shrinks to (specs, pairs) = ([Spec { tag: Some("@a"), done: true }], [])
+cc 67ecb44c1e1c2f1cc1fda3a0aac5f5c087ad4d1b26827634c51a5e00959a79d8 # shrinks to (specs, pairs) = ([Spec { tag: Some("@c"), done: false }, Spec { tag: Some("@c"), done: false }, Spec { tag: Some("@c"), done: false }, Spec { tag: Some("@c"), done: false }], [])
+cc 1a9052b9c791ccd945aa4168fc7c1808959f20952eac06e70fc8bf59f7593f82 # shrinks to (specs, pairs) = ([Spec { tag: Some("@a"), done: false }, Spec { tag: Some("@b"), done: false }, Spec { tag: Some("@a"), done: false }, Spec { tag: Some("@b"), done: false }, Spec { tag: Some("@b"), done: false }, Spec { tag: Some("@a"), done: false }], [])

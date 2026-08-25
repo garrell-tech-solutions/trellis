@@ -7,7 +7,7 @@
 # trip-progress-panel-holds-02: checking items off never dissolves the panel
 # trip-progress-uncheck-restores-03: unchecking a struck item puts it back
 # trip-progress-clear-done-04: clear done removes the struck items and only those
-# trip-progress-clearing-can-drop-a-group-05: clearing can take a group below the threshold, and it drops to loose ends
+# trip-progress-clearing-holds-the-group-05: clearing can take a group below the threshold, and it stays a trip
 # trip-progress-fully-done-06: a group with nothing open left says so, and clearing empties it
 # trip-progress-clear-control-appears-with-work-07: the clear control appears only once something is struck, and is named
 # trip-progress-loose-ends-unchanged-08: a completed loose end still leaves the screen at once
@@ -66,6 +66,22 @@
 # means archived and still displayed, cleared means archived and no longer
 # displayed, and "no longer displayed" is a consequence of the clear tap
 # rather than a stored fact.
+#
+# --- TWO SCENARIOS HERE CHANGED IN #129 (`trip_persistence.feature`) ------
+# THE WORD THAT FAILED WAS "DISPLAYED", four lines up. Persistence counting
+# "everything displayed" is right until CLEARING is the thing that stops
+# something being displayed -- so five with three cleared counted as two and
+# fell to loose ends, with the owner still standing in the shop. The owner
+# EXTENDED `D-a-trip-survives-being-worked` on 2026-08-24: once a tag has
+# formed a trip it stays one for the rest of the run, and clearing tidies the
+# panel rather than dissolving it.
+#
+# `-05` ASSERTED THAT DEFECT and is REVERSED, deliberately and in the open --
+# it was green, it had to go red, and it is neither deleted nor weakened.
+# `-04` is the consequence: its two survivors used to land in loose ends and
+# now stay in the panel, so its `loose` count is zero. Everything else in
+# this file, `-06` above all, stands exactly as written. The rule that
+# replaces the single predicate is in `trip_persistence.feature`'s header.
 Feature: A trip survives being worked
 
   Background:
@@ -116,26 +132,28 @@ Feature: A trip survives being worked
     When the done items are cleared from "@homedepot"
     And the pool screen is viewed
     Then the trip "@homedepot" shows "<struck>" struck items
+    And the trip "@homedepot" shows "<open>" open items
     And the loose ends list shows "<loose>" items
 
     Examples:
-      | struck | loose |
-      | 0      | 2     |
+      | struck | open | loose |
+      | 0      | 2    | 0     |
 
-  # trip-progress-clearing-can-drop-a-group-05: clearing can take a group below the threshold, and it drops to loose ends
-  Scenario: Clearing can take a group below the threshold, and it drops to loose ends
+  # trip-progress-clearing-holds-the-group-05: clearing can take a group below the threshold, and it stays a trip
+  Scenario: Clearing can take a group below the threshold, and it stays a trip
     Given "3" pool tasks tagged "@homedepot"
     And "1" of them are marked done
     When the pool screen is viewed
     Then the pool screen offers the trips "<trips>"
     When the done items are cleared from "@homedepot"
     And the pool screen is viewed
-    Then the pool screen offers no trips
+    Then the pool screen offers the trips "<trips>"
+    And the trip "@homedepot" reads "<label>"
     And the loose ends list shows "<loose>" items
 
     Examples:
-      | trips      | loose |
-      | @homedepot | 2     |
+      | trips      | label    | loose |
+      | @homedepot | 2 things | 0     |
 
   # trip-progress-fully-done-06: a group with nothing open left says so, and clearing empties it
   Scenario: A group with nothing open left says so, and clearing empties it

@@ -21,7 +21,7 @@ use crate::committed::http::{mark_committed_task_done, show_committed};
 use crate::dismiss::http::dismiss_capture;
 use crate::inbox::http::{set_shown_kind, show_inbox};
 use crate::platform::assets::{
-    htmx_js, icon_192, icon_512, icon_maskable_512, manifest, space_grotesk_woff2, trellis_css,
+    htmx_js, ibm_plex_sans_woff2, icon_192, icon_512, icon_maskable_512, manifest, trellis_css,
 };
 use crate::platform::clock::Clock;
 use crate::pool::http::{
@@ -57,8 +57,8 @@ pub fn build_app(pool: SqlitePool, clock: Clock) -> Router {
         .route("/static/htmx.min.js", get(htmx_js))
         .route("/static/trellis.css", get(trellis_css))
         .route(
-            "/static/fonts/space-grotesk-variable.woff2",
-            get(space_grotesk_woff2),
+            "/static/fonts/ibm-plex-sans-variable.woff2",
+            get(ibm_plex_sans_woff2),
         )
         .route("/manifest.webmanifest", get(manifest))
         .route("/static/icons/icon-192.png", get(icon_192))

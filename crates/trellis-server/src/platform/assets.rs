@@ -16,8 +16,8 @@ use axum::response::IntoResponse;
 
 const HTMX_JS: &str = include_str!("../../static/htmx.min.js");
 const TRELLIS_CSS: &str = include_str!("../../static/trellis.css");
-const SPACE_GROTESK_WOFF2: &[u8] =
-    include_bytes!("../../static/fonts/space-grotesk-variable.woff2");
+const IBM_PLEX_SANS_WOFF2: &[u8] =
+    include_bytes!("../../static/fonts/ibm-plex-sans-variable.woff2");
 const MANIFEST: &str = include_str!("../../static/manifest.webmanifest");
 const ICON_192: &[u8] = include_bytes!("../../static/icons/icon-192.png");
 const ICON_512: &[u8] = include_bytes!("../../static/icons/icon-512.png");
@@ -74,13 +74,13 @@ pub async fn icon_maskable_512() -> impl IntoResponse {
     ([(header::CONTENT_TYPE, "image/png")], ICON_MASKABLE_512)
 }
 
-pub async fn space_grotesk_woff2() -> impl IntoResponse {
+pub async fn ibm_plex_sans_woff2() -> impl IntoResponse {
     (
         [
             (header::CONTENT_TYPE, "font/woff2"),
             (header::CACHE_CONTROL, IMMUTABLE),
         ],
-        SPACE_GROTESK_WOFF2,
+        IBM_PLEX_SANS_WOFF2,
     )
 }
 
@@ -130,7 +130,7 @@ mod tests {
         let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
         let body = String::from_utf8(body.to_vec()).unwrap();
         assert!(
-            body.contains("url('/static/fonts/space-grotesk-variable.woff2')"),
+            body.contains("url('/static/fonts/ibm-plex-sans-variable.woff2')"),
             "expected the stylesheet to name the font's own route"
         );
     }
@@ -156,7 +156,7 @@ mod tests {
     }
 
     /// #124/#128: both colours are the app's own surface (`--color-gray-50`,
-    /// `#f9fafb`), not a brand colour -- what Trellis looks like before it
+    /// `#fafdfe`), not a brand colour -- what Trellis looks like before it
     /// has painted anything, and the same value for both because Trellis has
     /// one surface. A manifest carries one of each and cannot express a
     /// custom property, so this is the light value; the dark one lives only
@@ -166,8 +166,8 @@ mod tests {
         let response = manifest().await.into_response();
         let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
         let parsed: serde_json::Value = serde_json::from_slice(&body).unwrap();
-        assert_eq!(parsed["theme_color"], "#f9fafb");
-        assert_eq!(parsed["background_color"], "#f9fafb");
+        assert_eq!(parsed["theme_color"], "#fafdfe");
+        assert_eq!(parsed["background_color"], "#fafdfe");
     }
 
     #[tokio::test]
@@ -218,8 +218,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn space_grotesk_serves_the_embedded_font_as_woff2() {
-        let response = space_grotesk_woff2().await.into_response();
+    async fn ibm_plex_sans_serves_the_embedded_font_as_woff2() {
+        let response = ibm_plex_sans_woff2().await.into_response();
         assert_eq!(
             response.headers().get(header::CONTENT_TYPE).unwrap(),
             "font/woff2"

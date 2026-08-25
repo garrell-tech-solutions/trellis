@@ -107,15 +107,7 @@ fn count_label(count: usize, done_count: usize) -> String {
 pub(super) fn build(rows: Vec<PoolTaskRow>, expanded_tags: &HashSet<String>) -> PoolView {
     let is_empty = rows.is_empty();
     let waiting = rows.iter().filter(|row| !row.done).count();
-    let tasks = rows
-        .into_iter()
-        .map(|row| PoolTask {
-            sequence: row.task_id,
-            text: row.raw_text,
-            context_tag: row.context_tag,
-            done: row.done,
-        })
-        .collect();
+    let tasks = rows.into_iter().map(pool_task).collect();
     let groups = pool::group(tasks);
 
     let trips = groups
@@ -126,25 +118,42 @@ pub(super) fn build(rows: Vec<PoolTaskRow>, expanded_tags: &HashSet<String>) -> 
             trip_view(trip, expanded)
         })
         .collect();
-    let loose = groups
-        .loose
-        .into_iter()
-        .map(|task| LooseItemView {
-            id: task.id,
-            text: task.text,
-            context_tag: task.context_tag,
-        })
-        .collect();
+    let loose = groups.loose.into_iter().map(loose_item_view).collect();
 
     PoolView {
-        meta: if is_empty {
-            "empty".to_string()
-        } else {
-            format!("{waiting} waiting")
-        },
+        meta: meta_text(is_empty, waiting),
         empty: is_empty,
         trips,
         loose,
+    }
+}
+
+fn pool_task(row: PoolTaskRow) -> PoolTask {
+    PoolTask {
+        sequence: row.task_id,
+        text: row.raw_text,
+        context_tag: row.context_tag,
+        done: row.done,
+        run_member_count: row.run_member_count as usize,
+    }
+}
+
+fn loose_item_view(task: pool::LooseTask) -> LooseItemView {
+    LooseItemView {
+        id: task.id,
+        text: task.text,
+        context_tag: task.context_tag,
+    }
+}
+
+/// `"empty"` when nothing is pooled, `"N waiting"` otherwise
+/// (`pool-screen-empty-07`) -- see [`build`] for why `waiting` is not just
+/// `is_empty`'s own row count.
+fn meta_text(is_empty: bool, waiting: usize) -> String {
+    if is_empty {
+        "empty".to_string()
+    } else {
+        format!("{waiting} waiting")
     }
 }
 
@@ -195,6 +204,7 @@ mod tests {
             raw_text: text.to_string(),
             context_tag: tag.map(str::to_string),
             done: false,
+            run_member_count: 0,
         }
     }
 
@@ -204,6 +214,21 @@ mod tests {
             raw_text: text.to_string(),
             context_tag: tag.map(str::to_string),
             done: true,
+            run_member_count: 0,
+        }
+    }
+
+    /// A below-threshold row whose tag's run has already reached
+    /// [`pool::TRIP_THRESHOLD`] (#129) -- what [`store::run_member_count`]
+    /// reports once a clear has swept some of the run away without ending
+    /// it.
+    fn run_row(task_id: i64, text: &str, tag: &str, run_member_count: i64) -> PoolTaskRow {
+        PoolTaskRow {
+            task_id,
+            raw_text: text.to_string(),
+            context_tag: Some(tag.to_string()),
+            done: false,
+            run_member_count,
         }
     }
 
@@ -497,6 +522,21 @@ mod tests {
         let view = build_expanded(rows, &no_expanded());
         assert!(view.trips[0].offers_complete);
         assert_eq!(view.trips[0].complete_label, "Complete all 3");
+    }
+
+    // --- #129: a trip survives being tidied ------------------------------
+
+    #[test]
+    fn a_below_threshold_row_persists_as_a_trip_when_its_run_has_reached_the_threshold() {
+        let view = build(vec![
+            run_row(4, "grab a tarp", "@homedepot", 5),
+            run_row(5, "buy screws again", "@homedepot", 5),
+        ]);
+
+        assert_eq!(view.trips.len(), 1);
+        assert_eq!(view.trips[0].tag, "@homedepot");
+        assert_eq!(view.trips[0].count_label, "2 things");
+        assert!(view.loose.is_empty());
     }
 
     #[test]

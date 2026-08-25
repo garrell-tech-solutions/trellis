@@ -2,6 +2,53 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use trellis_server::platform::clock::Clock;
 
+/// What `trellis --version` says when the binary was not built by ci.yml's
+/// `release` job -- a developer's `cargo run`, or the pull-request build
+/// ops/preview.sh installs. Neither is a release, and both have to say so
+/// rather than borrow an identity they do not have.
+const UNRELEASED: &str = "unreleased";
+const UNKNOWN_COMMIT: &str = "unknown-commit";
+
+/// The one line `trellis --version` prints: the release tag this binary was
+/// published under and the commit it was built from.
+///
+/// Both are read with `option_env!`, not from `CARGO_PKG_VERSION`. The three
+/// workspace crates are all `0.1.0` and nothing consumes them; the tag is
+/// derived from the CI run that publishes the release (see the `release` job
+/// in .github/workflows/ci.yml), so there is no version field for a human to
+/// forget to bump and no file for it to go stale in. Cargo tracks
+/// `option_env!` reads as build dependencies, so changing either value
+/// rebuilds this crate rather than silently keeping a cached binary that
+/// names the wrong release.
+///
+/// The arguments are parameters rather than `option_env!` calls inside the
+/// body so that both the released and the unreleased shape are reachable from
+/// a test; a build can only ever exercise one of them.
+///
+/// The format is load-bearing, not decoration. ops/update.sh compares this
+/// string against `trellis <tag> (<commit>)` built from the release it just
+/// downloaded, and refuses to install a binary that does not match -- which
+/// is what makes "update.sh installed what it said it did" checkable instead
+/// of merely claimed.
+fn version_line(release: Option<&str>, commit: Option<&str>) -> String {
+    format!(
+        "trellis {} ({})",
+        release.unwrap_or(UNRELEASED),
+        commit.unwrap_or(UNKNOWN_COMMIT)
+    )
+}
+
+fn run_version() -> ExitCode {
+    println!(
+        "{}",
+        version_line(
+            option_env!("TRELLIS_RELEASE"),
+            option_env!("TRELLIS_COMMIT")
+        )
+    );
+    ExitCode::SUCCESS
+}
+
 fn arg_value(args: &[String], flag: &str) -> Option<String> {
     let mut iter = args.iter();
     while let Some(arg) = iter.next() {
@@ -96,9 +143,10 @@ async fn dispatch(args: &[String]) -> ExitCode {
     match args.get(1).map(String::as_str) {
         Some("migrate") => run_migrate(&args[2..]).await,
         Some("serve") => run_serve(&args[2..]).await,
+        Some("version") | Some("--version") => run_version(),
         _ => {
             eprintln!(
-                "usage: trellis <migrate|serve> --db <path> [--addr <host:port>] [--now <RFC3339>]"
+                "usage: trellis <migrate|serve> --db <path> [--addr <host:port>] [--now <RFC3339>]\n       trellis --version"
             );
             ExitCode::from(2)
         }
@@ -114,6 +162,35 @@ async fn main() -> ExitCode {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn version_line_names_the_release_and_the_commit_it_was_built_from() {
+        assert_eq!(
+            version_line(Some("v2026.08.24.1042"), Some("c452751")),
+            "trellis v2026.08.24.1042 (c452751)"
+        );
+    }
+
+    #[test]
+    fn version_line_refuses_to_claim_a_release_it_was_not_built_for() {
+        assert_eq!(
+            version_line(None, None),
+            format!("trellis {UNRELEASED} ({UNKNOWN_COMMIT})")
+        );
+    }
+
+    #[test]
+    fn version_line_reports_a_known_commit_even_without_a_release() {
+        assert_eq!(
+            version_line(None, Some("c452751")),
+            format!("trellis {UNRELEASED} (c452751)")
+        );
+    }
+
+    #[test]
+    fn run_version_succeeds() {
+        assert_eq!(run_version(), ExitCode::SUCCESS);
+    }
 
     #[test]
     fn arg_value_returns_the_value_following_a_present_flag() {
@@ -230,6 +307,18 @@ mod tests {
     async fn dispatch_reports_usage_for_an_unknown_subcommand() {
         let args = vec!["trellis".to_string(), "bogus".to_string()];
         assert_eq!(dispatch(&args).await, ExitCode::from(2));
+    }
+
+    #[tokio::test]
+    async fn dispatch_reports_the_version_for_the_version_flag() {
+        let args = vec!["trellis".to_string(), "--version".to_string()];
+        assert_eq!(dispatch(&args).await, ExitCode::SUCCESS);
+    }
+
+    #[tokio::test]
+    async fn dispatch_reports_the_version_for_the_version_subcommand() {
+        let args = vec!["trellis".to_string(), "version".to_string()];
+        assert_eq!(dispatch(&args).await, ExitCode::SUCCESS);
     }
 
     #[tokio::test]

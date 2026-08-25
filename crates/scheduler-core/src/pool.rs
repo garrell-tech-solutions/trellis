@@ -40,6 +40,17 @@ pub struct PoolTask {
     /// in place, so it leaves the screen at once, exactly as it did before
     /// this slice (`trip-progress-loose-ends-unchanged-08`).
     pub done: bool,
+    /// How many pool tasks have belonged to this tag's current *run* --
+    /// everything created since the run last emptied out entirely, cleared
+    /// or not (#129, `D-a-trip-survives-being-tidied`). Equal to the
+    /// concurrently-waiting count (`bucket_by_tag`'s own bucket size) until
+    /// a clear removes something mid-run without ending it; larger than it
+    /// from that point on, since the removed member still belonged to the
+    /// run. The adapter's job, derived from `tasks.id` order and
+    /// `cleared_at` batches -- this module only compares it to
+    /// [`TRIP_THRESHOLD`], the same way it already compares the
+    /// concurrently-waiting count.
+    pub run_member_count: usize,
 }
 
 /// One item's own identity and text, wherever a caller needs to act on it
@@ -109,26 +120,16 @@ const VISIBLE_TRIP_ITEMS: usize = 3;
 /// the caller to have sorted already, since a caller that forgot would fail
 /// silently rather than loudly (both orders type-check).
 ///
-/// **Two rules that are not the same rule** (#122): a tag needs
-/// [`TRIP_THRESHOLD`] tasks *waiting there* to become a trip in the first
-/// place, and a completed task is still waiting there until it is cleared
-/// — so the same `>= TRIP_THRESHOLD` count on the same (open + struck, not
-/// cleared) set both forms a trip and keeps one standing while it is
-/// worked. A below-threshold group's own struck items are dropped rather
-/// than shown as loose ends: a loose end has no panel to hold a completed
-/// item in place, so it leaves at once, exactly as it did before this
-/// slice (`trip-progress-loose-ends-unchanged-08`).
+/// Whether a bucket earns its trip panel is [`classify_group`]'s call, not
+/// this function's -- FORMATION (#122) and PERSISTENCE (#129) are two rules,
+/// not one, and [`is_trip`]'s own doc has both.
 pub fn group(mut tasks: Vec<PoolTask>) -> PoolGroups {
     tasks.sort_by_key(|t| std::cmp::Reverse(t.sequence));
     let (groups, mut loose) = bucket_by_tag(tasks);
 
     let mut trips = Vec::new();
     for (tag, list) in groups {
-        if list.len() >= TRIP_THRESHOLD {
-            trips.push(trip_from_group(tag, list));
-        } else {
-            loose.extend(list.into_iter().filter(|t| !t.done));
-        }
+        classify_group(tag, list, &mut trips, &mut loose);
     }
 
     loose.sort_by_key(|t| std::cmp::Reverse(t.sequence));
@@ -137,28 +138,69 @@ pub fn group(mut tasks: Vec<PoolTask>) -> PoolGroups {
     PoolGroups { trips, loose }
 }
 
+/// Routes one tag's bucket to `trips` once it earns a panel ([`is_trip`]),
+/// or spreads its still-open tasks into `loose` otherwise -- a
+/// below-threshold, un-persisted group's own struck items are dropped here
+/// rather than shown as loose ends: a loose end has no panel to hold a
+/// completed item in place, so it leaves at once, exactly as it did before
+/// #122 (`trip-progress-loose-ends-unchanged-08`).
+fn classify_group(
+    tag: String,
+    list: Vec<PoolTask>,
+    trips: &mut Vec<Trip>,
+    loose: &mut Vec<PoolTask>,
+) {
+    if is_trip(&list) {
+        trips.push(trip_from_group(tag, list));
+    } else {
+        loose.extend(list.into_iter().filter(|t| !t.done));
+    }
+}
+
+/// Whether one tag's bucket has earned a trip panel: FORMATION (#122) needs
+/// [`TRIP_THRESHOLD`] tasks waiting there now; PERSISTENCE (#129) needs the
+/// same threshold met by the tag's *run* instead, which can hold after a
+/// clear has dropped the concurrently-waiting count below it. Every task in
+/// one bucket carries the same tag-level `run_member_count` -- the adapter's
+/// fact about the tag, not the task -- so the first one speaks for the whole
+/// bucket.
+fn is_trip(list: &[PoolTask]) -> bool {
+    let run_member_count = list.first().map_or(0, |t| t.run_member_count);
+    list.len() >= TRIP_THRESHOLD || run_member_count >= TRIP_THRESHOLD
+}
+
 /// Splits `tasks` (already newest-first) into tag buckets, ranked by size
 /// then alphabetically (`pool-screen-trip-order-02`), and the untagged
 /// remainder. Every bucket's own relative order is preserved from `tasks`,
-/// so it stays newest-first without a second sort. A done, untagged task is
-/// dropped here rather than carried into `loose` -- it has no tag to ever
-/// reach [`TRIP_THRESHOLD`] with, so it is unconditionally a loose end, and
-/// a done loose end leaves the screen at once (#122).
+/// so it stays newest-first without a second sort.
 fn bucket_by_tag(tasks: Vec<PoolTask>) -> (Vec<(String, Vec<PoolTask>)>, Vec<PoolTask>) {
     let mut buckets: std::collections::HashMap<String, Vec<PoolTask>> =
         std::collections::HashMap::new();
     let mut loose = Vec::new();
     for task in tasks {
-        match &task.context_tag {
-            Some(tag) => buckets.entry(tag.clone()).or_default().push(task),
-            None if !task.done => loose.push(task),
-            None => {}
-        }
+        bucket_one(task, &mut buckets, &mut loose);
     }
 
     let mut groups: Vec<(String, Vec<PoolTask>)> = buckets.into_iter().collect();
     groups.sort_by(by_size_then_tag);
     (groups, loose)
+}
+
+/// Routes a single task to its tag's bucket, or to `loose` when it is
+/// untagged -- a done, untagged task is dropped here rather than carried
+/// into `loose`: it has no tag to ever reach [`TRIP_THRESHOLD`] with, so it
+/// is unconditionally a loose end, and a done loose end leaves the screen at
+/// once (#122).
+fn bucket_one(
+    task: PoolTask,
+    buckets: &mut std::collections::HashMap<String, Vec<PoolTask>>,
+    loose: &mut Vec<PoolTask>,
+) {
+    match &task.context_tag {
+        Some(tag) => buckets.entry(tag.clone()).or_default().push(task),
+        None if !task.done => loose.push(task),
+        None => {}
+    }
 }
 
 /// Ranks buckets by size then alphabetically (`pool-screen-trip-order-02`).
@@ -228,6 +270,7 @@ mod tests {
             text: text.to_string(),
             context_tag: tag.map(str::to_string),
             done: false,
+            run_member_count: 0,
         }
     }
 
@@ -237,6 +280,20 @@ mod tests {
             text: text.to_string(),
             context_tag: tag.map(str::to_string),
             done: true,
+            run_member_count: 0,
+        }
+    }
+
+    /// A below-threshold task whose tag's *run* has already reached
+    /// [`TRIP_THRESHOLD`] -- the store's own answer to "is this tag still
+    /// inside a run that once formed a trip" (#129).
+    fn run_task(sequence: i64, text: &str, tag: &str, run_member_count: usize) -> PoolTask {
+        PoolTask {
+            sequence,
+            text: text.to_string(),
+            context_tag: Some(tag.to_string()),
+            done: false,
+            run_member_count,
         }
     }
 
@@ -489,5 +546,42 @@ mod tests {
         let groups = group(vec![task(1, "fix the door latch", None)]);
 
         assert_eq!(groups.loose.len(), 1);
+    }
+
+    // --- #129: a trip survives being tidied -----------------------------
+
+    #[test]
+    fn a_below_threshold_group_persists_as_a_trip_when_its_run_has_reached_the_threshold() {
+        let groups = group(vec![
+            run_task(4, "grab a tarp", "@homedepot", 5),
+            run_task(5, "buy screws again", "@homedepot", 5),
+        ]);
+
+        assert_eq!(groups.trips.len(), 1);
+        assert_eq!(groups.trips[0].tag, "@homedepot");
+        assert_eq!(groups.trips[0].count, 2);
+        assert!(groups.loose.is_empty());
+    }
+
+    #[test]
+    fn a_below_threshold_group_stays_loose_when_its_run_has_never_reached_the_threshold() {
+        let groups = group(vec![
+            run_task(1, "milk", "@supermarket", 2),
+            run_task(2, "coffee", "@supermarket", 2),
+        ]);
+
+        assert!(groups.trips.is_empty());
+        assert_eq!(groups.loose.len(), 2);
+    }
+
+    #[test]
+    fn a_persisted_trips_done_items_stay_visible_and_struck() {
+        let mut done = run_task(1, "buy screws", "@homedepot", 5);
+        done.done = true;
+        let groups = group(vec![done, run_task(2, "return the drill", "@homedepot", 5)]);
+
+        assert_eq!(groups.trips.len(), 1);
+        assert_eq!(groups.trips[0].count, 2);
+        assert_eq!(groups.trips[0].done_count, 1);
     }
 }

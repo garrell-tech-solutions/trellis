@@ -2344,3 +2344,53 @@ proved, **none breaks the hook** — so the `survives-being-worked` assertion ha
 never been seen red. `T-a-check-must-be-seen-to-fail` is unsatisfied for exactly
 one assertion, and the historically real breakage (`document.body`) is the one to
 revert and observe. **The fix is a revert-and-watch, not a new check.**
+
+### 2026-08-25 — A quota is an entity, and #93 becomes two slices
+
+**The finding that reshaped the slice:** `TaskKind::Quota { target_count,
+target_minutes_each, period }` makes a quota **a triaged capture**. Everything
+settled about quotas since describes something else. `D-quotas-are-selected-not-typed`
+has a quota **created from the Menu without a capture**, **chosen from chips** at
+triage, carrying **a name and a weekly hour target**, and **holding items filed
+into it**. **None of those are properties a task kind can have.**
+
+**So a quota is a first-class entity, and #93's own framing —** *"that is a
+migration and a triage change"* — **understates it by a whole table.** The
+decision was settled on 2026-08-20; the schema it contradicts is migration
+`0002`, from M1. **Nobody had read the two against each other for five days**,
+which is the same failure mode as `T-collation-enforces-name-identity`: a
+description and the thing described both reading as current.
+
+**The cut, chosen by the owner.** Slice 1 (**#93**) is the entity, the fourth
+tab, `+ Define a new quota` and **the whole logging loop**. Slice 2 (**#138**) is
+filing, `Filed here`, and retiring the task kind — **which is where `period`'s
+fate gets decided**, since the canvas draws only *hours a week* and
+`D-quota-no-rollover`'s Monday reset leaves `month` no evident meaning.
+
+**A three-way cut was offered and rejected** — entity, then logging, then filing.
+The owner took the larger first slice knowingly. **The recorded reason to prefer
+it:** a quota screen whose bar always reads zero is a demo nobody can judge, and
+*define → log → correct* is the loop the screen exists for. **The recorded risk:**
+it is the largest slice this pipeline has been handed. The brief names a
+designated stopping line — entity and define land, session surface does not — so
+that overrunning produces a coherent half rather than a half-built one.
+
+**Two quota concepts coexist between the slices, deliberately.** Slice 1 leaves
+`TaskKind::Quota` and the existing triage form untouched. **That is a knowingly
+accepted transitional state**, not an oversight, and #138 closes it.
+
+**Read the canvas, do not grep it — the third instance.** `T-trips-are-derived-not-ranked`
+records the PM dissenting twice on the Pool from a grepped reading. This brief
+found three more: the quick-log controls are **outside** the expanded row, so
+logging never requires expanding; `Filed here` and `This week` share **one** row
+template with the former gated; and **the canvas draws reorder controls on quota
+rows** (`q.onUp` / `q.onDown`, lines 259-262) that **no decision covers**.
+
+**The reorder question is deferred to #139 rather than answered here**, and the
+reason is worth keeping: `T-trips-are-derived-not-ranked` forbids ranking a trip
+because *"a trip is a unit you clear in one stop"*, while #95 grants loose ends a
+control because *"a loose end is a thing you decide about."* **A quota looks like
+the second — but `D-quota-no-rollover` gives it a readout and a bar that may
+already say everything a ranking would.** It is durable state, so it would earn a
+column under `T-ephemeral-view-state-rides-the-request` — **which is exactly why
+it should be wanted from use before it is built.**

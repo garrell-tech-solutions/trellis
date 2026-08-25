@@ -193,12 +193,12 @@ thing however you break it has one assertion wearing four names.
 ### Expected Observable Outcomes
 
 - `color-scheme` names **both** schemes on all three screens.
-- Two theme colours: one unmediated (`#f9fafb`) and one under
-  `media="(prefers-color-scheme: dark)"` (`#0b0f14`). **The unmediated one is
+- Two theme colours: one unmediated (`#fafdfe`) and one under
+  `media="(prefers-color-scheme: dark)"` (`#091014`). **The unmediated one is
   the light one and stays first**, because `installable-theme-colour-05`
   matches a page's theme colour against the manifest's and must keep passing
   untouched.
-- The manifest carries `#f9fafb` for **both** members. That is
+- The manifest carries `#fafdfe` for **both** members. That is
   `--color-gray-50` in light — the app's own surface. **They are the same
   value on purpose**: both answer *what does Trellis look like before it has
   painted anything*, and Trellis has one surface. `background_color` already

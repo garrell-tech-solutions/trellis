@@ -42,7 +42,7 @@ const SCREENS = [
 ];
 const SCHEMES = ['light', 'dark'];
 
-const EXPECTED_THEME_COLOUR = { light: '#f9fafb', dark: '#0b0f14' };
+const EXPECTED_THEME_COLOUR = { light: '#fafdfe', dark: '#091014' };
 
 let failures = 0;
 function fail(message) {

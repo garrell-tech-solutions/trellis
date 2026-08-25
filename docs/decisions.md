@@ -214,6 +214,7 @@ O4 → #40 · O5 → #41 · O6 → #36. Issue #1 is titled `OQ2`; same question.
 | T-collation-enforces-name-identity | **TRANSLATED 2026-08-23 to context tags, and the mechanism changed with it.** `migrations/0010_context_tags.sql` carries the collation forward by name — *"the same argument `life_areas.name` made before #88, applied here to something typed rather than picked, where the slip is likelier"* — but **drops the `UNIQUE`**, because a tag is not a managed row a second capture already has; many captures share one tag by design. **The consequential half reversed:** with no unique row to be the canonical spelling, choosing which spelling wins moved out of the schema and into `capture::resolve_tag`, which is exactly the *"function in `scheduler-core`"* shape this decision originally rejected — and `T-cross-capability-invariants-need-an-owner` is the bill for it, because `pool::group`'s plain string equality is correct only while that function runs on every write path. **The original reasoning was right and the new model could not keep it**, which is worth more than either half alone. **Two life-area names are the same name once trimmed and case-folded, and `life_areas.name UNIQUE COLLATE NOCASE` is where that is enforced** — not a function in `scheduler-core`. Lookups match through the same collation. | The slice shipped `scheduler_core::life_area::same_name` stating the rule, with seven unit tests and **no caller anywhere in the tree**; production went through the column. A second statement of a rule that nothing calls is one nothing keeps honest — its tests would have passed forever while the real behaviour lived elsewhere, which is `T-module-boundary`'s *"a layering rule nothing checks is a comment"* with the polarity reversed: here the check is real and the *description* is the dead thing. Deleted rather than wired in, because a constraint the database enforces cannot be bypassed by a write path that forgot to call something, and "Work" and "work" as two indistinguishable picker entries is exactly what the rule exists to prevent. Two consequences, recorded because neither is visible from the Rust: `T-sqlite-sqlx`'s "mechanical" Postgres move must carry the collation across (`CITEXT`, or a functional unique index), and if the rule ever outgrows a collation — Unicode folding — it moves into the core and the constraint becomes the backstop. `parse_name` stays in the core, because trimming and rejecting blank is decidable from the string alone with no database. |
 | T-one-front-door-per-capability | **Example translated 2026-08-23:** `life_areas::active_options` no longer exists. The live front doors are `capture::resolve_tag`, `capture::distinct_tags`, `inbox::render_lists` and `mark_done::mark_task_done` — each one function in a `mod.rs`, each hiding a query composed with a mapping. **The rule is unchanged and is now enforced**, per `platform/boundary.rs` and `T-inbox-owns-membership`. **A capability that other capabilities read exposes one function for it, in its `mod.rs`.** Three callers needed the pickable life areas; they call `life_areas::active_options`, never `store::list_active` composed with `LifeAreaOption::from`. Reaching across for a *type* stays fine; reaching across for the *recipe* does not. | The management page, the inbox fragment whose triage forms carry the picker, and a quick-added capture rendering that same row had each composed the query with the mapping for itself. A caller that must know which query *and* which mapping to combine is holding a copy of another capability's internals, and three copies drift. Same move as `http::view`, `steps/payloads.rs`, `steps/app_client.rs` and `http::lists` — when a second caller appears, the shared thing gets its own home — applied one level up, to a capability's public surface rather than to a helper. **This is the complement to `T-capability-owns-its-queries`**, and the two are only safe together: that decision says a capability owns the SQL it issues, and without this one "own your own queries" degenerates into every capability hand-assembling every other capability's internals, which is the sideways dependency it was written to prevent. |
 | T-core-owns-validation-order | **RESTS ON A REMOVED EXAMPLE, 2026-08-23.** `WellFormedTriage` and `unknown_life_area` are both gone — a triage submission no longer names a life area at all (`T-life-area-required-at-triage`, superseded). **The rule stands and is why it is worth keeping:** an ordering rule living in each adapter is one the second adapter gets wrong, and this product still runs more than one transport over one triage path. `T-required-fields-are-specified-per-transport` is the live neighbour to read alongside it. **When validation has a required order, the core composes it and returns one result; the adapter keeps only the part that genuinely needs something the core cannot have.** `WellFormedTriage::from_fields` decides kind first and then that *some* life area was named; `unknown_life_area` stays the adapter's rejection, because resolving a name against the table needs a database. | Triage validation arrived as two core functions an adapter had to call in a fixed order — kind first, so a submission naming neither reports `unknown_kind` rather than a life-area complaint — with `require_life_area` public so each adapter could get the sequence right on its own. **A rule every delivery mechanism has to remember for itself is one the second delivery mechanism gets wrong.** This product already runs two transports over one triage path (JSON and the page), and `T-capture-surfaces` adds a third at M7. The invariant #33 spent a property test pinning — *the page and the endpoint are one code path, not two* — is precisely what an ordering rule living in each adapter quietly breaks, and it breaks it in the way that still compiles and still passes every example test that does not exercise both failures at once. `T-module-boundary`'s inward-pointing rule at the granularity of a call sequence: the order is a rule, so it lives where the rules live. |
+| T-ephemeral-view-state-rides-the-request | **A view choice the owner made with a thumb rides along with the request that needs it and is then forgotten; only a durable consequence of a deliberate act earns a column.** Which trips are expanded is read live off the DOM by an `htmx:configRequest` hook, appended to every request `#pool-body` issues as `expanded=<tags>`, and echoed straight back into the rendered fragment. Nothing is stored, and a fresh page load starts collapsed. **The general rule underneath it:** *the tier you assert in decides what the implementation must store*, so **choose the tier from the nature of the state, not the state from the tier you happen to be asserting in.* Ephemeral view state is asserted in the browser tier; a durable one may be asserted over HTTP. | Settled inside `trip-controls` (#120, #125, PR #135), and it is the **corrected** answer to the question `disclosures` (#119, PR #126) got wrong eight days earlier. That slice reasoned: *the acceptance suite speaks only HTTP; to make the assertion true over HTTP the state had to be server-rendered; to be server-rendered across a request it had to be stored* — and bought `captures.shown_kind`, **a permanent, append-only column for a display preference**, migration `0012`. The reasoning is valid and the conclusion is still wrong, because **the premise was a choice**: two tiers that could have held the assertion already existed and neither was used — `scripts/qa/phone_layout.cjs` drives real Chrome under a CI gate, and `base.html` has loaded htmx and an inline script on every page since #58. **`cleared_at` (#122, migration `0013`) is the contrast that makes the line real** — clearing a trip is a deliberate act with a consequence that must survive a reload, so it earned its column on the same test this one fails. The cost of getting it wrong is asymmetric and permanent: `T-migrations-append-only` means a column bought for a display preference can never be taken back, only added to. | 
 
 **Renumbered on merge, then superseded.** This branch allocated numeric IDs that `trunk` had already given to other decisions, and its source comments were left citing the stale numbers. Both problems are gone: decisions are keyed by slug now, and the citations were migrated with a CI gate behind them. Kept as the record of why.
 
@@ -2289,3 +2290,57 @@ real: it is concrete, it is in the repository, and it answers questions the
 decisions log leaves open. **Being concrete is not the same as being current.**
 `T-collation-enforces-name-identity` is the same failure from the other side — a
 description and the thing described drifting apart while both read as current.
+
+### 2026-08-25 — trip-controls (#120, #125, PR #135): the column that was not bought
+
+**The brief asked one question and told the pipeline not to answer it the way
+`#126` had.** *Where does toggle state live?* — and: *"If you find yourself
+reaching for a column, stop and say why in the handoff before writing it."*
+**No migration was written.** `T-ephemeral-view-state-rides-the-request` records
+the answer, and it is the first time this project has reversed a design mistake
+**before** it cost anything rather than after.
+
+**Why it is worth a row rather than a commit message.** The two slices are eight
+days apart and reached opposite conclusions from the *same* correct premise.
+`#126`'s reasoning is not sloppy — it is a valid chain from *"the acceptance
+suite speaks HTTP"* to *"the state must be stored"*. **What it never examined is
+the first link.** The suite speaking HTTP is a fact about which tier the slice
+chose to assert in, and this project already had two others: a CI-gated browser
+check driving real Chrome, and an inline script on every page since `#58`.
+**A premise that is really a choice is the hardest kind to notice**, which is why
+it gets a slug instead of a caution.
+
+**The line between the two, stated so a future slice can apply it:** `#122` bought
+`cleared_at` in migration `0013` **and was right to**. Clearing a trip is a
+deliberate act whose consequence must survive a reload. Expanding a panel is
+something you did with your thumb ten seconds ago. **Same shape, opposite
+answers, and the test that separates them is whether a reload should forget it.**
+
+**And the cost is not symmetric.** `T-migrations-append-only` means `shown_kind`
+can never be removed, only added to. **A column bought wrongly is permanent; a
+query parameter chosen wrongly is one slice's rework.** When the two designs are
+otherwise close, that asymmetry decides it.
+
+**What the pipeline did well, recorded because the roles that did it will not
+read their own commit messages again.** The coder wrote both listeners as
+`document.body.addEventListener` first — which throws, because the block runs in
+`<head>` before `<body>` exists — **and said so plainly instead of quietly
+fixing it.** That is the only reason the architect could name client behaviour as
+an uncovered tier (`docs/design/architecture.md`), and the only reason QA knew
+which assertion to write. **A defect reported is worth more than a defect
+fixed**, and this is the second slice running where that has been true.
+
+**One correction to `#136`, filed by the PM against a note that was already
+stale.** The architect recorded *"nothing executes the `configRequest` hook's
+contract"* at `8151323`; QA's `0416241` — **the very next commit** — added
+`scripts/qa/trip_controls.cjs` step 10, which ticks a real checkbox in real
+Chrome and asserts the panel is still expanded with all eight items painted
+after the swap. **That is the hook end to end**, gated at `ci.yml:452`. The
+architecture note and `#136` both describe a gap that closed while they were
+being written.
+
+**What remains of `#136` is narrower and still real.** Of the six breakages QA
+proved, **none breaks the hook** — so the `survives-being-worked` assertion has
+never been seen red. `T-a-check-must-be-seen-to-fail` is unsatisfied for exactly
+one assertion, and the historically real breakage (`document.body`) is the one to
+revert and observe. **The fix is a revert-and-watch, not a new check.**

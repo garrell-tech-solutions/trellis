@@ -1,6 +1,6 @@
-# mutation-stamp: sha256=c189e5cb1fa3ce8e6c01060e055fb88710932c7835bfabb7acdf272ddb7e5bd4
+# mutation-stamp: sha256=1d46c34d503c6bd38f080ea4f70ba74ab529c6abbba15b164c9b495719c02269
 # acceptance-mutation-manifest-begin
-# {"version":1,"tested_at":"2026-08-21T21:20:12.529312396Z","feature_name":"The pool screen groups loose work by where it can be done","feature_path":"features/pool_screen.feature","background_hash":"304f93e93e2b217b49069c091950b87589f0c7e789e2d0dc3aaa8d845450cb64","implementation_hash":"sha256:c4a6206113d624af68d486016b12551fe2fb489f346e0f956f5d199902112a29","scenarios":[{"index":0,"name":"Pool tasks with enough at one place become a trip; the rest fall to loose ends","scenario_hash":"dce621dbf11efcda2c31641e84cf2cc2a11da65bdcf9777d555bedfc96c19c2f","mutation_count":3,"result":{"Total":3,"Killed":3,"Survived":0,"Errors":0},"tested_at":"2026-08-21T18:36:43.334687532Z"},{"index":1,"name":"Trips are ordered by how many things they clear, then alphabetically","scenario_hash":"26092b7208cb5ee38adb0edb9b6785537592a900330ba81aba760fe1f19d61ae","mutation_count":4,"result":{"Total":4,"Killed":4,"Survived":0,"Errors":0},"tested_at":"2026-08-21T18:36:43.334687532Z"},{"index":2,"name":"Two spellings of one tag are one trip","scenario_hash":"c2d0430c5821b16786bfa100baeddb9e74e34dd5d751f1d0854292a013295410","mutation_count":2,"result":{"Total":2,"Killed":2,"Survived":0,"Errors":0},"tested_at":"2026-08-21T18:36:43.334687532Z"},{"index":3,"name":"Committed and quota tasks do not appear","scenario_hash":"d16bdaad1df0b98a76bc46ed5d91ebc362ef0ae475b12d88e466189cec1051c5","mutation_count":1,"result":{"Total":1,"Killed":1,"Survived":0,"Errors":0},"tested_at":"2026-08-21T18:36:43.334687532Z"},{"index":4,"name":"Everything is newest first and nothing on the screen can be reordered","scenario_hash":"2192791261be70d53fe91482c3457efddd4dda7f720711a2015779f79105275d","mutation_count":2,"result":{"Total":2,"Killed":2,"Survived":0,"Errors":0},"tested_at":"2026-08-21T18:36:43.334687532Z"},{"index":5,"name":"A long trip shows three and offers the rest","scenario_hash":"92b668c98034b0f94fab4fedf926b576727316697c091d8f61adfdf7aaa1dc0d","mutation_count":3,"result":{"Total":3,"Killed":3,"Survived":0,"Errors":0},"tested_at":"2026-08-21T18:36:43.334687532Z"},{"index":6,"name":"With nothing pooled the screen says so and points at Capture","scenario_hash":"03eb5e13152711637156de8088a3c47427bdb30692f1d71446c3a320420d790b","mutation_count":1,"result":{"Total":1,"Killed":1,"Survived":0,"Errors":0},"tested_at":"2026-08-21T18:36:43.334687532Z"}]}
+# {"version":1,"tested_at":"2026-08-24T21:42:48.456805001Z","feature_name":"The pool screen groups loose work by where it can be done","feature_path":"features/pool_screen.feature","background_hash":"304f93e93e2b217b49069c091950b87589f0c7e789e2d0dc3aaa8d845450cb64","implementation_hash":"sha256:c4a6206113d624af68d486016b12551fe2fb489f346e0f956f5d199902112a29","scenarios":[{"index":5,"name":"A long trip holds every item and offers to show the rest","scenario_hash":"f74356a00d8dfc49caeeb5bd1ded00d3c274f4390c73b849c4831145670cdb30","mutation_count":3,"result":{"Total":3,"Killed":3,"Survived":0,"Errors":0},"tested_at":"2026-08-24T21:42:48.456805001Z"},{"index":0,"name":"Pool tasks with enough at one place become a trip; the rest fall to loose ends","scenario_hash":"dce621dbf11efcda2c31641e84cf2cc2a11da65bdcf9777d555bedfc96c19c2f","mutation_count":3,"result":{"Total":3,"Killed":3,"Survived":0,"Errors":0},"tested_at":"2026-08-21T18:36:43.334687532Z"},{"index":1,"name":"Trips are ordered by how many things they clear, then alphabetically","scenario_hash":"26092b7208cb5ee38adb0edb9b6785537592a900330ba81aba760fe1f19d61ae","mutation_count":4,"result":{"Total":4,"Killed":4,"Survived":0,"Errors":0},"tested_at":"2026-08-21T18:36:43.334687532Z"},{"index":2,"name":"Two spellings of one tag are one trip","scenario_hash":"c2d0430c5821b16786bfa100baeddb9e74e34dd5d751f1d0854292a013295410","mutation_count":2,"result":{"Total":2,"Killed":2,"Survived":0,"Errors":0},"tested_at":"2026-08-21T18:36:43.334687532Z"},{"index":3,"name":"Committed and quota tasks do not appear","scenario_hash":"d16bdaad1df0b98a76bc46ed5d91ebc362ef0ae475b12d88e466189cec1051c5","mutation_count":1,"result":{"Total":1,"Killed":1,"Survived":0,"Errors":0},"tested_at":"2026-08-21T18:36:43.334687532Z"},{"index":4,"name":"Everything is newest first and nothing on the screen can be reordered","scenario_hash":"2192791261be70d53fe91482c3457efddd4dda7f720711a2015779f79105275d","mutation_count":2,"result":{"Total":2,"Killed":2,"Survived":0,"Errors":0},"tested_at":"2026-08-21T18:36:43.334687532Z"},{"index":6,"name":"With nothing pooled the screen says so and points at Capture","scenario_hash":"03eb5e13152711637156de8088a3c47427bdb30692f1d71446c3a320420d790b","mutation_count":1,"result":{"Total":1,"Killed":1,"Survived":0,"Errors":0},"tested_at":"2026-08-21T18:36:43.334687532Z"}]}
 # acceptance-mutation-manifest-end
 
 # pool-screen-trips-and-loose-01: pool tasks with enough at one place become a trip; the rest fall to loose ends
@@ -8,7 +8,7 @@
 # pool-screen-case-folded-grouping-03: two spellings of one tag are one trip
 # pool-screen-only-pool-04: committed and quota tasks do not appear
 # pool-screen-nothing-reorders-05: everything is newest first and nothing on the screen can be reordered
-# pool-screen-truncation-06: a long trip shows three and offers the rest
+# pool-screen-truncation-06: a long trip holds every item and offers to show the rest
 # pool-screen-empty-07: with nothing pooled the screen says so and points at Capture
 # pool-screen-escapes-hostile-text-09: a hostile context tag stays escaped on this screen
 #
@@ -61,6 +61,17 @@
 # because it asserts one order at three points as it changes, which is the
 # whole scenario. Reported as placeholder drift and it is not; splitting it
 # would lose the progression that is the point.
+#
+# SCENARIO 06 CHANGED WITH #120, AND THE OLD ASSERTION WAS ABOUT STRUCTURE.
+# It read "lists 3 items" for a trip of five, and `trip_visible_items` answers
+# that by reading the FIRST `<ul class="trip-items">` in the panel -- which
+# only distinguishes anything while the hidden items are a SECOND list inside
+# a `<details>`. That two-list shape is precisely the defect #120 removes:
+# the canvas draws one list whose visible slice grows, so over HTTP the trip
+# now holds all five and the control offers the other two. THE GUARANTEE
+# MOVED RATHER THAN LAPSED -- "only three are on screen" is now asserted in
+# `qa/trip_controls.md`, against a rendered page, where it is a fact rather
+# than an artefact of markup. See `features/trip_controls.feature`.
 #
 # `tasks.priority` already means P1-P4 for committed work. A loose end's
 # manual order is a different thing and must not be spelled with that column.
@@ -142,16 +153,16 @@ Feature: The pool screen groups loose work by where it can be done
       | trip_order                                 | loose_order                            |
       | pick up trim, return the drill, buy screws | sharpen the mower, fix the door latch  |
 
-  # pool-screen-truncation-06: a long trip shows three and offers the rest
-  Scenario: A long trip shows three and offers the rest
+  # pool-screen-truncation-06: a long trip holds every item and offers to show the rest
+  Scenario: A long trip holds every item and offers to show the rest
     Given "<total>" pool tasks tagged "@homedepot"
     When the pool screen is viewed
-    Then the trip "@homedepot" lists "<shown>" items
+    Then the trip "@homedepot" lists "<held>" items
     And the trip "@homedepot" offers "<more>"
 
     Examples:
-      | total | shown | more        |
-      | 5     | 3     | Show 2 more |
+      | total | held | more        |
+      | 5     | 5    | Show 2 more |
 
   # pool-screen-empty-07: with nothing pooled the screen says so and points at Capture
   Scenario: With nothing pooled the screen says so and points at Capture

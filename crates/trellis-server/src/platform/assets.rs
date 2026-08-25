@@ -155,6 +155,21 @@ mod tests {
         assert_eq!(parsed["display"], "standalone");
     }
 
+    /// #124/#128: both colours are the app's own surface (`--color-gray-50`,
+    /// `#f9fafb`), not a brand colour -- what Trellis looks like before it
+    /// has painted anything, and the same value for both because Trellis has
+    /// one surface. A manifest carries one of each and cannot express a
+    /// custom property, so this is the light value; the dark one lives only
+    /// in `base.html`'s media-scoped theme-color meta.
+    #[tokio::test]
+    async fn manifest_carries_the_app_surface_as_its_theme_and_background_colour() {
+        let response = manifest().await.into_response();
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let parsed: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(parsed["theme_color"], "#f9fafb");
+        assert_eq!(parsed["background_color"], "#f9fafb");
+    }
+
     #[tokio::test]
     async fn manifest_declares_192_and_512_any_icons_and_one_maskable_icon() {
         let response = manifest().await.into_response();

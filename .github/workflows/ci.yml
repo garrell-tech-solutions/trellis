@@ -431,6 +431,26 @@ jobs:
       - name: Phone layout (real browser, 390x844)
         run: ./scripts/qa/phone_layout.sh
 
+      # #124/#128, qa/colour.md. The only other check in this repo that can
+      # observe a computed style: contrast ratios, the closed palette, and
+      # dark mode, none of which any HTTP-level assertion can see. Reads
+      # PHONE_LAYOUT_CHROME, already resolved above -- no second resolution
+      # step, per qa/colour.md's own instruction. Same no-skip contract as
+      # the phone-layout check: scripts/qa/colour.sh fails closed when node
+      # or playwright-core is missing rather than silently passing.
+      - name: Colour (real browser, contrast and dark mode)
+        run: ./scripts/qa/colour.sh
+
+      # #120/#125, qa/trip_controls.md. Expand/collapse is pure client
+      # state (never stored, per #126's own lesson) -- a request log and a
+      # rendered box are the only things that can prove it, so this is
+      # here alongside phone-layout and colour rather than in the
+      # acceptance suite. Reads PHONE_LAYOUT_CHROME, already resolved
+      # above. Same no-skip contract: scripts/qa/trip_controls.sh fails
+      # closed when node or playwright-core is missing.
+      - name: Trip controls (real browser, expand/collapse and placement)
+        run: ./scripts/qa/trip_controls.sh
+
       # Runs `cargo build --release --target x86_64-unknown-linux-musl` and
       # then asserts via ldd that the produced binary is actually static --
       # a release build that exits 0 but links dynamically is not a pass.

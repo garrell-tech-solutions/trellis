@@ -354,10 +354,14 @@ fn dispatch_meta(
     }
 }
 
-/// The visible (not truncated-away) items of the trip labelled `tag`, in
-/// document order — shared by both "lists exactly" and "lists N items",
+/// Every item the trip labelled `tag` holds, in document order -- the whole
+/// `<ul class="trip-items">`, not just what a phone screen paints (#120:
+/// one list throughout, CSS decides what is visually hidden past the
+/// third; `pool-screen-truncation-06` moved "only three are on screen" to
+/// `qa/trip_controls.md`, a fact about a rendered page rather than about
+/// this document). Shared by both "lists exactly" and "lists N items",
 /// which differ only in what they do with the list once they have it.
-fn trip_visible_items(world: &World, tag: &str) -> Result<Vec<String>, String> {
+fn trip_held_items(world: &World, tag: &str) -> Result<Vec<String>, String> {
     let body = html_body(world)?;
     let section = html::trip_section(body, tag)?;
     let items = html::between(section, r#"<ul class="trip-items">"#, "</ul>")?;
@@ -371,7 +375,7 @@ fn dispatch_trip_lists_exactly(
 ) -> Result<(), String> {
     let tag = resolve(example, &caps[1])?;
     let expected = resolve(example, &caps[2])?;
-    let actual = trip_visible_items(world, &tag)?;
+    let actual = trip_held_items(world, &tag)?;
     html::listed_in_order(&expected, actual, &format!("the trip {tag:?} to list"))
 }
 
@@ -382,7 +386,7 @@ fn dispatch_trip_lists_n_items(
 ) -> Result<(), String> {
     let tag = resolve(example, &caps[1])?;
     let expected = resolved_count(example, &caps[2])?;
-    let actual = trip_visible_items(world, &tag)?.len();
+    let actual = trip_held_items(world, &tag)?.len();
     if actual == expected {
         Ok(())
     } else {
@@ -401,7 +405,7 @@ fn dispatch_trip_offers(
     let expected = resolve(example, &caps[2])?;
     let body = html_body(world)?;
     let section = html::trip_section(body, &tag)?;
-    let label = html::between(section, "<summary>", "</summary>")?;
+    let (_, label) = html::button(section, r#"class="trip-more-toggle""#)?;
     if label == expected {
         Ok(())
     } else {
@@ -631,7 +635,7 @@ mod tests {
 
     fn two_trip_body() -> String {
         format!(
-            r#"<div class="trip panel"><div class="trip-header"><div class="trip-tag">@attic</div><div class="trip-count">3 things</div></div><ul class="trip-items">{}{}{}</ul></div><div class="trip panel"><div class="trip-header"><div class="trip-tag">@bakery</div><div class="trip-count">4 things</div></div><ul class="trip-items">{}{}{}</ul><details class="trip-more"><summary>Show 1 more</summary><ul class="trip-items">{}</ul></details></div>"#,
+            r#"<div class="trip panel"><div class="trip-header"><div class="trip-tag">@attic</div><div class="trip-count">3 things</div></div><ul class="trip-items">{}{}{}</ul></div><div class="trip panel"><div class="trip-header"><div class="trip-tag">@bakery</div><div class="trip-count">4 things</div></div><ul class="trip-items">{}{}{}{}</ul><button type="button" class="trip-more-toggle" data-collapsed-label="Show 1 more">Show 1 more</button></div>"#,
             item_li("b3"),
             item_li("b2"),
             item_li("b1"),
@@ -684,12 +688,12 @@ mod tests {
     }
 
     #[test]
-    fn dispatch_trip_lists_exactly_checks_the_visible_order() {
+    fn dispatch_trip_lists_exactly_checks_everything_the_trip_holds() {
         let mut world = World::new();
         world.last_html_body = Some(two_trip_body());
         let example = BTreeMap::new();
         let re = THEN_TRIP_LISTS_EXACTLY
-            .captures(r#"the trip "@bakery" lists "a3, a2, a1""#)
+            .captures(r#"the trip "@bakery" lists "a3, a2, a1, a0""#)
             .unwrap();
 
         assert_eq!(
@@ -699,12 +703,12 @@ mod tests {
     }
 
     #[test]
-    fn dispatch_trip_lists_n_items_counts_only_the_visible_ones() {
+    fn dispatch_trip_lists_n_items_counts_everything_the_trip_holds() {
         let mut world = World::new();
         world.last_html_body = Some(two_trip_body());
         let example = BTreeMap::new();
         let re = THEN_TRIP_LISTS_N_ITEMS
-            .captures(r#"the trip "@bakery" lists "3" items"#)
+            .captures(r#"the trip "@bakery" lists "4" items"#)
             .unwrap();
 
         assert_eq!(

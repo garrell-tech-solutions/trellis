@@ -71,8 +71,13 @@ pub fn row_containing<'a>(section: &'a str, needle: &str) -> Result<&'a str, Str
 /// `trip_progress.rs`, unlike most of this project's step-parsing helpers:
 /// it takes `body: &str` rather than `World`, so there is no per-module
 /// state to duplicate around.
+///
+/// Matches on the `class` attribute's own prefix rather than the whole
+/// opening tag, so an expanded trip (#120: `class="trip panel expanded"`)
+/// still scopes correctly -- `T-qa-binds-tolerantly-to-markup`'s reasoning
+/// applied to this harness's own step code, not only to QA's.
 pub fn trip_section<'a>(body: &'a str, tag: &str) -> Result<&'a str, String> {
-    let marker = r#"<div class="trip panel">"#;
+    let marker = r#"<div class="trip panel"#;
     let needle = format!(r#"<div class="trip-tag">{tag}</div>"#);
     let mut offset = 0;
     while let Some(rel_start) = body[offset..].find(marker) {
@@ -89,6 +94,47 @@ pub fn trip_section<'a>(body: &'a str, tag: &str) -> Result<&'a str, String> {
         offset = after;
     }
     Err(format!("no trip panel found for tag {tag:?} in:\n{body}"))
+}
+
+/// The `<button ...>...</button>` whose opening tag contains `class_marker`
+/// (e.g. `r#"class="trip-more-toggle""#`) -- its full opening tag (so a
+/// caller can check for an `hx-get`/`hx-post`/`hx-trigger` attribute, #120's
+/// own "issues no request") and its trimmed text content. Shared by
+/// `pool_screen.rs` and `trip_controls.rs`, the same "second caller earns a
+/// shared home" reasoning [`trip_section`] and [`listed_in_order`] already
+/// follow.
+/// The byte offset where the `<button ...>` opening tag carrying
+/// `class_marker` starts -- found by locating the class marker and walking
+/// back to its enclosing `<button`.
+fn button_tag_start(section: &str, class_marker: &str) -> Result<usize, String> {
+    let class_at = section
+        .find(class_marker)
+        .ok_or_else(|| format!("expected a button with {class_marker}, got:\n{section}"))?;
+    section[..class_at]
+        .rfind("<button")
+        .ok_or_else(|| format!("malformed button markup near {class_marker}"))
+}
+
+/// The `(start, end)` byte offsets of the `<button ...>` opening tag whose
+/// attributes contain `class_marker` -- split out of [`button`] itself so
+/// that function's own three sequential lookups (the tag, then its own
+/// text) do not all live behind one cyclomatic count.
+fn button_opening_tag_span(section: &str, class_marker: &str) -> Result<(usize, usize), String> {
+    let tag_start = button_tag_start(section, class_marker)?;
+    let rel_tag_close = section[tag_start..]
+        .find('>')
+        .ok_or_else(|| format!("no closing '>' on the button carrying {class_marker}"))?;
+    Ok((tag_start, tag_start + rel_tag_close + 1))
+}
+
+pub fn button<'a>(section: &'a str, class_marker: &str) -> Result<(&'a str, &'a str), String> {
+    let (tag_start, tag_end) = button_opening_tag_span(section, class_marker)?;
+    let opening_tag = &section[tag_start..tag_end];
+    let after_open = &section[tag_end..];
+    let text_end = after_open
+        .find("</button>")
+        .ok_or_else(|| format!("no closing </button> after {class_marker}"))?;
+    Ok((opening_tag, after_open[..text_end].trim()))
 }
 
 /// A comma-separated example value, compared against what a screen actually
@@ -186,5 +232,41 @@ mod tests {
         let section = header_section(body).unwrap();
         assert!(section.contains("Pool"));
         assert!(!section.contains("buy milk"));
+    }
+
+    #[test]
+    fn button_finds_the_text_and_opening_tag_by_its_class() {
+        let section = r#"<div><button type="button" class="trip-more-toggle" data-collapsed-label="Show 2 more">Show fewer</button></div>"#;
+        let (opening_tag, text) = button(section, r#"class="trip-more-toggle""#).unwrap();
+        assert_eq!(text, "Show fewer");
+        assert!(opening_tag.contains("data-collapsed-label=\"Show 2 more\""));
+        assert!(!opening_tag.contains("hx-post"));
+    }
+
+    #[test]
+    fn button_reports_an_hx_post_attribute_when_present() {
+        let section = r#"<button type="button" class="trip-complete" hx-post="/pool/trips/%40homedepot/complete">Complete all 8</button>"#;
+        let (opening_tag, text) = button(section, r#"class="trip-complete""#).unwrap();
+        assert_eq!(text, "Complete all 8");
+        assert!(opening_tag.contains("hx-post"));
+    }
+
+    #[test]
+    fn button_errors_when_no_button_carries_the_class() {
+        let section = r#"<button type="button" class="clear-done">&times;</button>"#;
+        assert!(button(section, r#"class="trip-more-toggle""#).is_err());
+    }
+
+    #[test]
+    fn trip_section_finds_a_panel_carrying_extra_classes() {
+        let body = concat!(
+            r#"<div class="trip panel expanded" data-tag="@homedepot">"#,
+            r#"<div class="trip-tag">@homedepot</div>3 things</div>"#,
+            r#"<div class="trip panel" data-tag="@supermarket">"#,
+            r#"<div class="trip-tag">@supermarket</div>3 things</div>"#,
+        );
+        let section = trip_section(body, "@homedepot").unwrap();
+        assert!(section.contains("expanded"));
+        assert!(!section.contains("@supermarket"));
     }
 }

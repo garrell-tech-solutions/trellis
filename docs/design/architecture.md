@@ -712,17 +712,57 @@ place pool work is offered, which is why `pool::store`'s one query carries
 `WHERE tasks.kind = 'pool'` and nothing else has to.
 
 ```
-scheduler_core::pool::group(Vec<PoolTask>) -> PoolGroups   trips + loose ends
+scheduler_core::pool::group(Vec<PoolTask>, &RunSizes) -> PoolGroups
                      TRIP_THRESHOLD                        3
                      VISIBLE_TRIP_ITEMS                    what shows unexpanded
+                     RunSizes                              per tag, not per task
 
-trellis_server::pool/  store.rs  the one query · view.rs  the rendered shape
+trellis_server::pool/  store.rs  two queries · view.rs  the rendered shape
 ```
 
 **A tag becomes a trip only once three things wait under it.** Fewer, and
 they are strays that share a place rather than a reason to leave the house,
 so they fall to loose ends still showing their tag. An untagged task always
 falls to loose ends — there is no threshold for having nothing to group by.
+
+**#129 gave that rule a second half, and the second half is about a *tag*.**
+A trip persists while its tag's whole **run** — everything created since the
+run last emptied out entirely, cleared or not — still reaches the threshold,
+so clearing three of five does not scatter the last two. `is_trip` is now a
+disjunction over two counts: what waits there now, and what the run holds.
+
+> **A fact about a group cannot ride on a member of it.** The first
+> implementation put `run_member_count` on `PoolTask`, filled the same value
+> into every row of a bucket after the query, and had `is_trip` read
+> `list.first()` — one task speaking for its whole tag. Nothing in the type
+> said the values agreed, no test could state that they must, and the
+> adapter had to fan a per-tag answer across per-row structs to produce them.
+> `RunSizes` is the same fact keyed by the thing it is about, so a bucket
+> asks about its own tag and disagreement is not representable. The row type
+> lost its `#[sqlx(default)]` phantom column with it.
+>
+> **The run *boundary* is still SQL, and that is the cost worth naming.**
+> Which clear ended a run — the one that left nothing open behind it — is a
+> business rule executing in a correlated subquery, where `cargo-mutants`
+> cannot reach it (`T-set-operations-execute-in-the-store` requires a slice
+> that moves a rule down to say what still proves it). What proves it is
+> `store.rs`'s own run tests, which go through `clear_done` rather than
+> writing `cleared_at` by hand, and the six properties below that pin the
+> half of the rule which *is* in the core. There was one boundary query and
+> is now one still: the single-tag variant beside it had no caller outside
+> its own tests, and a second statement of one rule is a second place to
+> drift from.
+
+**Six properties hold `group` where examples cannot** (`pool_properties.rs`,
+`#[ignore]`d with the rest): every task returns exactly once or is dropped
+for the one stated reason; arrival order changes nothing; a panel's counts
+agree with the items it carries; ranking is size-then-tag and loose ends stay
+newest-first; a tag panels exactly when either count reaches the threshold;
+and a *larger* run never costs a tag its panel — which is what the `or` in
+`is_trip` means for the screen. Each was watched fail against a breakage
+aimed at its own assertion before being trusted. One of the six passed that
+check first time round and had to be rewritten: it compared sorted ids, so a
+`group` with its sort deleted still satisfied it.
 
 **Nothing here writes.** No reorder, no solver, no pins. When a manual
 reorder arrives it belongs to loose ends alone, never to a trip, whose rank
@@ -1437,7 +1477,7 @@ schemas are still there. A revival inherits the gap along with the tables.
 | ~~Per-life-area capacity vs `allowed_windows`~~ | ~~M2~~ | **closed** — `T-capacity-two-axes` + `D-life-area-owns-its-time`, #6 |
 | `Block::missed` unreachable under silence-means-done | M6 | #4 — the `block` table survives #88; nothing writes it |
 | `ScheduleTask` needs `life_area_id` and `deadline_type`; triage writes `NULL` for both | M3 revival | #88 · #94 — needs a decision, not a re-attachment |
-| `scheduler_core::pool` filters and counts in memory; `pool/store.rs` still has no `ORDER BY` | the company set-operations standard | **#108** — surface grew at `#122`, which added done-filtering and a done-count to `pool::group` after the 2026-08-23 audit |
+| `scheduler_core::pool` filters and counts in memory; `pool/store.rs`'s task query still has no `ORDER BY` | the company set-operations standard | **#108** — surface grew at `#122`, which added done-filtering and a done-count to `pool::group` after the 2026-08-23 audit. **#129 made it easier, not worse**: `run_member_counts` does its `GROUP BY` in SQL and hands back `RunSizes`, a domain value the core consumes without knowing how it was reached — the shape the specification object #108 needs, now with a working precedent in this module |
 | ~~The committed screen's date cell is always UTC~~ | ~~wrong once the zone is set~~ | **closed** — `#110` reads the owner's zone; `settings::current_timezone` is a front door again |
 | U3 — backward-pass input | M3 | #7 · ~~U2~~ `T-hard-refuses-soft-slips` · ~~U4~~ `T-blocks-do-not-cross-guardrail-seams` |
 | ~~Crate layout ratification~~ | ~~nothing; cost grows~~ | **closed** — `T-package-by-business-domain`, #44 |

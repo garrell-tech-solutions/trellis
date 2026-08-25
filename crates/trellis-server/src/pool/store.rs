@@ -11,7 +11,6 @@
 //! no longer keeps a row off this screen; see [`PoolTaskRow::done`].
 
 use sqlx::SqlitePool;
-use std::collections::HashMap;
 
 /// A row of [`list_pool_tasks`].
 #[derive(Debug, Clone, PartialEq, Eq, sqlx::FromRow)]
@@ -23,55 +22,39 @@ pub struct PoolTaskRow {
     /// returns is never *cleared* -- that is what excludes it -- so `done`
     /// alone is enough for the view to decide open-vs-struck.
     pub done: bool,
-    /// [`run_member_count`] for this row's own tag, `0` for an untagged row
-    /// -- attached after the main query rather than selected by it
-    /// (`#[sqlx(default)]` leaves it `0` until [`list_pool_tasks`] fills it
-    /// in), since it is a per-*tag* fact, not a per-row column.
-    #[sqlx(default)]
-    pub run_member_count: i64,
 }
 
 /// Every pool task not yet cleared, alongside the text and context tag of
 /// the capture it was triaged from. Unordered on purpose:
 /// `scheduler_core::pool::group` establishes newest-first itself rather
 /// than trusting a caller to have sorted already.
+///
+/// Run sizes are [`run_member_counts`]'s answer, not this one's: a run
+/// belongs to a *tag*, and there is no honest way to hang one off a row
+/// without inviting a caller to believe two rows could disagree about their
+/// shared tag.
 pub async fn list_pool_tasks(pool: &SqlitePool) -> Result<Vec<PoolTaskRow>, sqlx::Error> {
-    let mut rows: Vec<PoolTaskRow> = sqlx::query_as(
+    sqlx::query_as(
         "SELECT tasks.id AS task_id, captures.raw_text, captures.context_tag, \
          (tasks.archived_at IS NOT NULL) AS done FROM tasks \
          JOIN captures ON captures.id = tasks.capture_id \
          WHERE tasks.kind = 'pool' AND tasks.cleared_at IS NULL",
     )
     .fetch_all(pool)
-    .await?;
-
-    let counts = run_member_counts(pool).await?;
-    for row in &mut rows {
-        row.run_member_count = row
-            .context_tag
-            .as_deref()
-            .and_then(|tag| counts.get(tag))
-            .copied()
-            .unwrap_or(0);
-    }
-    Ok(rows)
+    .await
 }
 
-/// The run-boundary subquery [`run_member_count`] and [`run_member_counts`]
-/// both need: the largest task `id` any clear has swept away *and* left
-/// nothing open behind (a run-ending clear, #129) for the tag named by
-/// `tag_expr`, or `0` if that tag's run has never ended. Every member with
-/// a larger `id` belongs to the run still open now. `tag_expr` is a raw SQL
-/// fragment naming the tag to check -- `?` for a single bound tag, or a
-/// correlated outer column (`c.context_tag`) to compute every tag's
-/// boundary in one query -- substituted by `format!`, never user input.
+/// The largest task `id` a run-ending clear has swept away, per tag, or `0`
+/// for a tag whose run has never ended (#129). Every member with a larger
+/// `id` belongs to the run still open now. Correlated on `c.context_tag`, so
+/// it answers for whichever tag the enclosing query is grouping by.
 ///
 /// A clear batch — every task sharing one `cleared_at` — ended the run at
 /// its own largest `id` if nothing else at the same tag was still open
 /// *at that instant*: created no later than the clear (`created_at_ms <=
 /// cleared_at`) and not yet cleared by it (`cleared_at IS NULL` or a *later*
 /// clear). Such a survivor is exactly an open item the clear left behind,
-/// and `clear_done` never clears one, so its presence is what tells a
+/// and [`clear_done`] never clears one, so its presence is what tells a
 /// partial clear from a run-ending one. This is the one comparison in this
 /// module between a creation instant and a clear instant, and it is a real
 /// (if narrow) risk: `platform::clock::Clock` is a plain wall clock with no
@@ -80,61 +63,42 @@ pub async fn list_pool_tasks(pool: &SqlitePool) -> Result<Vec<PoolTaskRow>, sqlx
 /// the run would fail to reset. Once a batch is judged full, membership
 /// itself is counted on `id` -- strictly increasing and tie-free -- rather
 /// than repeating the timestamp comparison.
-fn run_boundary_id_sql(tag_expr: &str) -> String {
-    format!(
-        "COALESCE(( \
-           SELECT MAX(b.batch_max_id) FROM ( \
-             SELECT MAX(t3.id) AS batch_max_id, t3.cleared_at AS cleared_at \
-             FROM tasks t3 JOIN captures c3 ON c3.id = t3.capture_id \
-             WHERE c3.context_tag = {tag_expr} AND t3.kind = 'pool' \
-               AND t3.cleared_at IS NOT NULL \
-             GROUP BY t3.cleared_at \
-           ) b \
-           WHERE NOT EXISTS ( \
-             SELECT 1 FROM tasks t4 JOIN captures c4 ON c4.id = t4.capture_id \
-             WHERE c4.context_tag = {tag_expr} AND t4.kind = 'pool' \
-               AND t4.created_at_ms <= b.cleared_at \
-               AND (t4.cleared_at IS NULL OR t4.cleared_at > b.cleared_at) \
-           ) \
-         ), 0)"
-    )
-}
+const RUN_BOUNDARY_ID: &str = "COALESCE(( \
+     SELECT MAX(b.batch_max_id) FROM ( \
+       SELECT MAX(t3.id) AS batch_max_id, t3.cleared_at AS cleared_at \
+       FROM tasks t3 JOIN captures c3 ON c3.id = t3.capture_id \
+       WHERE c3.context_tag = c.context_tag AND t3.kind = 'pool' \
+         AND t3.cleared_at IS NOT NULL \
+       GROUP BY t3.cleared_at \
+     ) b \
+     WHERE NOT EXISTS ( \
+       SELECT 1 FROM tasks t4 JOIN captures c4 ON c4.id = t4.capture_id \
+       WHERE c4.context_tag = c.context_tag AND t4.kind = 'pool' \
+         AND t4.created_at_ms <= b.cleared_at \
+         AND (t4.cleared_at IS NULL OR t4.cleared_at > b.cleared_at) \
+     ) \
+   ), 0)";
 
-/// How many pool tasks have belonged to `tag`'s current *run* -- everything
-/// created since the run last ended, cleared or not (#129,
-/// `D-a-trip-survives-being-tidied`). Equal to the concurrently-uncleared
-/// count (what [`list_pool_tasks`] alone would show) until a clear removes
-/// a member without ending the run; larger than it from that point on,
-/// since the removed member still belonged to the run. `0` for a tag with
-/// no pool tasks at all.
-pub async fn run_member_count(pool: &SqlitePool, tag: &str) -> Result<i64, sqlx::Error> {
-    let boundary = run_boundary_id_sql("?");
-    let sql = format!(
-        "SELECT COUNT(*) FROM tasks t JOIN captures c ON c.id = t.capture_id \
-         WHERE c.context_tag = ? AND t.kind = 'pool' AND t.id > {boundary}"
-    );
-    sqlx::query_scalar(&sql)
-        .bind(tag)
-        .bind(tag)
-        .bind(tag)
-        .fetch_one(pool)
-        .await
-}
-
-/// [`run_member_count`] for every tag that currently has at least one
-/// member in its run, in one query -- what [`list_pool_tasks`] attaches
-/// per row rather than calling [`run_member_count`] once per distinct tag.
-async fn run_member_counts(pool: &SqlitePool) -> Result<HashMap<String, i64>, sqlx::Error> {
-    let boundary = run_boundary_id_sql("c.context_tag");
+/// How many pool tasks belong to each tag's current *run* -- everything
+/// created since that tag's run last ended, cleared or not (#129,
+/// `D-a-trip-survives-being-tidied`). Equal to the tag's concurrently-
+/// uncleared count (what [`list_pool_tasks`] alone would show) until a clear
+/// removes a member without ending the run; larger than it from that point
+/// on, since the removed member still belonged to the run.
+///
+/// One query for every tag at once, and the only one: a tag whose run is
+/// empty is simply absent from the result, which is the same answer as zero
+/// to `scheduler_core::pool::RunSizes`'s only question. A second,
+/// single-tag variant of this rule would be a second place it could drift.
+pub async fn run_member_counts(pool: &SqlitePool) -> Result<Vec<(String, i64)>, sqlx::Error> {
     let sql = format!(
         "SELECT c.context_tag AS tag, COUNT(*) AS member_count \
          FROM tasks t JOIN captures c ON c.id = t.capture_id \
          WHERE t.kind = 'pool' AND c.context_tag IS NOT NULL \
-           AND t.id > {boundary} \
+           AND t.id > {RUN_BOUNDARY_ID} \
          GROUP BY c.context_tag"
     );
-    let rows: Vec<(String, i64)> = sqlx::query_as(&sql).fetch_all(pool).await?;
-    Ok(rows.into_iter().collect())
+    sqlx::query_as(&sql).fetch_all(pool).await
 }
 
 /// Sweeps every struck-through (`archived_at IS NOT NULL`), not-yet-cleared
@@ -358,7 +322,7 @@ mod tests {
     // --- #129: a trip survives being tidied -----------------------------
 
     /// `n` pool tasks tagged `tag`, created at consecutive milliseconds from
-    /// `start_ms` -- distinct, ordered timestamps, since [`run_member_count`]
+    /// `start_ms` -- distinct, ordered timestamps, since [`run_member_counts`]
     /// compares creation instants to clear instants and the real `Clock`
     /// this stands in for would never hand out the same millisecond twice
     /// for tasks created this deliberately apart.
@@ -399,39 +363,51 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn run_member_count_equals_the_uncleared_count_when_the_run_has_never_been_cleared() {
-        let (_dir, pool) = test_pool().await;
-        given_pool_tasks(&pool, "@homedepot", 3).await;
-
-        assert_eq!(run_member_count(&pool, "@homedepot").await.unwrap(), 3);
+    /// One tag's run size, read off the production query rather than a
+    /// second one written for tests: absent means a run of zero, which is
+    /// exactly what `RunSizes` makes of it.
+    async fn run_members(pool: &SqlitePool, tag: &str) -> i64 {
+        run_member_counts(pool)
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|(t, _)| t == tag)
+            .map_or(0, |(_, members)| members)
     }
 
     #[tokio::test]
-    async fn run_member_count_is_zero_for_a_tag_with_no_pool_tasks() {
+    async fn run_members_equals_the_uncleared_count_when_the_run_has_never_been_cleared() {
+        let (_dir, pool) = test_pool().await;
+        given_pool_tasks(&pool, "@homedepot", 3).await;
+
+        assert_eq!(run_members(&pool, "@homedepot").await, 3);
+    }
+
+    #[tokio::test]
+    async fn run_members_is_zero_for_a_tag_with_no_pool_tasks() {
         let (_dir, pool) = test_pool().await;
 
-        assert_eq!(run_member_count(&pool, "@homedepot").await.unwrap(), 0);
+        assert_eq!(run_members(&pool, "@homedepot").await, 0);
     }
 
     /// A partial clear -- one that leaves an open item behind -- does not
     /// end the run (#129): the two swept members still belong to it.
     #[tokio::test]
-    async fn run_member_count_includes_members_a_partial_clear_swept_away() {
+    async fn run_members_includes_members_a_partial_clear_swept_away() {
         let (_dir, pool) = test_pool().await;
         let ids = given_pool_tasks(&pool, "@homedepot", 5).await;
         mark_archived_ids(&pool, &ids[0..3]).await;
 
         clear_done(&pool, "@homedepot", 100).await.unwrap();
 
-        assert_eq!(run_member_count(&pool, "@homedepot").await.unwrap(), 5);
+        assert_eq!(run_members(&pool, "@homedepot").await, 5);
     }
 
     /// A clear that leaves nothing open behind ends the run: a fresh task
     /// afterward starts a new one and does not inherit the old members
     /// (`trip-persistence-re-earns-its-trip-03`).
     #[tokio::test]
-    async fn run_member_count_resets_once_a_clear_leaves_nothing_open() {
+    async fn run_members_resets_once_a_clear_leaves_nothing_open() {
         let (_dir, pool) = test_pool().await;
         let ids = given_pool_tasks(&pool, "@homedepot", 3).await;
         mark_archived_ids(&pool, &ids).await;
@@ -439,14 +415,14 @@ mod tests {
 
         given_pool_tasks_at(&pool, "@homedepot", 200, 2).await;
 
-        assert_eq!(run_member_count(&pool, "@homedepot").await.unwrap(), 2);
+        assert_eq!(run_members(&pool, "@homedepot").await, 2);
     }
 
     /// Two separate partial clears in the same still-open run both count
     /// toward it -- the derivation must not stop at the first clear batch it
     /// finds.
     #[tokio::test]
-    async fn run_member_count_accumulates_across_multiple_partial_clears() {
+    async fn run_members_accumulates_across_multiple_partial_clears() {
         let (_dir, pool) = test_pool().await;
         let ids = given_pool_tasks(&pool, "@homedepot", 6).await;
         mark_archived_ids(&pool, &ids[0..2]).await;
@@ -454,38 +430,56 @@ mod tests {
         mark_archived_ids(&pool, &ids[2..4]).await;
         clear_done(&pool, "@homedepot", 200).await.unwrap();
 
-        assert_eq!(run_member_count(&pool, "@homedepot").await.unwrap(), 6);
+        assert_eq!(run_members(&pool, "@homedepot").await, 6);
     }
 
     #[tokio::test]
-    async fn run_member_count_is_scoped_to_its_own_tag() {
+    async fn run_members_is_scoped_to_its_own_tag() {
         let (_dir, pool) = test_pool().await;
         given_pool_tasks(&pool, "@homedepot", 5).await;
         given_pool_tasks(&pool, "@supermarket", 2).await;
 
-        assert_eq!(run_member_count(&pool, "@supermarket").await.unwrap(), 2);
+        assert_eq!(run_members(&pool, "@supermarket").await, 2);
     }
 
+    /// The two facts the pool screen reads are read separately and stay
+    /// consistent: a partial clear leaves two rows and a run of five.
     #[tokio::test]
-    async fn list_pool_tasks_carries_the_run_member_count_per_row() {
+    async fn a_partial_clear_leaves_fewer_rows_than_its_tags_run_has_members() {
         let (_dir, pool) = test_pool().await;
         let ids = given_pool_tasks(&pool, "@homedepot", 5).await;
         mark_archived_ids(&pool, &ids[0..3]).await;
         clear_done(&pool, "@homedepot", 100).await.unwrap();
 
-        let rows = list_pool_tasks(&pool).await.unwrap();
-
-        assert_eq!(rows.len(), 2);
-        assert!(rows.iter().all(|row| row.run_member_count == 5));
+        assert_eq!(list_pool_tasks(&pool).await.unwrap().len(), 2);
+        assert_eq!(run_members(&pool, "@homedepot").await, 5);
     }
 
+    /// An untagged task has no tag to have a run, so it contributes to no
+    /// entry at all rather than to an empty-string one.
     #[tokio::test]
-    async fn list_pool_tasks_reports_zero_run_member_count_for_an_untagged_task() {
+    async fn run_member_counts_reports_nothing_for_an_untagged_task() {
         let (_dir, pool) = test_pool().await;
         given_a_pool_task(&pool, "fix the door latch", None).await;
 
-        let rows = list_pool_tasks(&pool).await.unwrap();
+        assert_eq!(run_member_counts(&pool).await.unwrap(), Vec::new());
+    }
 
-        assert_eq!(rows[0].run_member_count, 0);
+    #[tokio::test]
+    async fn run_member_counts_reports_every_tag_with_a_live_run_at_once() {
+        let (_dir, pool) = test_pool().await;
+        given_pool_tasks(&pool, "@homedepot", 5).await;
+        given_pool_tasks_at(&pool, "@supermarket", 100, 2).await;
+
+        let mut counts = run_member_counts(&pool).await.unwrap();
+        counts.sort();
+
+        assert_eq!(
+            counts,
+            vec![
+                ("@homedepot".to_string(), 5),
+                ("@supermarket".to_string(), 2)
+            ]
+        );
     }
 }

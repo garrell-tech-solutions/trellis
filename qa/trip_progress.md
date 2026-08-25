@@ -30,6 +30,13 @@ purpose.**
 - **Persistence** counts **everything displayed.** Working a trip never
   dissolves it.
 
+**"Displayed" is the word that failed, and #129 replaced it.** Clearing is
+precisely what stops something being displayed, so five with three cleared
+counted as two and fell to loose ends. The rule is now stated over the *run*
+rather than the render — a run ends when the last thing waiting at a tag is
+cleared away — and it is written out in `qa/trip_persistence.md`. Everything
+in this document below still holds; only the clearing procedure moved.
+
 **If those are ever collapsed into one predicate, one of the two behaviours
 is wrong** — and #103 got there by fixing the number without the experience.
 A panel of one open item that reads *"1 of 3 done"* is right; a panel of one
@@ -101,18 +108,31 @@ cleared.** Check both halves.
 - The label reads **3 of 5 done**, not `5 things` and not `2 things`.
 - The two open items are still in the same trip, **not in loose ends**.
 
-## Procedure — clearing, and what it can take with it
+## Procedure — clearing, and what it does not take with it
+
+**Changed by #129 (`qa/trip_persistence.md`), and an earlier version of this
+document asserted the opposite.** It said the second case below "drops to
+loose ends, because clearing took it to two open items and formation needs
+three". **That was the defect**, found by the owner within an hour of merging
+this slice: clearing dissolved the panel with the owner still standing in the
+shop. `D-a-trip-survives-being-worked` was extended on 2026-08-24 —
+**clearing tidies the panel, it does not dissolve it** — and both cases now
+hold.
 
 1. Five tasks at one tag, three done. Clear done. Read the screen.
 2. On a fresh database: **three** tasks at one tag, **one** done. Confirm a
    trip. Clear done. Read the screen.
 
 ### Expected Observable Outcomes
-- After 1: two items remain, none struck, still a trip.
-- After 2: **the group drops to loose ends**, because clearing took it to two
-  open items and **formation needs three.** Both items keep their tag.
+- After 1: two items remain, none struck, **still a trip**, reading
+  `2 things`, and **loose ends stay empty.**
+- After 2: **the same** — still a trip at two items, both keeping their tag,
+  loose ends empty. It formed a trip, so it stays one for the rest of the
+  run.
 - **That second case is the interesting one** and the one a five-item fixture
   cannot reach: it is where formation and persistence visibly differ.
+  `trip-progress-clearing-holds-the-group-05` is the scenario, and it was
+  reversed in the open rather than edited quietly.
 
 ## Procedure — a group with nothing open left
 
@@ -125,8 +145,13 @@ cleared.** Check both halves.
 - After clearing: **the group is gone entirely** — no empty panel, no heading
   with nothing under it.
 - **#125's complete-group button must not appear or must not act in this
-  state** — there is nothing left to complete. That slice is not this one;
-  note what you see so it lands knowing.
+  state** — there is nothing left to complete. **That landed in PR #135 and
+  `trip-controls-nothing-left-to-complete-03` now asserts it**, so this is a
+  cross-check rather than a note forward.
+- **#129 extended what "gone entirely" means** below three items: a trip that
+  clearing has taken down to two keeps its panel through the last check-off
+  and leaves when you tap `✕`, exactly as this three-item case does. See
+  `qa/trip_persistence.md`.
 
 ## Procedure — loose ends are unchanged
 
@@ -152,7 +177,7 @@ cleared.** Check both halves.
 
 ## Procedure — nothing else changed
 
-1. Run all twenty existing QA suites and the acceptance suite.
+1. Run every existing QA suite and the acceptance suite.
 
 ### Expected Observable Outcomes
 - **`mark_done` legitimately changed** — its no-undo scenario narrowed with

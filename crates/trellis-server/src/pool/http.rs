@@ -397,11 +397,11 @@ mod tests {
         assert!(!body.contains(">buy screws<"), "got:\n{body}");
         assert!(!body.contains("return the drill"), "got:\n{body}");
         assert!(!body.contains("pick up trim"), "got:\n{body}");
-        // Two survive (grab a tarp, buy screws again), which is itself
-        // below TRIP_THRESHOLD -- qa/trip_progress.md's own "second case"
-        // (`trip-progress-clear-done-04`'s Examples: 0 struck, 2 loose):
-        // clearing can take a group below the threshold same as scenario
-        // 05 does, this is simply the five-item fixture reaching it too.
+        // Two survive (grab a tarp, buy screws again). Before #129 these
+        // fell below TRIP_THRESHOLD and landed in loose ends
+        // (`trip-progress-clear-done-04`'s old Examples: 0 struck, 2
+        // loose); the run had already reached five, so it now holds --
+        // `-04`'s own moved Examples read `loose: 0`.
         assert!(
             body.contains("grab a tarp") && body.contains("buy screws again"),
             "got:\n{body}"
@@ -410,10 +410,23 @@ mod tests {
             body.contains("@homedepot"),
             "the survivors keep their tag, got:\n{body}"
         );
+        assert_eq!(
+            body.matches("trip-tag").count(),
+            1,
+            "the persisted trip should hold, not fall to loose ends, got:\n{body}"
+        );
+        assert!(!body.contains(r#"class="loose""#), "got:\n{body}");
     }
 
+    /// Reversed by #129 (`D-a-trip-survives-being-tidied`, extended
+    /// 2026-08-24): this used to assert that clearing below `TRIP_THRESHOLD`
+    /// dropped the tag to loose ends. That was the defect the slice exists
+    /// to fix -- the owner still standing in the shop with two things left
+    /// to get -- so the trip now stays a trip for the rest of its run,
+    /// matching `trip-progress-clearing-can-drop-a-group-05`'s own reversal
+    /// in `features/trip_progress.feature`.
     #[tokio::test]
-    async fn clearing_can_drop_a_group_below_the_threshold_to_loose_ends() {
+    async fn clearing_below_threshold_holds_the_group_for_the_rest_of_its_run() {
         let (_dir, pool) = test_pool().await;
         let ids = given_three_pool_tasks(&pool, "@homedepot").await;
         post_mark_done(&pool, ids[0]).await;
@@ -428,10 +441,12 @@ mod tests {
             body.contains("return the drill") && body.contains("pick up trim"),
             "got:\n{body}"
         );
-        // Two items remain at the tag -- below TRIP_THRESHOLD -- so the tag
-        // no longer heads a trip panel; the loose-ends section carries them.
         let trip_header_count = body.matches("trip-tag").count();
-        assert_eq!(trip_header_count, 0, "got:\n{body}");
+        assert_eq!(
+            trip_header_count, 1,
+            "the run has already reached TRIP_THRESHOLD, so the panel holds, got:\n{body}"
+        );
+        assert!(body.contains("2 things"), "got:\n{body}");
     }
 
     #[tokio::test]

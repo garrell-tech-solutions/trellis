@@ -3,7 +3,7 @@
 //! (`T-templates-take-view-models`).
 
 use crate::pool::store::PoolTaskRow;
-use scheduler_core::pool::{self, PoolTask};
+use scheduler_core::pool::{self, PoolTask, RunSizes};
 use std::collections::HashSet;
 
 /// One item's own id and text, wherever the template needs to act on a
@@ -104,19 +104,20 @@ fn count_label(count: usize, done_count: usize) -> String {
 /// function stores. `GET /pool` always passes an empty set: expand state is
 /// a thing you did with your thumb during this page's own lifetime, not
 /// something a fresh navigation remembers.
-pub(super) fn build(rows: Vec<PoolTaskRow>, expanded_tags: &HashSet<String>) -> PoolView {
+///
+/// `run_sizes` is `store::run_member_counts`'s `(tag, members)` answer, and
+/// this is where it stops being rows and becomes the domain's
+/// [`RunSizes`] (#129) -- the same boundary at which a `PoolTaskRow`
+/// becomes a `PoolTask`.
+pub(super) fn build(
+    rows: Vec<PoolTaskRow>,
+    run_sizes: Vec<(String, i64)>,
+    expanded_tags: &HashSet<String>,
+) -> PoolView {
     let is_empty = rows.is_empty();
     let waiting = rows.iter().filter(|row| !row.done).count();
-    let tasks = rows
-        .into_iter()
-        .map(|row| PoolTask {
-            sequence: row.task_id,
-            text: row.raw_text,
-            context_tag: row.context_tag,
-            done: row.done,
-        })
-        .collect();
-    let groups = pool::group(tasks);
+    let tasks = rows.into_iter().map(pool_task).collect();
+    let groups = pool::group(tasks, &to_run_sizes(run_sizes));
 
     let trips = groups
         .trips
@@ -126,25 +127,53 @@ pub(super) fn build(rows: Vec<PoolTaskRow>, expanded_tags: &HashSet<String>) -> 
             trip_view(trip, expanded)
         })
         .collect();
-    let loose = groups
-        .loose
-        .into_iter()
-        .map(|task| LooseItemView {
-            id: task.id,
-            text: task.text,
-            context_tag: task.context_tag,
-        })
-        .collect();
+    let loose = groups.loose.into_iter().map(loose_item_view).collect();
 
     PoolView {
-        meta: if is_empty {
-            "empty".to_string()
-        } else {
-            format!("{waiting} waiting")
-        },
+        meta: meta_text(is_empty, waiting),
         empty: is_empty,
         trips,
         loose,
+    }
+}
+
+fn pool_task(row: PoolTaskRow) -> PoolTask {
+    PoolTask {
+        sequence: row.task_id,
+        text: row.raw_text,
+        context_tag: row.context_tag,
+        done: row.done,
+    }
+}
+
+/// A `COUNT(*)` is never negative, so the conversion cannot lose anything --
+/// but `as usize` would turn a negative into an enormous run rather than
+/// saying so, and an enormous run is a permanent trip panel. `try_from`
+/// makes the impossible case harmless instead of catastrophic.
+fn to_run_sizes(counts: Vec<(String, i64)>) -> RunSizes {
+    RunSizes::new(
+        counts
+            .into_iter()
+            .map(|(tag, members)| (tag, usize::try_from(members).unwrap_or(0))),
+    )
+}
+
+fn loose_item_view(task: pool::LooseTask) -> LooseItemView {
+    LooseItemView {
+        id: task.id,
+        text: task.text,
+        context_tag: task.context_tag,
+    }
+}
+
+/// `"empty"` when nothing is pooled, `"N waiting"` otherwise
+/// (`pool-screen-empty-07`) -- see [`build`] for why `waiting` is not just
+/// `is_empty`'s own row count.
+fn meta_text(is_empty: bool, waiting: usize) -> String {
+    if is_empty {
+        "empty".to_string()
+    } else {
+        format!("{waiting} waiting")
     }
 }
 
@@ -207,16 +236,27 @@ mod tests {
         }
     }
 
+    /// One tag's run, as `store::run_member_counts` reports it once a clear
+    /// has swept some of the run away without ending it (#129).
+    fn run_of(tag: &str, members: i64) -> Vec<(String, i64)> {
+        vec![(tag.to_string(), members)]
+    }
+
     /// Every test in this module but the #120 ones below is indifferent to
     /// expand state -- shadows the real `build` with the empty set baked
     /// in, so those tests do not have to carry a `&HashSet::new()` they do
-    /// not care about.
+    /// not care about. Run sizes default to none, which is what every test
+    /// predating #129 assumes.
     fn build(rows: Vec<PoolTaskRow>) -> PoolView {
-        super::build(rows, &no_expanded())
+        super::build(rows, Vec::new(), &no_expanded())
+    }
+
+    fn build_with_runs(rows: Vec<PoolTaskRow>, run_sizes: Vec<(String, i64)>) -> PoolView {
+        super::build(rows, run_sizes, &no_expanded())
     }
 
     fn build_expanded(rows: Vec<PoolTaskRow>, expanded: &HashSet<String>) -> PoolView {
-        super::build(rows, expanded)
+        super::build(rows, Vec::new(), expanded)
     }
 
     #[test]
@@ -497,6 +537,45 @@ mod tests {
         let view = build_expanded(rows, &no_expanded());
         assert!(view.trips[0].offers_complete);
         assert_eq!(view.trips[0].complete_label, "Complete all 3");
+    }
+
+    // --- #129: a trip survives being tidied ------------------------------
+
+    #[test]
+    fn a_below_threshold_row_persists_as_a_trip_when_its_run_has_reached_the_threshold() {
+        let view = build_with_runs(
+            vec![
+                row(4, "grab a tarp", Some("@homedepot")),
+                row(5, "buy screws again", Some("@homedepot")),
+            ],
+            run_of("@homedepot", 5),
+        );
+
+        assert_eq!(view.trips.len(), 1);
+        assert_eq!(view.trips[0].tag, "@homedepot");
+        assert_eq!(view.trips[0].count_label, "2 things");
+        assert!(view.loose.is_empty());
+    }
+
+    /// The store reports run sizes as `i64`; a below-threshold run must not
+    /// become a trip on the way across, and a negative one -- which
+    /// `COUNT(*)` cannot produce, and which `as usize` would turn into a
+    /// permanent panel -- must not either.
+    #[test]
+    fn a_run_size_the_store_could_not_produce_does_not_manufacture_a_trip() {
+        let rows = || {
+            vec![
+                row(4, "grab a tarp", Some("@homedepot")),
+                row(5, "buy screws again", Some("@homedepot")),
+            ]
+        };
+
+        assert!(build_with_runs(rows(), run_of("@homedepot", 2))
+            .trips
+            .is_empty());
+        assert!(build_with_runs(rows(), run_of("@homedepot", -1))
+            .trips
+            .is_empty());
     }
 
     #[test]

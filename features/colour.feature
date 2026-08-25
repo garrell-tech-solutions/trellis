@@ -40,9 +40,9 @@
 # it -- and Trellis has one surface, so they are the same value. It stops
 # being a brand block above a white app: a dark green strip over a near-white
 # page was two-tone, and in dark mode a brand-coloured strip is a bright bar
-# above a dark screen. `#f9fafb` is `--color-gray-50` in light, which is what
+# above a dark screen. `#fafdfe` is `--color-gray-50` in light, which is what
 # `background_color` has always been; the change is that `theme_color` joins
-# it and that the page adds `#0b0f14`, `--color-gray-50` in dark, for a dark
+# it and that the page adds `#091014`, `--color-gray-50` in dark, for a dark
 # device.
 #
 # `installable.feature` IS NOT EDITED. Its scenario 05 already asserts that
@@ -150,8 +150,8 @@ Feature: Trellis follows the device's colour scheme
 
     Examples:
       | screen  | scheme | colour  |
-      | capture | light  | #f9fafb |
-      | capture | dark   | #0b0f14 |
+      | capture | light  | #fafdfe |
+      | capture | dark   | #091014 |
 
   # colour-manifest-colours-03: the manifest's colours are the app's own surface, no longer provisional
   Scenario: The manifest's colours are the app's own surface, no longer provisional
@@ -160,5 +160,5 @@ Feature: Trellis follows the device's colour scheme
 
     Examples:
       | member           | value   |
-      | theme_color      | #f9fafb |
-      | background_color | #f9fafb |
+      | theme_color      | #fafdfe |
+      | background_color | #fafdfe |

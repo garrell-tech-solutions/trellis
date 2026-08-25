@@ -152,22 +152,22 @@ if qa_start_server "$BIN" "$TMP_DIR/colour.sqlite" "$TMP_DIR/colour.log" "2026-0
       echo "FAIL: [metadata] $screen's first theme-color carries a media attribute (\"$light_media\") -- the unmediated one must be first and stay light" >&2
       FAILURES=1
     fi
-    if [[ "$light_content" != "#f9fafb" ]]; then
-      echo "FAIL: [metadata] $screen's light theme-color is \"$light_content\", expected #f9fafb" >&2
+    if [[ "$light_content" != "#fafdfe" ]]; then
+      echo "FAIL: [metadata] $screen's light theme-color is \"$light_content\", expected #fafdfe" >&2
       FAILURES=1
     fi
     if [[ "$dark_media" != "(prefers-color-scheme: dark)" ]]; then
       echo "FAIL: [metadata] $screen's second theme-color's media is \"$dark_media\", expected \"(prefers-color-scheme: dark)\"" >&2
       FAILURES=1
     fi
-    if [[ "$dark_content" != "#0b0f14" ]]; then
-      echo "FAIL: [metadata] $screen's dark theme-color is \"$dark_content\", expected #0b0f14" >&2
+    if [[ "$dark_content" != "#091014" ]]; then
+      echo "FAIL: [metadata] $screen's dark theme-color is \"$dark_content\", expected #091014" >&2
       FAILURES=1
     fi
   done
 
   manifest_body="$(curl -s "http://$ADDR/manifest.webmanifest")"
-  for pair in "theme_color=#f9fafb" "background_color=#f9fafb"; do
+  for pair in "theme_color=#fafdfe" "background_color=#fafdfe"; do
     member="${pair%%=*}"
     expected="${pair#*=}"
     actual="$(python3 -c '

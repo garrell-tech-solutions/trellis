@@ -2,10 +2,10 @@
 //! to itself and to its siblings looks like (`T-nav-is-the-site-map`, the
 //! header is the route table).
 //!
-//! Three pages today — Capture, Pool (#92) and Committed (#94) — not the
-//! four the design draws. `Quota` arrives with its own slice; **a dead link
-//! is worse than no link**, so [`ALL`] names only what [`platform::app`]
-//! can actually route to.
+//! Four pages — Capture, Pool (#92), Quota (#93) and Committed (#94) — the
+//! full set `D-four-screens` draws. `Quota` was the last dead link this
+//! module carried the comment for; [`ALL`] now names every page
+//! [`platform::app`] can route to.
 
 /// A page the header can link to. Add a variant only alongside the route
 /// it names — [`ALL`] and [`links`] are what keep the header from ever
@@ -15,10 +15,12 @@ pub(crate) enum Page {
     Capture,
     Pool,
     Committed,
+    Quota,
 }
 
-/// Every page that exists, in the order the header lists them.
-pub(crate) const ALL: [Page; 3] = [Page::Capture, Page::Pool, Page::Committed];
+/// Every page that exists, in the order the header lists them --
+/// `committed-screen-tabs-06`'s own order, `Quota` last.
+pub(crate) const ALL: [Page; 4] = [Page::Capture, Page::Pool, Page::Committed, Page::Quota];
 
 impl Page {
     fn label(self) -> &'static str {
@@ -26,6 +28,7 @@ impl Page {
             Page::Capture => "Capture",
             Page::Pool => "Pool",
             Page::Committed => "Committed",
+            Page::Quota => "Quota",
         }
     }
 
@@ -34,6 +37,7 @@ impl Page {
             Page::Capture => "/",
             Page::Pool => "/pool",
             Page::Committed => "/committed",
+            Page::Quota => "/quota",
         }
     }
 }
@@ -67,7 +71,7 @@ mod tests {
         let links = links(Page::Capture);
         assert_eq!(
             links.iter().map(|l| l.label).collect::<Vec<_>>(),
-            vec!["Capture", "Pool", "Committed"]
+            vec!["Capture", "Pool", "Committed", "Quota"]
         );
     }
 
@@ -85,6 +89,6 @@ mod tests {
     #[test]
     fn each_pages_own_path_is_distinct() {
         let paths: Vec<&str> = ALL.iter().map(|p| p.path()).collect();
-        assert_eq!(paths, vec!["/", "/pool", "/committed"]);
+        assert_eq!(paths, vec!["/", "/pool", "/committed", "/quota"]);
     }
 }

@@ -74,8 +74,8 @@
     {
       "file": "crates/acceptance-tests/src/steps/mod.rs",
       "function": "dispatch",
-      "cyclomatic_complexity": 23,
-      "why": "Top-level step dispatcher; delegates to one step module per arm. 18 -> 19 for the new installable module's arm (#112), 19 -> 20 for the new disclosures module's arm (#119), 20 -> 21 for the new trip_progress module's arm (#122), 21 -> 22 for the new colour module's arm (#124/#128), 22 -> 23 for the new trip_controls module's arm (#120/#125): a new step, not new logic."
+      "cyclomatic_complexity": 24,
+      "why": "Top-level step dispatcher; delegates to one step module per arm. 18 -> 19 for the new installable module's arm (#112), 19 -> 20 for the new disclosures module's arm (#119), 20 -> 21 for the new trip_progress module's arm (#122), 21 -> 22 for the new colour module's arm (#124/#128), 22 -> 23 for the new trip_controls module's arm (#120/#125), 23 -> 24 for the new quota_screen module's arm (#93): a new step, not new logic."
     },
     {
       "file": "crates/acceptance-tests/src/steps/one_screen.rs",
@@ -88,6 +88,12 @@
       "function": "dispatch",
       "cyclomatic_complexity": 28,
       "why": "Gherkin step dispatcher; regex chain, one-line delegation per arm. 27 -> 28 (#94): then_does_not_mention moved to steps::mod as a shared helper taking `body` directly, and the tab-path lookup gained a \"committed\" arm. Both are new arms, not conditionals in the match."
+    },
+    {
+      "file": "crates/acceptance-tests/src/steps/quota_screen.rs",
+      "function": "dispatch",
+      "cyclomatic_complexity": 17,
+      "why": "Gherkin step dispatcher; regex chain, one-line delegation per arm. New module for features/quota_screen.feature (#93). Reviewed arm by arm: every branch is `if let Some(caps) = REGEX.captures(text) { return Some(handler(..).await) }`, `if let Some(caps) = REGEX.captures(text) { return Some(handler(..)) }`, or `if REGEX.is_match(text) { return Some(handler(..)) }` with no conditional of its own."
     },
     {
       "file": "crates/acceptance-tests/src/steps/triage.rs",

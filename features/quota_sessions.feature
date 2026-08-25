@@ -60,8 +60,9 @@
 #
 # --- WHAT IS NOT ASSERTED HERE -------------------------------------------
 # WHICH ROW IS EXPANDED, AND WHETHER ITS `Other` PANEL IS OPEN, ARE EXACTLY
-# THE STATE THAT MUST NOT BUY A COLUMN (`T-ephemeral-view-state-rides-the-
-# request`, `740d224`). `expanded=<tags>` on the pool is the worked example
+# THE STATE THAT MUST NOT BUY A COLUMN
+# (`T-ephemeral-view-state-rides-the-request`, `740d224`). `expanded=<tags>`
+# on the pool is the worked example
 # and `scripts/qa/trip_controls.cjs` step 10 is the pattern; both live in
 # `qa/quota_sessions.md`. A LOGGED SESSION IS THE OPPOSITE -- a durable
 # consequence of a deliberate act, and it earns its table.

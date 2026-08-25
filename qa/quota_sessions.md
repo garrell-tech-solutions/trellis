@@ -122,8 +122,8 @@ owner's Monday in two places rather than one.
 - Step 5 leaves **`No sessions yet this week. Log one above when you have done
   it.`** and the summary **`nothing logged`** — and **the quota itself is still
   there.** Deleting every session must not delete the quota.
-- **All three routes go through one front door** (`T-one-front-door-per-
-  capability`). This is a proxy and worth saying so: log 20 sessions and delete
+- **All three routes go through one front door**
+  (`T-one-front-door-per-capability`). This is a proxy and worth saying so: log 20 sessions and delete
   them one at a time, and confirm nothing degrades in a way that suggests a
   second write path or a per-row round trip that should have been one
   statement (`T-set-operations-execute-in-the-store`).
@@ -155,8 +155,8 @@ owner's Monday in two places rather than one.
 ## Procedure — the disclosures, in a browser
 
 **Which row is expanded, and whether its `Other…` panel is open, are exactly
-the state that must not buy a column** (`T-ephemeral-view-state-rides-the-
-request`). `expanded=<tags>` on the pool is the worked example and
+the state that must not buy a column**
+(`T-ephemeral-view-state-rides-the-request`). `expanded=<tags>` on the pool is the worked example and
 `scripts/qa/trip_controls.cjs` **step 10 is the pattern**; that check is
 CI-gated at `ci.yml:452` under a no-skip contract, and anything added here must
 be too.

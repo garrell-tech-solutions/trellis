@@ -50,8 +50,9 @@
 # nothing new invented), that the warning names the quota it clashed with,
 # and that a warned-about name goes through when the definition is repeated.
 # WHETHER THE WARNING ALSO APPEARS LIVE AS YOU TYPE IS THE BROWSER TIER'S,
-# and it is in `qa/quota_screen.md` -- `T-ephemeral-view-state-rides-the-
-# request` says to choose the tier from the nature of the state, and a
+# and it is in `qa/quota_screen.md` --
+# `T-ephemeral-view-state-rides-the-request` says to choose the tier from the
+# nature of the state, and a
 # warning you have not submitted yet is the definition of ephemeral. A
 # scenario here asserting it would push it into a request or a column, which
 # is #126's mistake with a new subject.

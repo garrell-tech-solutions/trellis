@@ -8,7 +8,7 @@
 # committed-screen-past-still-shows-03: a deadline that has passed is still listed, and marked
 # committed-screen-only-committed-04: pool and quota work does not appear
 # committed-screen-empty-05: with nothing dated the screen says that is allowed
-# committed-screen-tabs-06: the tab bar offers three tabs and marks the current one
+# committed-screen-tabs-06: the tab bar offers four tabs and marks the current one
 # committed-screen-triage-takes-at-or-by-07: committed triage asks at or by, on every transport
 # committed-screen-escapes-hostile-text-08: hostile text stays escaped on this screen
 #
@@ -52,7 +52,16 @@
 # THE GAP THIS EXPOSES, raised rather than resolved: NOTHING IN TRELLIS CAN
 # MARK A TASK DONE. So past items accumulate with no way to clear them, and
 # this screen is the first place that becomes visible daily. Not this slice's
-# to fix; worth an issue before the fortnight of dogfooding fills it.
+# to fix; worth an issue before the fortnight of dogfooding fills it.#
+# --- THE FOURTH TAB ARRIVES IN #93 (`quota_screen.feature`) ---------------
+# THIS SCENARIO ASSERTED THREE TABS AND NOW ASSERTS FOUR, with a fourth
+# example row for the Quota screen itself. `nav.rs:21` has carried
+# `ALL: [Page; 3]` and the comment "A DEAD LINK IS WORSE THAN NO LINK" since
+# #92, naming only what `platform::app` can actually route to -- so the tab
+# could not arrive before the route did, and it arrives with it. This is the
+# ONE existing scenario #93 changes; if any other needed editing, the change
+# leaked.
+
 Feature: The committed screen lists what has a date on it
 
   Background:
@@ -123,17 +132,18 @@ Feature: The committed screen lists what has a date on it
       | message                                       | meta          |
       | Nothing with a time on it. That is allowed.   | nothing dated |
 
-  # committed-screen-tabs-06: the tab bar offers three tabs and marks the current one
-  Scenario: The tab bar offers three tabs and marks the current one
+  # committed-screen-tabs-06: the tab bar offers four tabs and marks the current one
+  Scenario: The tab bar offers four tabs and marks the current one
     When the "<screen>" screen is viewed
     Then the tab bar offers exactly "<tabs>"
     And the tab bar marks "<current>" as the current tab
 
     Examples:
-      | screen    | tabs                      | current   |
-      | capture   | Capture, Pool, Committed  | Capture   |
-      | pool      | Capture, Pool, Committed  | Pool      |
-      | committed | Capture, Pool, Committed  | Committed |
+      | screen    | tabs                            | current   |
+      | capture   | Capture, Pool, Committed, Quota | Capture   |
+      | pool      | Capture, Pool, Committed, Quota | Pool      |
+      | committed | Capture, Pool, Committed, Quota | Committed |
+      | quota     | Capture, Pool, Committed, Quota | Quota     |
 
   # committed-screen-triage-takes-at-or-by-07: committed triage asks at or by, on every transport
   Scenario: Committed triage asks at or by, on every transport

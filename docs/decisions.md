@@ -147,6 +147,7 @@ O4 → #40 · O5 → #41 · O6 → #36. Issue #1 is titled `OQ2`; same question.
 | D-recurrence-is-re-commitment | **A recurring commitment is not a rule the system runs; it is a decision the owner makes again each period.** Cadence comes from quota's `period` (`week \| month`), placement from a **pin**, and survival from **re-committing at the weekly review** — prompted at each task's own period boundary, not on the review's weekly rhythm. **A skipped review changes nothing**: the commitment stays on the schedule. It ends the first time the owner *attends* a review and does not re-commit. | Resolves #72, raised by the owner on 2026-08-18 after using the product — *"I want to learn with a friend every Tuesday at 20:00–20:30"* — and finding no way to say it. Nothing fitted: a guardrail is life-area level, **committed** means a deadline the scheduler places around, **quota** is cadence without a clock, and a **pin** is one interval, so a weekly commitment would be 52 of them. **The owner's answer beat all four options this role offered**, and it is `D-inaction-archives` one domain over: a recurrence *rule* is exactly the thing where inaction preserves — set once, generating forever, outliving the friendship — which is the phantom-obligation failure this product exists to invert. Re-commitment makes the recurrence survive only by a deliberate act. **It also closes `T-pins-in-constraints`' "pins have no defined death"** for this class: a recurring pin dies at the period boundary unless renewed. **The skipped-review case was the one real objection and it dissolved on reading `D-skipped-review-ages`**, which already says a skipped review *"ages everything one more week. No deeper sweep."* Nothing dies from a skipped review today, so a recurring commitment dying would be the anomaly. The two archive rules coexist cleanly once stated: **skipping the review kills nothing; attending it and staying silent kills the item** (U7). The deliberate act is attendance. **Composition, not new primitives:** `T-period-closed-set` already closed `period` to `week \| month`, so *"the beginning of each month"* needs no new vocabulary — the review preceding a month boundary asks, and the owner places the pin. A recurrence rule would have had to invent a second period vocabulary beside the one quota has. **Rejected: the calendar owns it** — put the standing event in Google Calendar and let `busy` keep the scheduler off it (`T-gcal-is-render-target`). Free time and capacity *supply* stay correct, but the half-hour counts as neither Learning demand nor Learning done, so M8's reckoning cannot see it and `D-quota-no-rollover`'s *"1 of 3 sessions"* can never include it — `T-capacity-two-axes`' concern one layer over: not wrong about the clock, wrong about the work. **Rejected also:** a recurrence rule on `pin` (makes a Constraints-layer interval into a generator), a fourth task kind (reopens `T-three-task-kinds` for something that composes from three), and recurring task instances (most machinery, and it is what every calendar app does rather than what this product is for). **Accepted cost:** skip reviews for two months and eight Tuesdays stay blocked by a commitment that may have lapsed in life. It is on the calendar every week and one review clears it, so it is not the *invisible* constraint `T-pins-in-constraints` warns about. **What M3 must build is unchanged** — `pin { task_id, start, end, source }`, one interval. The recurrence lives in the review (M8). |
 | D-placed-whole-or-not-at-all | **A task is scheduled entirely or not at all. There is no partial placement.** A 6h task with 4h available before its deadline is not scheduled; it appears in the infeasibility report with a reason, and the owner moves the deadline, cuts scope, or frees the time. | Settled by the owner 2026-08-18, as the first of the three decisions the M3 invariants turned out to contain. **The alternative — book the 4h and report 2h unplaced — is genuinely more useful in the moment and was rejected on two grounds.** First, this product's instinct is to surface a conflict rather than cope quietly with it: `D-guardrails-never-yield` says a P1 against full hours *"raises a conflict; it does not breach the wall"*, and the infeasibility report exists precisely to say *this did not fit, and here is why*. A half-booked task converts a decision the owner must make into four hours of work that feels like progress. Second, the cost is structural: **"partly placed" is a third state that the calendar, the menu (M3.5), the reality-flex loop (M6), the weekly review and the capacity view would each have to represent**, and a partly-scheduled task on the calendar looks like a plan when it is not — which is `D-no-pool-on-calendar`'s *"the calendar's entire value is that everything on it is true"* under a different disguise. **This is what makes invariant 3 well-defined**: conservation under splitting can say a placed task's chunks sum *exactly* to its estimate only because there is no case where they sum to less. |
 | D-manual-triage-until-llm | **Nothing classifies a capture until the LLM lands at M9. Triage is fully manual until then, and the life-area picker offers no preselection — the human chooses, every time.** The keyword implementation `T-classifier-covers-domain` scheduled for M1 is **cancelled, not deferred**: M9 builds the trait once, against a real implementation. | Settled by the owner 2026-08-17, reversing the M1 half of `T-classifier-covers-domain`. **The argument is `D-inaction-archives` relocated to triage: a wrong pre-fill is accepted silently, a blank field is filled deliberately.** A keyword classifier guessing Home for "call dentist" produces a task filed in Home, because the default is what happens — in a product whose entire value is that the user trusts what it shows. That cost is paid on every capture, while the benefit, at keyword accuracy over natural language, is not reliably positive. **It dissolves rather than contradicts `T-classifier-covers-domain`'s central argument**, which was that growing the trait's output shape at M1 beats retrofitting it after M9 depends on it: with no trait at M1 there is nothing to retrofit *into*, and designing an interface against a strawman implementation risks shaping it around what keyword matching happens to afford. M9 designs it holding the real implementation, which is strictly better information. **What survives from `T-classifier-covers-domain` and moves wholesale to M9:** one trait, output covering `kind`/`deadline`/`priority`/`domain`/`title` with per-field confidence, invoked from a background worker between capture and triage, OpenRouter behind a hand-rolled client. **What changes at M9:** its criterion "API failure or timeout falls back to the keyword implementation" has nothing to fall back to, and becomes *falls back to empty fields and manual triage* — a degraded mode that is exactly the shipped product rather than a second classifier nobody validated. That deletes M9's "classifier trait + keyword impl refactor" story outright, so this makes **M9 smaller as well as M1**. **Cost, accepted and named:** `#20`'s R2 calls the committed:pool ratio "the highest-leverage counter in the product" and names the remedy for a bad one as *"triage defaults and classifier bias"*. Until M9 only the first half of that remedy exists. ~~`/stats` still counts and the >50% alarm still fires (`#45`), so the experiment narrows rather than stops.~~ **False as of 2026-08-23:** #88 deleted `/stats` and `scheduler_core::ratio` with no replacement counter, so the experiment **stopped** rather than narrowed. Whether R2's counter returns before the dogfooding window opens is open and belongs to #20. **Consequence for the picker, which is the whole point:** a default that is merely first-by-id is the same silent-wrong-default one layer down, so the life-area select carries no preselection and a submission naming none is rejected like any other missing required field. |
+| D-a-trip-survives-being-tidied | **A *run* at a tag begins when something lands there with nothing else waiting, and ends when the last thing waiting there is cleared away. A run of three or more is a trip, and it stays one for as long as the run lasts.** **The panel leaves on a tap, never on a tick** (owner, 2026-08-25): tick the last open item in a trip and it holds, reading *2 of 2 done*, until `✕ Clear done` is tapped. **A tag must re-earn its trip** — three cleared last month plus one captured today is not a trip. The bound is **an event, not a time window**. Completes `D-a-trip-survives-being-worked`, whose word *displayed* failed: clearing is precisely what stops something being displayed. | Settled inside `trip-persistence` (#129, PR #141), the third and last slice on this panel. **The threshold asks *"is this worth a special trip?"* once, when the group forms**; re-asking it mid-shop is the category error #122 was written to fix, and clearing was the one remaining door it came through. **The tap-not-tick rule is a deviation from the brief's own demo, made deliberately, and the third of its three reasons is the one that decides it.** `trip-progress-fully-done-06` already holds a fully-struck trip at *three* items, so going at two and staying at three would let **the item count decide whether finishing a trip wipes it**. **You can uncheck what you can see** — a panel that vanishes on the last tick takes its own undo with it, which is the group-completion undo gap #135 left, reappearing one slice later. And **nothing clears itself**: the alternative that ends a run on the last tick without sweeping leaves the strikes uncleared and invisible, so the next capture at that tag **resurrects the old panel over month-old strikes** — precisely the runaway #129 was filed against. **No column, and the attempt was the brief's instruction.** The run is derived from `cleared_at` and `tasks.id`, both already stored; the boundary is the last clear that left nothing behind it. `T-ephemeral-view-state-rides-the-request` would have **permitted** a column here — a trip that dissolves while the phone is locked in the car park is this defect one gesture further out, so it fails the *should-a-reload-forget-it* test — which makes this the useful precedent: **the test says when storage is legitimate, not when it is mandatory.** Deriving first cost one slice's thought and saved a permanent migration (`T-migrations-append-only`). **The rule moved into the store, and the engineering standard's answer is in the pull request rather than after it:** which clear ended a run runs in a correlated subquery where `cargo-mutants` cannot reach, and what still proves it is `store.rs`'s run tests going through `clear_done` rather than writing `cleared_at` by hand, plus six properties over `pool::group` — including **monotonicity, that a larger run never costs a tag its panel**. `RunSizes` carries the answer across the boundary as a specification value object keyed by tag; an earlier draft hung the count on `PoolTask` and let `list.first()` speak for a whole tag, which the architect replaced so that **disagreement is not representable**. | 
 
 ## Settled — technical
 
@@ -2344,3 +2345,112 @@ proved, **none breaks the hook** — so the `survives-being-worked` assertion ha
 never been seen red. `T-a-check-must-be-seen-to-fail` is unsatisfied for exactly
 one assertion, and the historically real breakage (`document.body`) is the one to
 revert and observe. **The fix is a revert-and-watch, not a new check.**
+
+### 2026-08-25 — A quota is an entity, and #93 becomes two slices
+
+**The finding that reshaped the slice:** `TaskKind::Quota { target_count,
+target_minutes_each, period }` makes a quota **a triaged capture**. Everything
+settled about quotas since describes something else. `D-quotas-are-selected-not-typed`
+has a quota **created from the Menu without a capture**, **chosen from chips** at
+triage, carrying **a name and a weekly hour target**, and **holding items filed
+into it**. **None of those are properties a task kind can have.**
+
+**So a quota is a first-class entity, and #93's own framing —** *"that is a
+migration and a triage change"* — **understates it by a whole table.** The
+decision was settled on 2026-08-20; the schema it contradicts is migration
+`0002`, from M1. **Nobody had read the two against each other for five days**,
+which is the same failure mode as `T-collation-enforces-name-identity`: a
+description and the thing described both reading as current.
+
+**The cut, chosen by the owner.** Slice 1 (**#93**) is the entity, the fourth
+tab, `+ Define a new quota` and **the whole logging loop**. Slice 2 (**#138**) is
+filing, `Filed here`, and retiring the task kind — **which is where `period`'s
+fate gets decided**, since the canvas draws only *hours a week* and
+`D-quota-no-rollover`'s Monday reset leaves `month` no evident meaning.
+
+**A three-way cut was offered and rejected** — entity, then logging, then filing.
+The owner took the larger first slice knowingly. **The recorded reason to prefer
+it:** a quota screen whose bar always reads zero is a demo nobody can judge, and
+*define → log → correct* is the loop the screen exists for. **The recorded risk:**
+it is the largest slice this pipeline has been handed. The brief names a
+designated stopping line — entity and define land, session surface does not — so
+that overrunning produces a coherent half rather than a half-built one.
+
+**Two quota concepts coexist between the slices, deliberately.** Slice 1 leaves
+`TaskKind::Quota` and the existing triage form untouched. **That is a knowingly
+accepted transitional state**, not an oversight, and #138 closes it.
+
+**Read the canvas, do not grep it — the third instance.** `T-trips-are-derived-not-ranked`
+records the PM dissenting twice on the Pool from a grepped reading. This brief
+found three more: the quick-log controls are **outside** the expanded row, so
+logging never requires expanding; `Filed here` and `This week` share **one** row
+template with the former gated; and **the canvas draws reorder controls on quota
+rows** (`q.onUp` / `q.onDown`, lines 259-262) that **no decision covers**.
+
+**The reorder question is deferred to #139 rather than answered here**, and the
+reason is worth keeping: `T-trips-are-derived-not-ranked` forbids ranking a trip
+because *"a trip is a unit you clear in one stop"*, while #95 grants loose ends a
+control because *"a loose end is a thing you decide about."* **A quota looks like
+the second — but `D-quota-no-rollover` gives it a readout and a bar that may
+already say everything a ranking would.** It is durable state, so it would earn a
+column under `T-ephemeral-view-state-rides-the-request` — **which is exactly why
+it should be wanted from use before it is built.**
+
+### 2026-08-25 — trip-persistence (#129, PR #141): a run, and the test that permits rather than compels
+
+**`D-a-trip-survives-being-tidied` closes the panel this project spent three
+slices on.** #122 made a trip survive being *worked*; #135 gave it controls;
+this makes it survive being *tidied*. **All three were the same defect wearing a
+different gesture**, and each was found by the owner within an hour of using the
+one before.
+
+**The bound #129 asked for turned out to be an event, not a window.** *"When does
+trip-ness expire?"* looked open-ended — the issue feared *"over a year every
+frequently-used tag becomes a permanent panel"* — and the answer was already half
+written down. `trip-progress-fully-done-06` asserts a tag with nothing open left
+leaves the screen; a run therefore **ends on its own**, and a tag must reach three
+again to earn another. **The brief found that pair by reading the feature file
+rather than the issue**, and it turned "design the expiry rule" into "name the
+one already implemented on the other side."
+
+**The precedent worth keeping is about `T-ephemeral-view-state-rides-the-request`,
+not about trips.** That row was written eight days after `shown_kind` bought a
+column for a display preference, and the obvious misreading of it is *"do not
+store things."* **This slice is the counter-example: a column here would have
+been legitimate** — a trip that dissolves while the phone is locked in the car
+park fails the *should-a-reload-forget-it* test outright. **The test tells you
+when storage is permitted. It never tells you it is required.** The brief asked
+for a derivation to be attempted first; it worked; and the difference between
+"permitted" and "taken" is one slice's thought against a permanent migration.
+
+**A deviation from the brief, made in the open, and the pipeline was right.**
+The demo said the panel goes when the last open item is ticked. It goes one tap
+later, on `✕`. **Three reasons, and the third is the one that matters**: ending a
+run on a tick without sweeping leaves the strikes uncleared and invisible, so the
+next capture at that tag resurrects a panel over month-old strikes — **the exact
+runaway #129 was filed to prevent, re-entering through the fix for it.** A brief
+is not a specification, and a pipeline that had implemented the demo literally
+would have shipped the bug the slice was for.
+
+**The second reason is a debt from #135 surfacing on schedule.** *You can uncheck
+what you can see* — a panel that vanishes on the last tick takes its own undo
+with it. #135 left group completion with no single-gesture undo and this brief
+flagged the edge; it came back one slice later as an argument about a different
+control. **Debts in this product do not sit still; they change shape.**
+
+**What still proves a rule that moved into the store, stated before the query was
+written** — the company standard's requirement, met in the pull-request body
+rather than after the fact. `store.rs`'s run tests go through `clear_done` rather
+than writing `cleared_at` by hand, and six properties pin the half of the rule
+that stayed in the core, **monotonicity among them: a larger run never costs a
+tag its panel.** The architect's replacement of a per-task count with `RunSizes`
+is the same instinct one level up — **a run size is a fact about a tag, and the
+type now says so, so disagreement is not representable.**
+
+**One process note, recorded because it cost the owner a CI cycle.** The slice
+cited `D-a-trip-survives-being-tidied` in three source comments before the row
+existed, so `decision citations resolve` went red on the branch and the row had
+to land on `trunk` afterwards. **`trunk` is `strict`**, so the branch then needs
+updating before it can merge. **The citation gate and the PM's ownership of this
+file pull against each other**, and the cheap fix is for a slice that knows it
+will need a row to say so in its *first* handoff rather than its last.

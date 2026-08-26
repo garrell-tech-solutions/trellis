@@ -4,25 +4,28 @@
 
 > **This is not a new slice. It is the rest of `quota-screen`.**
 >
-> **Branch from `origin/slice/quota-screen`, not from `origin/trunk`.** PR #144 is open, blocked, and this work turns it green. Push to that branch and the same pull request completes.
+> **`trunk` is red and this slice is what fixes it.** PR #144 merged at `bf8c7f9` carrying its deliberately-deferred `quota_sessions.feature` with it. Cut from `origin/trunk` as normal and open a new pull request.
 
 ---
 
-## Why the branch, and it is the whole shape of this handoff
+## Why this is urgent, and it is the whole shape of this handoff
 
-`quota-screen` stopped at the line the brief drew, and stopped honestly. **The cost of stopping there was three things nobody predicted individually:**
+`quota-screen` stopped at the line the brief drew, and stopped honestly. **Then it was merged red**, and the cost is larger than the one red check anybody was looking at. As of `bf8c7f9`:
 
-1. **PR #144 cannot merge.** `acceptance suite + analyzers` is red on `quota_sessions_acceptance`.
-2. **The language-mutation run is gone.** `run.sh` globs `features/*.feature`, so the deferred spec generates an entrypoint and runs red, and `cargo-mutants` aborts on a failed baseline rather than degrading.
-3. **The owner could not preview it** (**#146**). `ops/preview.sh` selects on run-level `--status success`; the run failed, so the poller bailed and the phone never showed the fourth tab — **even though the binary built fine and is sitting in that failed run.**
+1. **`trunk` is failing.** `acceptance suite + analyzers` is red on `quota_sessions_acceptance`. **Every slice from here cuts from a red base**, and "did I break it?" stops having a cheap answer.
+2. **No release was published.** The `publish the trunk release` job **skipped**, because the run failed. `T-releases-are-identified-by-build` says every push to `trunk` publishes a release tagged `v<commit date>.<run number>` — **that silently did not happen.**
+3. **The live instance cannot move to this commit.** `ops/update.sh` installs from GitHub releases, and there is no release for `bf8c7f9`. **The owner's real Trellis cannot be updated to the version containing the fourth screen.**
+4. **`migrations are append-only` never ran** — it is marked *skipped* on that run, so migration `0014` merged without that gate reporting.
+5. **The language-mutation run is gone**, `trunk`-wide now rather than on one branch: `run.sh` globs `features/*.feature`, so the deferred spec generates an entrypoint and runs red, and `cargo-mutants` aborts on a failed baseline rather than degrading.
+6. **The owner could not preview it** (**#146**) — `ops/preview.sh` selects on run-level `--status success`, so the phone never showed the fourth tab even though the musl binary built fine and is sitting inside that failed run.
 
-**Finishing on the same branch fixes all three at once and produces one green, complete, previewable pull request.** Merging #144 red would put a failing suite on `trunk`, which is the worst option available and is not on the table.
+**Every one of those clears the moment `quota_sessions.feature` goes green.** That is what this slice is for, and it is why it goes out ahead of everything else queued.
 
 ## Demo
 
-**On the phone.** #144 is already labelled `preview`; once the suite is green the poller will pick it up on its own.
+**On the phone.** Label the pull request `preview`; the poller will pick it up once the suite is green — and **#146 means it will not pick it up before then**, so a red intermediate state is invisible rather than merely untidy.
 
-1. **Tap the fourth tab.** Define `Piano`, 4 hours a week — that part already works.
+1. **Tap the fourth tab.** Define `Piano`, 4 hours a week — that part is already on `trunk`.
 2. **Tap `+1h`.** The bar moves. The readout says one hour against four.
 3. **Tap `+30m`.** Now an hour and a half.
 4. **Use `Other`** to log the 20 minutes you did on Monday. **The day picker offers Monday and today, and nothing later.**
@@ -32,7 +35,7 @@
 
 ## The specification already exists — implement it, do not re-specify it
 
-`features/quota_sessions.feature` is on the branch, **nine scenarios, fully reasoned in a header worth reading twice.** It is red only because nothing implements it.
+`features/quota_sessions.feature` is **already on `trunk`**, nine scenarios, fully reasoned in a header worth reading twice. **It is red only because nothing implements it** — the spec is not the thing to change.
 
 **Four things in that header that are decisions, not suggestions:**
 
@@ -76,7 +79,8 @@ Use `settings::current_timezone` + `scheduler_core::timezone::resolve`, the path
 3. **The language-mutation run returns the moment the suite is green.** It has been unavailable for a whole slice — expect it to have something to say.
 4. **`quota::check_name` runs in memory** (`store::existing_names` has no `WHERE`) — a known, tracked exception in the Gaps index. **Not yours.** It needs the quota identity ruling that belongs with #138.
 5. **DRY was 2.05% at #144** against a 3% product-code threshold. A second step module for the same screen is the thing most likely to cross it — **extract a shared family early rather than at the end.**
-6. Base is **`origin/slice/quota-screen`**. Scratch in `./tmp/`. **The pull request already exists (#144) and is already labelled `preview`** — push to the branch; do not open a second one.
+6. Base is **`origin/trunk`**, which is red on exactly this one feature and green everywhere else — **confirm that before you start**, so a second failure is not mistaken for the known one. Scratch in `./tmp/`. **Open a new pull request and label it `preview`.**
+7. **Do not make the suite green by weakening, deleting or parking `quota_sessions.feature`.** The only acceptable green here is nine scenarios passing against a real implementation.
 
 ## Out of scope
 
@@ -84,10 +88,11 @@ Use `settings::current_timezone` + `scheduler_core::timezone::resolve`, the path
 
 ## Source
 
-- `features/quota_sessions.feature` (on `slice/quota-screen`) — **the specification. Its header is the brief for the hard parts.**
+- `features/quota_sessions.feature` (now on `trunk`) — **the specification. Its header is the brief for the hard parts.**
 - `qa/quota_sessions.md` — the QA document already written alongside it
 - `crates/acceptance-tests/src/steps/triage.rs:10` — the clock step that cannot resolve `<now>`
 - `crates/trellis-server/src/quota/` and `crates/scheduler-core/src/quota.rs` — the entity to build on
 - `crates/trellis-server/src/committed/body.rs:30-32` — how a screen resolves the owner's timezone
 - `docs/decisions.md` — `D-logging-is-retrospective-and-separate`, `D-quota-no-rollover`, `D-quotas-are-selected-not-typed`, `T-timezone-is-a-setting`, `T-set-operations-execute-in-the-store`, `T-ephemeral-view-state-rides-the-request`, `D-a-trip-survives-being-tidied`
-- **#146** — why the owner could not see the fourth tab, and why finishing on this branch is what fixes it
+- **#146** — why the owner could not see the fourth tab, and why a red intermediate state stays invisible
+- PR **#144** / merge `bf8c7f9` — the half already shipped, and the red it carried onto `trunk`

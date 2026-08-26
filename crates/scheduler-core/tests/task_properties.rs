@@ -22,29 +22,19 @@ fn any_fields() -> impl Strategy<Value = TriageFields> {
         proptest::option::of(".{0,40}"),
         proptest::option::of(".{0,40}"),
         proptest::option::of(any::<i64>()),
-        proptest::option::of(any::<i64>()),
-        proptest::option::of(any::<i64>()),
+        proptest::option::of(".{0,40}"),
         proptest::option::of(".{0,40}"),
     )
         .prop_map(
-            |(
-                deadline,
-                commitment,
-                priority,
-                estimated_minutes,
-                target_count,
-                target_minutes_each,
-                period,
-            )| {
+            |(deadline, commitment, priority, estimated_minutes, quota_name, quota_hours)| {
                 TriageFields {
                     kind: None,
                     deadline,
                     commitment,
                     priority,
                     estimated_minutes,
-                    target_count,
-                    target_minutes_each,
-                    period,
+                    quota_name,
+                    quota_hours,
                     ..TriageFields::default()
                 }
             },
@@ -64,18 +54,11 @@ fn has_deadline(attributes: &TaskAttributes) -> bool {
         || attributes.priority.is_some()
 }
 
-fn has_quota_target(attributes: &TaskAttributes) -> bool {
-    attributes.target_count.is_some()
-        || attributes.target_minutes_each.is_some()
-        || attributes.period.is_some()
-}
-
 /// The closed domains, restated here on purpose. The core parses these
 /// strings but does not enumerate them, so writing the membership out is what
 /// lets a property check the domain from outside rather than against itself.
 const COMMITMENTS: [&str; 2] = ["at", "by"];
 const PRIORITIES: [&str; 4] = ["P1", "P2", "P3", "P4"];
-const PERIODS: [&str; 2] = ["week", "month"];
 
 const VALID_DEADLINE: &str = "2026-08-20T17:00:00Z";
 
@@ -95,7 +78,7 @@ struct RequiredField {
     set: fn(&mut TriageFields, Option<String>),
 }
 
-const REQUIRED_STRING_FIELDS: [RequiredField; 4] = [
+const REQUIRED_STRING_FIELDS: [RequiredField; 3] = [
     RequiredField {
         field: Field::Deadline,
         domain: None,
@@ -113,12 +96,6 @@ const REQUIRED_STRING_FIELDS: [RequiredField; 4] = [
         domain: Some(&PRIORITIES),
         base: valid_committed,
         set: |fields, value| fields.priority = value,
-    },
-    RequiredField {
-        field: Field::Period,
-        domain: Some(&PERIODS),
-        base: valid_quota,
-        set: |fields, value| fields.period = value,
     },
 ];
 
@@ -152,9 +129,8 @@ fn valid_committed() -> TriageFields {
 fn valid_quota() -> TriageFields {
     TriageFields {
         kind: Some(QUOTA.to_string()),
-        target_count: Some(3),
-        target_minutes_each: Some(45),
-        period: Some("week".to_string()),
+        quota_name: Some("Piano".to_string()),
+        quota_hours: Some("4".to_string()),
         ..TriageFields::default()
     }
 }
@@ -177,22 +153,21 @@ proptest! {
     /// A pool task carries nothing, however much the caller sent.
     #[test]
     #[ignore]
-    fn a_pool_task_never_carries_a_deadline_or_a_quota_target(fields in any_fields()) {
+    fn a_pool_task_never_carries_a_deadline(fields in any_fields()) {
         let kind = TaskKind::from_fields(&with_kind(fields, POOL)).unwrap();
         let attributes = kind.attributes();
 
         prop_assert_eq!(attributes.kind, POOL);
         prop_assert!(!has_deadline(&attributes));
-        prop_assert!(!has_quota_target(&attributes));
     }
 
-    /// A committed task reports back exactly the metadata it was given, and
-    /// never a quota target. `commitment`/`priority` are drawn from their
-    /// closed domains (validity itself is the unit tests' job); the deadline
-    /// is reported as the instant it names, not the text that named it.
+    /// A committed task reports back exactly the metadata it was given.
+    /// `commitment`/`priority` are drawn from their closed domains (validity
+    /// itself is the unit tests' job); the deadline is reported as the
+    /// instant it names, not the text that named it.
     #[test]
     #[ignore]
-    fn a_committed_task_round_trips_its_metadata_and_carries_no_quota_target(
+    fn a_committed_task_round_trips_its_metadata(
         fields in any_fields(),
         deadline in valid_deadline(),
         commitment in prop::sample::select(vec!["at", "by"]),
@@ -214,26 +189,20 @@ proptest! {
         prop_assert_eq!(attributes.deadline, Some(deadline_ms));
         prop_assert_eq!(attributes.commitment, Some(commitment));
         prop_assert_eq!(attributes.priority, Some(priority));
-        prop_assert!(!has_quota_target(&attributes));
     }
 
-    /// A quota task reports back exactly the target it was given, and never a
-    /// deadline. T-quota-targets-required requires all three target fields at
-    /// triage, so unlike the pool case this generates only valid, complete
-    /// targets — and a target must be positive (folded in from the PR #31
-    /// review), so the generator only draws positive counts.
+    /// A quota task carries no deadline, whatever name and target it was
+    /// given -- #138: its name and weekly target are not a `tasks` column
+    /// at all, so `attributes()` reports nothing more than a pool task does.
     #[test]
     #[ignore]
-    fn a_quota_task_round_trips_its_target_and_carries_no_deadline(
+    fn a_quota_task_carries_no_deadline(
         fields in any_fields(),
-        target_count in 1i64..=1_000_000,
-        target_minutes_each in 1i64..=1_000_000,
-        period in prop::sample::select(vec!["week", "month"]),
+        hours in 1i64..=1000,
     ) {
         let fields = TriageFields {
-            target_count: Some(target_count),
-            target_minutes_each: Some(target_minutes_each),
-            period: Some(period.to_string()),
+            quota_name: Some("Piano".to_string()),
+            quota_hours: Some(hours.to_string()),
             ..with_kind(fields, QUOTA)
         };
 
@@ -241,19 +210,16 @@ proptest! {
         let attributes = kind.attributes();
 
         prop_assert_eq!(attributes.kind, QUOTA);
-        prop_assert_eq!(attributes.target_count, Some(target_count));
-        prop_assert_eq!(attributes.target_minutes_each, Some(target_minutes_each));
-        prop_assert_eq!(attributes.period, Some(period));
         prop_assert!(!has_deadline(&attributes));
     }
 
-    /// Whichever kind is accepted, at most one attribute group is populated.
-    /// This is the invariant the three-variant sum type exists to guarantee.
-    /// Every field required by any kind is supplied and valid, so the
-    /// outcome turns only on which `kind` was named.
+    /// Whichever kind is accepted, only a committed task ever carries a
+    /// deadline -- pool and quota never do. Every field required by any
+    /// kind is supplied and valid, so the outcome turns only on which
+    /// `kind` was named.
     #[test]
     #[ignore]
-    fn an_accepted_task_never_populates_both_attribute_groups(
+    fn only_a_committed_task_ever_carries_a_deadline(
         fields in any_fields(),
         kind_index in 0usize..3,
     ) {
@@ -263,9 +229,8 @@ proptest! {
             commitment: Some("at".to_string()),
             priority: Some("P1".to_string()),
             estimated_minutes: Some(180),
-            target_count: Some(3),
-            target_minutes_each: Some(45),
-            period: Some("week".to_string()),
+            quota_name: Some("Piano".to_string()),
+            quota_hours: Some("4".to_string()),
             ..with_kind(fields, name)
         };
 
@@ -273,7 +238,7 @@ proptest! {
         let attributes = kind.attributes();
 
         prop_assert_eq!(attributes.kind, name);
-        prop_assert!(!(has_deadline(&attributes) && has_quota_target(&attributes)));
+        prop_assert_eq!(has_deadline(&attributes), name == COMMITTED);
     }
 
     /// A committed submission is rejected naming the first required field it
@@ -341,29 +306,18 @@ proptest! {
         fields in any_fields(),
         commitment in prop::sample::select(&COMMITMENTS[..]),
         priority in prop::sample::select(&PRIORITIES[..]),
-        period in prop::sample::select(&PERIODS[..]),
     ) {
         let committed = TaskKind::from_fields(&TriageFields {
             deadline: Some(VALID_DEADLINE.to_string()),
             commitment: Some(commitment.to_string()),
             priority: Some(priority.to_string()),
             estimated_minutes: Some(180),
-            ..with_kind(fields.clone(), COMMITTED)
+            ..with_kind(fields, COMMITTED)
         })
         .unwrap()
         .attributes();
         prop_assert_eq!(committed.commitment, Some(commitment));
         prop_assert_eq!(committed.priority, Some(priority));
-
-        let quota = TaskKind::from_fields(&TriageFields {
-            target_count: Some(3),
-            target_minutes_each: Some(45),
-            period: Some(period.to_string()),
-            ..with_kind(fields, QUOTA)
-        })
-        .unwrap()
-        .attributes();
-        prop_assert_eq!(quota.period, Some(period));
     }
 
     /// A present value outside its domain is rejected as invalid — naming
@@ -383,27 +337,19 @@ proptest! {
         );
     }
 
-    /// A non-positive quota target is rejected as invalid, whichever of the
-    /// two count fields carries it — the reckoning's `count(done)/target`
-    /// has no meaning at zero or below (folded in from the PR #31 review).
+    /// A non-positive quota target is rejected as invalid, whichever field
+    /// carries it (folded in from the PR #31 review, restated for #138's
+    /// name/hours shape): the reckoning's `logged/target` has no meaning at
+    /// zero or below.
     #[test]
     #[ignore]
-    fn a_non_positive_quota_target_is_rejected_as_invalid(
-        bad_value in i64::MIN..=0,
-        vary_target_count in any::<bool>(),
-    ) {
+    fn a_non_positive_quota_target_is_rejected_as_invalid(bad_hours in -1000i64..=0) {
         let mut fields = valid_quota();
-        let expected_field = if vary_target_count {
-            fields.target_count = Some(bad_value);
-            Field::TargetCount
-        } else {
-            fields.target_minutes_each = Some(bad_value);
-            Field::TargetMinutesEach
-        };
+        fields.quota_hours = Some(bad_hours.to_string());
 
         prop_assert_eq!(
             TaskKind::from_fields(&fields),
-            Err(TriageRejection::InvalidField(expected_field))
+            Err(TriageRejection::InvalidField(Field::Hours))
         );
     }
 

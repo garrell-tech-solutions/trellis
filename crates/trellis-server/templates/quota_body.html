@@ -6,7 +6,8 @@
 
 {% if empty %}
 <div class="quota-empty">
-<p>A quota is a weekly hour target you keep — practice, study, running. Define one below.</p>
+<p>A quota is a weekly hour target you keep — practice, study, running. Capture one and triage it.</p>
+<a href="/" class="quota-go-capture">Go to Capture &rarr;</a>
 </div>
 {% endif %}
 
@@ -76,16 +77,4 @@
 </div>
 {% endfor %}
 </div>
-
-<form class="quota-define-form" hx-post="/quota" hx-target="#quota-body" hx-swap="outerHTML">
-<label>Name <input type="text" name="name" value="{{ pending_name }}"></label>
-<label>Hours a week — both are required <input type="number" name="hours" step="0.5" min="0.5" value="{{ pending_hours }}"></label>
-{% if let Some(warning) = warning %}
-<p class="quota-warning">{{ warning }}</p>
-{% endif %}
-{% if let Some(confirm_name) = confirm_name %}
-<input type="hidden" name="confirmed" value="{{ confirm_name }}">
-{% endif %}
-<button type="submit" class="quota-define-submit">{{ button_label }}</button>
-</form>
 </div>

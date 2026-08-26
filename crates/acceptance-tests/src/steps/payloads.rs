@@ -39,12 +39,20 @@ pub fn committed() -> Value {
     })
 }
 
+/// A quota name every canonical fixture uses (#138: triaging as quota is
+/// what creates it).
+pub const VALID_QUOTA_NAME: &str = "Piano";
+
+/// A weekly hour target inside the domain -- a positive number of hours,
+/// as free text (`scheduler_core::quota::QuotaDefinition::from_fields`
+/// reads it the same way the retired quota-screen define form did).
+pub const VALID_QUOTA_HOURS: &str = "4";
+
 pub fn quota() -> Value {
     json!({
         "kind": "quota",
-        "target_count": 3,
-        "target_minutes_each": 45,
-        "period": "week",
+        "name": VALID_QUOTA_NAME,
+        "hours": VALID_QUOTA_HOURS,
         "life_area": VALID_LIFE_AREA,
     })
 }

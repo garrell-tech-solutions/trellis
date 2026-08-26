@@ -66,7 +66,15 @@ fn quota_row(stored: StoredQuotaRow) -> Result<QuotaRow, sqlx::Error> {
 /// Every existing quota's own spelling and target, for
 /// `scheduler_core::quota::check_name` to compare a candidate name against
 /// before writing it.
-pub async fn existing_names(pool: &SqlitePool) -> Result<Vec<(String, i64)>, sqlx::Error> {
+///
+/// Reachable only from this capability: the question "where does this name
+/// stand?" leaves through [`super::name_standing`], which is the whole of
+/// what any other capability may ask (`T-one-front-door-per-capability`,
+/// and the company standard's *opaque retrieval* -- how the comparison is
+/// reached is nobody else's business). That visibility is also what keeps
+/// the Gaps entry under this one function: the day the exact tier moves
+/// into the query, no caller changes.
+pub(super) async fn existing_names(pool: &SqlitePool) -> Result<Vec<(String, i64)>, sqlx::Error> {
     sqlx::query_as("SELECT name, weekly_target_minutes FROM quotas ORDER BY id ASC")
         .fetch_all(pool)
         .await

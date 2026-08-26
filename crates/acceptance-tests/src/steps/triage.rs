@@ -21,7 +21,7 @@ static WHEN_TRIAGED_AS_COMMITTED: LazyLock<Regex> = LazyLock::new(|| {
 });
 static WHEN_TRIAGED_AS_QUOTA: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(
-            r#"^the capture is triaged as a quota task targeting "<(\w+)>" sessions of "<(\w+)>" minutes per "week"$"#,
+            r#"^the capture is triaged as a quota named "<(\w+)>" with a target of "<(\w+)>" hours a week$"#,
         )
         .unwrap()
 });
@@ -32,23 +32,15 @@ static THEN_KIND_IS: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r#"^the resulting task has kind "(\w+)"$"#).unwrap());
 static THEN_NO_DEADLINE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^the resulting task has no deadline$").unwrap());
-static THEN_NO_QUOTA_TARGET: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"^the resulting task has no quota target$").unwrap());
 static THEN_HAS_DEADLINE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r#"^the resulting task has a "<(\w+)>" deadline of "<(\w+)>"$"#).unwrap()
 });
 static THEN_HAS_PRIORITY: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r#"^the resulting task has priority "<(\w+)>"$"#).unwrap());
-static THEN_HAS_QUOTA_TARGET: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(
-            r#"^the resulting task has a quota target of "<(\w+)>" sessions of "<(\w+)>" minutes per "week"$"#,
-        )
-        .unwrap()
-});
 static THEN_REJECTED: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^the triage is rejected$").unwrap());
 static THEN_REJECTION_NAMES: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r#"^the rejection names "<(\w+)>"$"#).unwrap());
+    LazyLock::new(|| Regex::new(r#"^the rejection names "([^"]+)"$"#).unwrap());
 static THEN_TASK_LIST_EMPTY: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^the task list is still empty$").unwrap());
 static THEN_CAPTURE_STILL_WAITING: LazyLock<Regex> =
@@ -66,7 +58,7 @@ pub async fn dispatch(
         return Some(dispatch_server_believes_it_is(world, example, &caps));
     }
     if let Some(caps) = GIVEN_CAPTURE_WAITING.captures(text) {
-        return Some(given_capture_waiting(world, &caps[1]).await);
+        return Some(dispatch_capture_waiting(world, example, &caps).await);
     }
     if WHEN_TRIAGED_AS_POOL.is_match(text) {
         return Some(when_triaged(world, payloads::pool()).await);
@@ -86,17 +78,11 @@ pub async fn dispatch(
     if THEN_NO_DEADLINE.is_match(text) {
         return Some(then_task_has_no_deadline(world).await);
     }
-    if THEN_NO_QUOTA_TARGET.is_match(text) {
-        return Some(then_task_has_no_quota_target(world).await);
-    }
     if let Some(caps) = THEN_HAS_DEADLINE.captures(text) {
         return Some(dispatch_has_deadline(world, example, &caps).await);
     }
     if let Some(caps) = THEN_HAS_PRIORITY.captures(text) {
         return Some(dispatch_has_priority(world, example, &caps).await);
-    }
-    if let Some(caps) = THEN_HAS_QUOTA_TARGET.captures(text) {
-        return Some(dispatch_has_quota_target(world, example, &caps).await);
     }
     if THEN_REJECTED.is_match(text) {
         return Some(then_triage_is_rejected(world));
@@ -111,12 +97,6 @@ pub async fn dispatch(
         return Some(then_capture_still_waiting(world).await);
     }
     None
-}
-
-/// Parses a Gherkin example value expected to hold an integer, naming
-/// `field` in the error so a bad fixture points back at its source.
-fn parse_i64(field: &str, value: &str) -> Result<i64, String> {
-    value.parse().map_err(|e| format!("bad {field}: {e}"))
 }
 
 async fn dispatch_triaged_as_committed(
@@ -143,13 +123,12 @@ async fn dispatch_triaged_as_quota(
     example: &BTreeMap<String, String>,
     caps: &regex::Captures<'_>,
 ) -> Result<(), String> {
-    let target_count = parse_i64("target_count", example_value(example, &caps[1])?)?;
-    let target_minutes_each = parse_i64("target_minutes_each", example_value(example, &caps[2])?)?;
+    let name = example_value(example, &caps[1])?;
+    let hours = example_value(example, &caps[2])?;
     let body = json!({
         "kind": "quota",
-        "target_count": target_count,
-        "target_minutes_each": target_minutes_each,
-        "period": "week",
+        "name": name,
+        "hours": hours,
         "life_area": payloads::VALID_LIFE_AREA,
     });
     when_triaged(world, body).await
@@ -197,23 +176,22 @@ fn resolve(example: &BTreeMap<String, String>, raw: &str) -> Result<String, Stri
     }
 }
 
-async fn dispatch_has_quota_target(
-    world: &World,
-    example: &BTreeMap<String, String>,
-    caps: &regex::Captures<'_>,
-) -> Result<(), String> {
-    let target_count = example_value(example, &caps[1])?;
-    let target_minutes_each = example_value(example, &caps[2])?;
-    then_task_has_quota_target(world, target_count, target_minutes_each).await
-}
-
 fn dispatch_rejection_names(
     world: &mut World,
     example: &BTreeMap<String, String>,
     caps: &regex::Captures<'_>,
 ) -> Result<(), String> {
-    let missing_field = example_value(example, &caps[1])?;
-    then_rejection_names(world, missing_field)
+    let missing_field = resolve(example, &caps[1])?;
+    then_rejection_names(world, &missing_field)
+}
+
+async fn dispatch_capture_waiting(
+    world: &mut World,
+    example: &BTreeMap<String, String>,
+    caps: &regex::Captures<'_>,
+) -> Result<(), String> {
+    let raw_text = resolve(example, &caps[1])?;
+    given_capture_waiting(world, &raw_text).await
 }
 
 fn dispatch_server_believes_it_is(
@@ -289,9 +267,6 @@ pub(super) struct TaskRow {
     pub(super) deadline: Option<i64>,
     pub(super) commitment: Option<String>,
     pub(super) priority: Option<String>,
-    pub(super) target_count: Option<i64>,
-    pub(super) target_minutes_each: Option<i64>,
-    pub(super) period: Option<String>,
 }
 
 impl sqlx::FromRow<'_, sqlx::sqlite::SqliteRow> for TaskRow {
@@ -302,9 +277,6 @@ impl sqlx::FromRow<'_, sqlx::sqlite::SqliteRow> for TaskRow {
             deadline: row.try_get("deadline")?,
             commitment: row.try_get("commitment")?,
             priority: row.try_get("priority")?,
-            target_count: row.try_get("target_count")?,
-            target_minutes_each: row.try_get("target_minutes_each")?,
-            period: row.try_get("period")?,
         })
     }
 }
@@ -312,14 +284,11 @@ impl sqlx::FromRow<'_, sqlx::sqlite::SqliteRow> for TaskRow {
 pub(super) async fn task_row(world: &World) -> Result<TaskRow, String> {
     let pool = world.pool()?;
     let capture_id = capture_id(world)?;
-    sqlx::query_as(
-        "SELECT kind, deadline, commitment, priority, target_count, target_minutes_each, period \
-             FROM tasks WHERE capture_id = ?",
-    )
-    .bind(capture_id)
-    .fetch_one(pool)
-    .await
-    .map_err(|e| format!("query resulting task: {e}"))
+    sqlx::query_as("SELECT kind, deadline, commitment, priority FROM tasks WHERE capture_id = ?")
+        .bind(capture_id)
+        .fetch_one(pool)
+        .await
+        .map_err(|e| format!("query resulting task: {e}"))
 }
 
 pub async fn then_task_has_kind(world: &World, expected: &str) -> Result<(), String> {
@@ -337,19 +306,6 @@ pub async fn then_task_has_no_deadline(world: &World) -> Result<(), String> {
         Ok(())
     } else {
         Err(format!("expected no deadline, got {:?}", row.deadline))
-    }
-}
-
-pub async fn then_task_has_no_quota_target(world: &World) -> Result<(), String> {
-    let row = task_row(world).await?;
-    if row.target_count.is_none() && row.target_minutes_each.is_none() && row.period.is_none() {
-        Ok(())
-    } else {
-        Err(format!(
-            "expected no quota target, got target_count={:?} \
-                 target_minutes_each={:?} period={:?}",
-            row.target_count, row.target_minutes_each, row.period
-        ))
     }
 }
 
@@ -386,38 +342,6 @@ pub async fn then_task_has_priority(world: &World, expected: &str) -> Result<(),
         Err(format!(
             "expected priority {expected}, got {:?}",
             row.priority
-        ))
-    }
-}
-
-fn parse_quota_target(
-    expected_count: &str,
-    expected_minutes_each: &str,
-) -> Result<(i64, i64), String> {
-    Ok((
-        parse_i64("expected target_count", expected_count)?,
-        parse_i64("expected target_minutes_each", expected_minutes_each)?,
-    ))
-}
-
-pub async fn then_task_has_quota_target(
-    world: &World,
-    expected_count: &str,
-    expected_minutes_each: &str,
-) -> Result<(), String> {
-    let row = task_row(world).await?;
-    let (expected_count, expected_minutes_each) =
-        parse_quota_target(expected_count, expected_minutes_each)?;
-    if row.target_count == Some(expected_count)
-        && row.target_minutes_each == Some(expected_minutes_each)
-        && row.period.as_deref() == Some("week")
-    {
-        Ok(())
-    } else {
-        Err(format!(
-            "expected quota target {expected_count}x{expected_minutes_each}min per week, \
-                 got target_count={:?} target_minutes_each={:?} period={:?}",
-            row.target_count, row.target_minutes_each, row.period
         ))
     }
 }
@@ -588,7 +512,6 @@ mod tests {
 
         then_task_has_kind(&world, "pool").await.unwrap();
         then_task_has_no_deadline(&world).await.unwrap();
-        then_task_has_no_quota_target(&world).await.unwrap();
     }
 
     #[tokio::test]
@@ -604,7 +527,6 @@ mod tests {
             .await
             .unwrap();
         then_task_has_priority(&world, "P1").await.unwrap();
-        then_task_has_no_quota_target(&world).await.unwrap();
     }
 
     #[tokio::test]
@@ -614,7 +536,6 @@ mod tests {
         when_triaged(&mut world, payloads::quota()).await.unwrap();
 
         then_task_has_kind(&world, "quota").await.unwrap();
-        then_task_has_quota_target(&world, "3", "45").await.unwrap();
         then_task_has_no_deadline(&world).await.unwrap();
     }
 

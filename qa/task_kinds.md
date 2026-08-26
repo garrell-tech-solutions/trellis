@@ -37,8 +37,12 @@ Each procedure starts from an empty task list, matching the feature's
 - Triage is accepted.
 - Exactly one task exists, with kind `pool`.
 - Its deadline is empty.
-- Its quota target fields (`target_count`, `target_minutes_each`, `period`) are
-  all empty.
+- **The Quota screen offers no quotas.** This replaces the old check that
+  `target_count`, `target_minutes_each` and `period` were left empty. **Those
+  columns still exist** — `T-migrations-append-only` means they cannot be
+  dropped — **but nothing writes them any more**, so the old check would pass
+  against any implementation whatsoever. **A check that cannot fail reads
+  exactly like coverage** (#90).
 
 ## Procedure — committed — repeat once per example row
 
@@ -56,26 +60,42 @@ Each procedure starts from an empty task list, matching the feature's
 - Triage is accepted.
 - Exactly one task exists, with kind `committed`.
 - Its deadline, commitment and priority match the submitted row exactly.
-- Its quota target fields are all empty.
+- **The Quota screen offers no quotas**, for the reason given under pool.
 
 ## Procedure — quota — repeat once per example row
 
-| target_count | target_minutes_each |
-|--------------|---------------------|
-| 3            | 45                  |
-| 1            | 90                  |
+**What a quota triage carries changed completely in #138.** `target_count`,
+`target_minutes_each` and `period` are retired; a quota now carries **a name
+and a weekly hour target**, and **triaging is what creates the quota.** The
+owner settled that on 2026-08-26 — the reasoning and the whole validation
+surface are in `qa/quota_triage_validation.md`.
 
-1. Triage the capture as kind `quota`, supplying the row's target count, target
-   minutes each, and period `week`.
+**`kind` is still a three-variant sum type.** `quota` did not become an
+unknown kind; it became the verb that creates a quota.
+
+| name    | hours |
+|---------|-------|
+| Piano   | 4     |
+| Running | 0.5   |
+
+1. Triage the capture as kind `quota`, supplying the row's name and hours.
 2. Observe the response status.
-3. Query the tasks table for the resulting task.
+3. Read the Quota screen.
 
 ### Expected Observable Outcomes
 - Triage is accepted.
-- Exactly one task exists, with kind `quota`.
-- Its target count and target minutes each match the submitted row exactly, and
-  its period is `week`.
-- Its deadline is empty.
+- **The Quota screen offers exactly that one quota**, meta **`1 quota`**,
+  reading **`0m / 4h`** and **`0m / 30m`** respectively.
+- **`0.5` is the row that earns its keep.** The canvas's hours input is
+  `step="0.5"`, so half an hour is a value the product can really submit, and
+  it is the only row where the hours-to-minutes conversion is **visible in the
+  readout** rather than implied by it. **If `0.5` reads `0m / 0h` or is
+  rejected, the conversion is integer-truncating** and every half-hour target
+  the owner ever sets will be wrong.
+- The resulting task's deadline is empty.
+- **Assert through the screen, not through columns.** Where a quota is stored
+  is the architect's to settle; what the owner can see is that the thing they
+  triaged is on the Quota screen reading its target.
 
 ## Not covered here, deliberately
 
@@ -88,5 +108,5 @@ to assert, not silently skipped.
 
 This procedure depends only on the triage request/response contract and the
 durable task row it leaves behind. It does not depend on handler structure,
-how `kind` is represented in Rust, whether quota fields live in one table or
-several, or the ORM in use.
+how `kind` is represented in Rust, which table a quota lives in, or the ORM in
+use.

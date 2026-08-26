@@ -13,11 +13,14 @@
 use scheduler_core::task::TaskKind;
 use sqlx::SqlitePool;
 
-/// `tasks.life_area_id` and `tasks.deadline_type` both stay in the schema
-/// (#88 and #94, `T-migrations-append-only`: dropping either column means
+/// `tasks.life_area_id`, `tasks.deadline_type`, `tasks.target_count`,
+/// `tasks.target_minutes_each` and `tasks.period` all stay in the schema
+/// (#88, #94 and #138, `T-migrations-append-only`: dropping a column means
 /// rebuilding the table for nothing) but nothing upstream of this function
-/// can produce a value for either any more, so this always writes `NULL`
-/// rather than carrying a parameter every real caller would pass `None` to.
+/// can produce a value for any of them any more -- a quota's name and
+/// weekly target land in `quotas` instead (#138) -- so this always writes
+/// `NULL` rather than carrying a parameter every real caller would pass
+/// `None` to.
 pub async fn insert_task(
     pool: &SqlitePool,
     capture_id: i64,
@@ -29,7 +32,7 @@ pub async fn insert_task(
         "INSERT INTO tasks (capture_id, kind, deadline, deadline_type, commitment, priority, \
          estimated_minutes, target_count, target_minutes_each, period, life_area_id, \
          created_at_ms) \
-         VALUES (?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, NULL, ?)",
+         VALUES (?, ?, ?, NULL, ?, ?, ?, NULL, NULL, NULL, NULL, ?)",
     )
     .bind(capture_id)
     .bind(attributes.kind)
@@ -37,9 +40,6 @@ pub async fn insert_task(
     .bind(attributes.commitment)
     .bind(attributes.priority)
     .bind(attributes.estimated_minutes)
-    .bind(attributes.target_count)
-    .bind(attributes.target_minutes_each)
-    .bind(attributes.period)
     .bind(created_at_ms)
     .execute(pool)
     .await?;
@@ -50,7 +50,8 @@ pub async fn insert_task(
 mod tests {
     use super::*;
     use crate::platform::test_support::{insert_capture, test_pool};
-    use scheduler_core::task::{Commitment, Period, Priority};
+    use scheduler_core::quota::WeeklyTarget;
+    use scheduler_core::task::{Commitment, Priority};
 
     type StoredTask = (
         String,
@@ -84,9 +85,8 @@ mod tests {
 
     fn quota() -> TaskKind {
         TaskKind::Quota {
-            target_count: 3,
-            target_minutes_each: 45,
-            period: Period::Week,
+            name: "Piano".to_string(),
+            weekly_target: WeeklyTarget::from_minutes(135).unwrap(),
         }
     }
 
@@ -146,7 +146,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_quota_task_stores_its_target_and_no_deadline() {
+    async fn a_quota_task_stores_no_deadline_and_no_legacy_target_columns() {
         let (_dir, pool) = test_pool().await;
         let capture_id = insert_capture(&pool, "buy milk", None).await;
 
@@ -160,9 +160,9 @@ mod tests {
                 None,
                 None,
                 None,
-                Some(3),
-                Some(45),
-                Some("week".to_string()),
+                None,
+                None,
+                None
             )
         );
     }

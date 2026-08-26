@@ -11,7 +11,10 @@
 
 mod fields;
 
-pub use fields::{Commitment, DeadlineType, Field, Period, Priority};
+pub use fields::{Commitment, DeadlineType, Field, Priority};
+
+use crate::quota::Field as QuotaField;
+use crate::quota::{DefinitionRejection, QuotaDefinition, WeeklyTarget};
 
 /// The stored discriminant for each kind. These three strings are the durable
 /// contract shared by the `tasks.kind` column and every delivery mechanism.
@@ -48,13 +51,20 @@ pub struct TriageFields {
     pub timezone: Option<String>,
     pub commitment: Option<String>,
     pub priority: Option<String>,
-    pub target_count: Option<i64>,
-    pub target_minutes_each: Option<i64>,
-    pub period: Option<String>,
+    /// A quota's name (#138: triaging a capture as a quota is what creates
+    /// it). Prefilled with the capture's own words by the page, but always
+    /// required and editable -- renaming a quota is #148 and is not built,
+    /// so whatever name arrives here is the name forever.
+    pub quota_name: Option<String>,
+    /// A quota's weekly hour target, as free text -- `"4"`, `"0.5"` -- the
+    /// same shape the retired quota-screen define form read
+    /// ([`crate::quota::QuotaDefinition::from_fields`] parses it, reused
+    /// rather than restated here).
+    pub quota_hours: Option<String>,
     /// Required for a committed task only (#62's capacity number cannot
     /// count what committed work asks for otherwise). Pool is never placed
-    /// (`D-no-pool-on-calendar`) and quota already carries
-    /// `target_minutes_each`, so neither needs this field.
+    /// (`D-no-pool-on-calendar`) and a quota is bounded by its own weekly
+    /// target, so neither needs this field.
     pub estimated_minutes: Option<i64>,
 }
 
@@ -98,15 +108,17 @@ pub enum TaskKind {
         /// submission.
         estimated_minutes: i64,
     },
-    /// T-quota-targets-required: a quota task cannot be scheduled at M8 or
-    /// reported on at the reckoning without a target, so all three fields are
-    /// required at triage even though the columns stay nullable
-    /// (T-three-task-kinds) for schema reasons — one `tasks` table shared by
-    /// three kinds.
+    /// #138: triaging a capture as a quota is what *creates* the quota --
+    /// the quota screen only displays what triage produced. `name` and
+    /// `weekly_target` are required at triage (T-quota-targets-required's
+    /// successor: a quota with no target can never be reckoned against),
+    /// even though nothing about them is stored on the `tasks` row itself
+    /// (`T-three-task-kinds`'s nullable columns are a storage fact, not a
+    /// triage-time permission) -- they land in `quotas` instead, which is
+    /// the delivery layer's concern, not this type's.
     Quota {
-        target_count: i64,
-        target_minutes_each: i64,
-        period: Period,
+        name: String,
+        weekly_target: WeeklyTarget,
     },
 }
 
@@ -122,9 +134,6 @@ pub struct TaskAttributes {
     pub commitment: Option<&'static str>,
     pub priority: Option<&'static str>,
     pub estimated_minutes: Option<i64>,
-    pub target_count: Option<i64>,
-    pub target_minutes_each: Option<i64>,
-    pub period: Option<&'static str>,
 }
 
 /// A committed deadline's required-ness is decided before its source is,
@@ -171,8 +180,8 @@ fn require_i64(field: Field, value: Option<i64>) -> Result<i64, TriageRejection>
     value.ok_or(TriageRejection::MissingField(field))
 }
 
-/// A quota target of zero or fewer sessions/minutes defeats the reckoning's
-/// own math (`count(done)/target_count`) before a task can ever be created.
+/// An estimate of zero or fewer minutes defeats capacity math before a task
+/// can ever be created.
 fn require_positive(field: Field, value: i64) -> Result<i64, TriageRejection> {
     if value > 0 {
         Ok(value)
@@ -180,7 +189,6 @@ fn require_positive(field: Field, value: i64) -> Result<i64, TriageRejection> {
         Err(TriageRejection::InvalidField(field))
     }
 }
-
 impl TaskKind {
     /// Decides which kind of task, if any, a set of triage fields describes.
     pub fn from_fields(fields: &TriageFields) -> Result<Self, TriageRejection> {
@@ -269,32 +277,20 @@ impl TaskKind {
         })
     }
 
+    /// Reuses [`QuotaDefinition::from_fields`] rather than restating name
+    /// and hours validation here: it is the same rule the retired
+    /// quota-screen define form checked, now reached from triage instead
+    /// (`quota_triage_validation.feature`'s own reasoning -- "the rules
+    /// survived, the surface moved").
     fn quota_from(fields: &TriageFields) -> Result<Self, TriageRejection> {
-        let (target_count, target_minutes_each, period) = Self::require_quota_fields(fields)?;
-        Self::parse_quota_fields(target_count, target_minutes_each, period)
-    }
-
-    fn require_quota_fields(fields: &TriageFields) -> Result<(i64, i64, String), TriageRejection> {
-        let target_count = require_i64(Field::TargetCount, fields.target_count)?;
-        let target_minutes_each =
-            require_i64(Field::TargetMinutesEach, fields.target_minutes_each)?;
-        let period = require(Field::Period, &fields.period)?;
-        Ok((target_count, target_minutes_each, period))
-    }
-
-    fn parse_quota_fields(
-        target_count: i64,
-        target_minutes_each: i64,
-        period: String,
-    ) -> Result<Self, TriageRejection> {
-        let target_count = require_positive(Field::TargetCount, target_count)?;
-        let target_minutes_each = require_positive(Field::TargetMinutesEach, target_minutes_each)?;
-        let period = Period::parse(&period).ok_or(TriageRejection::InvalidField(Field::Period))?;
-
+        let definition = QuotaDefinition::from_fields(
+            fields.quota_name.as_deref(),
+            fields.quota_hours.as_deref(),
+        )
+        .map_err(quota_rejection_to_triage_rejection)?;
         Ok(Self::Quota {
-            target_count,
-            target_minutes_each,
-            period,
+            name: definition.name,
+            weekly_target: definition.weekly_target,
         })
     }
 
@@ -315,19 +311,36 @@ impl TaskKind {
                 commitment: Some(commitment.as_str()),
                 priority: Some(priority.as_str()),
                 estimated_minutes: Some(*estimated_minutes),
-                ..TaskAttributes::default()
             },
-            Self::Quota {
-                target_count,
-                target_minutes_each,
-                period,
-            } => TaskAttributes {
+            // A quota's name and target are not a `tasks` column at all
+            // (they land in `quotas` instead, the delivery layer's write to
+            // make): the row this triage produces carries no more than a
+            // pool task's does.
+            Self::Quota { .. } => TaskAttributes {
                 kind: QUOTA,
-                target_count: Some(*target_count),
-                target_minutes_each: Some(*target_minutes_each),
-                period: Some(period.as_str()),
                 ..TaskAttributes::default()
             },
+        }
+    }
+}
+
+/// [`QuotaDefinition::from_fields`]'s rejection, restated in triage's own
+/// vocabulary -- the same two field names, the same two shapes, because a
+/// quota triage's name and hours are exactly the fields the retired
+/// define form checked.
+fn quota_rejection_to_triage_rejection(rejection: DefinitionRejection) -> TriageRejection {
+    match rejection {
+        DefinitionRejection::MissingField(QuotaField::Name) => {
+            TriageRejection::MissingField(Field::Name)
+        }
+        DefinitionRejection::MissingField(QuotaField::Hours) => {
+            TriageRejection::MissingField(Field::Hours)
+        }
+        DefinitionRejection::InvalidField(QuotaField::Name) => {
+            TriageRejection::InvalidField(Field::Name)
+        }
+        DefinitionRejection::InvalidField(QuotaField::Hours) => {
+            TriageRejection::InvalidField(Field::Hours)
         }
     }
 }
@@ -398,7 +411,6 @@ mod tests {
                 commitment: Some("at"),
                 priority: Some("P1"),
                 estimated_minutes: Some(180),
-                ..TaskAttributes::default()
             }
         );
     }
@@ -624,132 +636,110 @@ mod tests {
         );
     }
 
-    // --- TaskKind::from_fields — quota --------------------------------------
+    // --- TaskKind::from_fields — quota (#138) -------------------------------
 
     fn quota_fields() -> TriageFields {
         TriageFields {
             kind: Some(QUOTA.to_string()),
-            target_count: Some(3),
-            target_minutes_each: Some(45),
-            period: Some("week".to_string()),
+            quota_name: Some("Piano".to_string()),
+            quota_hours: Some("4".to_string()),
             ..TriageFields::default()
         }
     }
 
     #[test]
-    fn quota_fields_describe_a_quota_task_carrying_its_target() {
+    fn quota_fields_describe_a_quota_task_carrying_its_name_and_target() {
         assert_eq!(
             TaskKind::from_fields(&quota_fields()),
             Ok(TaskKind::Quota {
-                target_count: 3,
-                target_minutes_each: 45,
-                period: Period::Week,
+                name: "Piano".to_string(),
+                weekly_target: WeeklyTarget::from_minutes(240).unwrap(),
             })
         );
     }
 
     #[test]
-    fn a_quota_task_reports_its_target_and_no_deadline() {
+    fn a_quota_task_reports_no_deadline_and_no_metadata_of_its_own() {
         let kind = TaskKind::from_fields(&quota_fields()).unwrap();
         assert_eq!(
             kind.attributes(),
             TaskAttributes {
                 kind: QUOTA,
-                target_count: Some(3),
-                target_minutes_each: Some(45),
-                period: Some("week"),
                 ..TaskAttributes::default()
             }
         );
     }
 
     #[test]
-    fn quota_fields_without_a_target_count_are_rejected_as_missing() {
+    fn quota_fields_without_a_name_are_rejected_as_missing() {
         let mut fields = quota_fields();
-        fields.target_count = None;
+        fields.quota_name = None;
         assert_eq!(
             TaskKind::from_fields(&fields),
-            Err(TriageRejection::MissingField(Field::TargetCount))
+            Err(TriageRejection::MissingField(Field::Name))
         );
     }
 
     #[test]
-    fn quota_fields_without_a_target_minutes_each_are_rejected_as_missing() {
+    fn quota_fields_with_a_blank_name_are_rejected_the_same_as_absent() {
         let mut fields = quota_fields();
-        fields.target_minutes_each = None;
+        fields.quota_name = Some("   ".to_string());
         assert_eq!(
             TaskKind::from_fields(&fields),
-            Err(TriageRejection::MissingField(Field::TargetMinutesEach))
+            Err(TriageRejection::MissingField(Field::Name))
         );
     }
 
     #[test]
-    fn quota_fields_without_a_period_are_rejected_as_missing() {
+    fn quota_fields_without_hours_are_rejected_as_missing() {
         let mut fields = quota_fields();
-        fields.period = None;
+        fields.quota_hours = None;
         assert_eq!(
             TaskKind::from_fields(&fields),
-            Err(TriageRejection::MissingField(Field::Period))
+            Err(TriageRejection::MissingField(Field::Hours))
         );
     }
 
     #[test]
-    fn quota_fields_with_an_empty_period_are_rejected_the_same_as_absent() {
+    fn quota_fields_with_zero_hours_are_rejected_as_invalid() {
         let mut fields = quota_fields();
-        fields.period = Some(String::new());
+        fields.quota_hours = Some("0".to_string());
         assert_eq!(
             TaskKind::from_fields(&fields),
-            Err(TriageRejection::MissingField(Field::Period))
+            Err(TriageRejection::InvalidField(Field::Hours))
         );
     }
 
     #[test]
-    fn quota_fields_with_an_invalid_period_are_rejected_naming_it_invalid() {
+    fn quota_fields_with_negative_hours_are_rejected_as_invalid() {
         let mut fields = quota_fields();
-        fields.period = Some("fortnight".to_string());
+        fields.quota_hours = Some("-2".to_string());
         assert_eq!(
             TaskKind::from_fields(&fields),
-            Err(TriageRejection::InvalidField(Field::Period))
+            Err(TriageRejection::InvalidField(Field::Hours))
         );
     }
 
     #[test]
-    fn quota_fields_with_a_zero_target_count_are_rejected_naming_it_invalid() {
+    fn quota_fields_with_unparseable_hours_are_rejected_as_invalid() {
         let mut fields = quota_fields();
-        fields.target_count = Some(0);
+        fields.quota_hours = Some("four".to_string());
         assert_eq!(
             TaskKind::from_fields(&fields),
-            Err(TriageRejection::InvalidField(Field::TargetCount))
+            Err(TriageRejection::InvalidField(Field::Hours))
         );
     }
 
     #[test]
-    fn quota_fields_with_a_negative_target_count_are_rejected_naming_it_invalid() {
+    fn quota_fields_accept_a_half_hour_target() {
         let mut fields = quota_fields();
-        fields.target_count = Some(-1);
+        fields.quota_hours = Some("0.5".to_string());
         assert_eq!(
             TaskKind::from_fields(&fields),
-            Err(TriageRejection::InvalidField(Field::TargetCount))
-        );
-    }
-
-    #[test]
-    fn quota_fields_with_a_zero_target_minutes_each_are_rejected_naming_it_invalid() {
-        let mut fields = quota_fields();
-        fields.target_minutes_each = Some(0);
-        assert_eq!(
-            TaskKind::from_fields(&fields),
-            Err(TriageRejection::InvalidField(Field::TargetMinutesEach))
-        );
-    }
-
-    #[test]
-    fn quota_fields_with_a_negative_target_minutes_each_are_rejected_naming_it_invalid() {
-        let mut fields = quota_fields();
-        fields.target_minutes_each = Some(-5);
-        assert_eq!(
-            TaskKind::from_fields(&fields),
-            Err(TriageRejection::InvalidField(Field::TargetMinutesEach))
+            Ok(TaskKind::Quota {
+                name: "Piano".to_string(),
+                weekly_target: WeeklyTarget::from_minutes(30).unwrap(),
+            })
         );
     }
 

@@ -58,9 +58,8 @@ mod tests {
 
     fn quota() -> TaskKind {
         TaskKind::Quota {
-            target_count: 3,
-            target_minutes_each: 20,
-            period: scheduler_core::task::Period::Week,
+            name: "Piano".to_string(),
+            weekly_target: scheduler_core::quota::WeeklyTarget::from_minutes(20).unwrap(),
         }
     }
 

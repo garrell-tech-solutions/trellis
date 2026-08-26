@@ -41,9 +41,8 @@ fn triage_fields(payload: &Value) -> TriageFields {
         commitment: string_field(payload, "commitment"),
         priority: string_field(payload, "priority"),
         estimated_minutes: payload.get("estimated_minutes").and_then(Value::as_i64),
-        target_count: payload.get("target_count").and_then(Value::as_i64),
-        target_minutes_each: payload.get("target_minutes_each").and_then(Value::as_i64),
-        period: string_field(payload, "period"),
+        quota_name: string_field(payload, "name"),
+        quota_hours: string_field(payload, "hours"),
         // #110's date/time/zone trio is the page form's alternative to
         // `deadline`, never JSON's -- the API keeps sending one complete
         // instant, per `committed-date-json-still-takes-an-instant-05`.
@@ -79,11 +78,22 @@ pub struct TriageFormRequest {
     commitment: Option<String>,
     priority: Option<String>,
     estimated_minutes: Option<i64>,
-    target_count: Option<i64>,
-    target_minutes_each: Option<i64>,
-    period: Option<String>,
+    /// A quota's name (#138) -- prefilled by the page with the capture's
+    /// own words, but always required and editable.
+    name: Option<String>,
+    /// A quota's weekly hour target, as free text -- the canvas's own
+    /// `step="0.5"` input.
+    hours: Option<String>,
     #[serde(default)]
     context_tag: Option<String>,
+    /// The candidate name a *similar*-name warning was already shown for,
+    /// carried back by a "Create anyway" resubmission
+    /// (`quota-triage-validation-similar-name-warns-04`) -- rides outside
+    /// `TriageFields` for the same reason `context_tag` does: it decides no
+    /// kind and fails no submission on its own, and the core has no
+    /// database to check it against.
+    #[serde(default)]
+    confirmed: Option<String>,
 }
 
 impl From<&TriageFormRequest> for TriageFields {
@@ -100,9 +110,8 @@ impl From<&TriageFormRequest> for TriageFields {
             commitment: form.commitment.clone(),
             priority: form.priority.clone(),
             estimated_minutes: form.estimated_minutes,
-            target_count: form.target_count,
-            target_minutes_each: form.target_minutes_each,
-            period: form.period.clone(),
+            quota_name: form.name.clone(),
+            quota_hours: form.hours.clone(),
         }
     }
 }
@@ -145,6 +154,25 @@ enum Rejection {
     /// was is not reported: the rejection is the same either way, "not open
     /// for business", and nothing downstream needs to tell them apart.
     CaptureNotOpen,
+    /// A well-formed quota name collides with an existing quota once case,
+    /// spaces and punctuation are folded away
+    /// (`D-quotas-are-selected-not-typed`'s guard, moved from the retired
+    /// define form to triage's own front door, #138). Never bypassable --
+    /// filing into an existing quota is deferred, so the only way out is a
+    /// different name.
+    QuotaNameExists {
+        existing_name: String,
+        existing_minutes: i64,
+    },
+    /// A well-formed quota name merely resembles an existing one -- warned
+    /// once, and created on confirmation
+    /// (`quota-triage-validation-similar-name-warns-04`). The candidate
+    /// name itself already decided [`check_quota_name`]'s outcome, so
+    /// nothing further downstream needs to carry it.
+    QuotaNameSimilar {
+        existing_name: String,
+        existing_minutes: i64,
+    },
 }
 
 /// The rejection contract: a client error whose body names what was wrong.
@@ -168,6 +196,14 @@ fn rejected(rejection: &Rejection, kind_submitted: &Value) -> (StatusCode, Json<
         Rejection::CaptureNotOpen => {
             json!({ "capture_not_open": CAPTURE_NOT_OPEN_MESSAGE })
         }
+        Rejection::QuotaNameExists { .. } => {
+            json!({ "quota_conflict": "exact", "message": rejection_message(rejection, kind_submitted) })
+        }
+        Rejection::QuotaNameSimilar { .. } => json!({
+            "quota_conflict": "similar",
+            "message": rejection_message(rejection, kind_submitted),
+            "confirm_control": QUOTA_CONFIRM_CONTROL,
+        }),
     };
     (StatusCode::UNPROCESSABLE_ENTITY, Json(body))
 }
@@ -187,18 +223,42 @@ fn rejection_message(rejection: &Rejection, kind_submitted: &Value) -> String {
             format!("unrecognised kind: {kind_submitted}")
         }
         Rejection::CaptureNotOpen => CAPTURE_NOT_OPEN_MESSAGE.to_string(),
+        Rejection::QuotaNameExists {
+            existing_name,
+            existing_minutes,
+        } => format!(
+            "\u{201c}{existing_name}\u{201d} already exists at {}. Log your time against that \
+             one, or give this a different name.",
+            crate::quota::hours_a_week(*existing_minutes)
+        ),
+        Rejection::QuotaNameSimilar {
+            existing_name,
+            existing_minutes,
+            ..
+        } => format!(
+            "That reads a lot like \u{201c}{existing_name}\u{201d} ({}). Same thing?",
+            crate::quota::hours_a_week(*existing_minutes)
+        ),
     }
 }
+
+/// The "Create anyway" control a similar-name warning offers, on both
+/// transports -- the JSON contract's own `confirm_control` and the page's
+/// button label alike (`quota-triage-validation-similar-name-warns-04`).
+const QUOTA_CONFIRM_CONTROL: &str = "Create anyway";
 
 /// The instant is passed in rather than read here: reading the clock is the
 /// handler's business, and a triage stamps the task and the capture it
 /// consumed with the same one.
 ///
-/// Two writes, one of them the inbox's: triage creates the task, then asks
-/// the inbox to close the capture it consumed. Triage does not know that
-/// leaving the inbox is a `left_inbox_at` stamp, which is what lets
-/// dismissal reach the same state without a second copy of the write
-/// (`T-one-front-door-per-capability`).
+/// Up to three writes, two of them the same for every kind: triage creates
+/// the task, then asks the inbox to close the capture it consumed. Triage
+/// does not know that leaving the inbox is a `left_inbox_at` stamp, which is
+/// what lets dismissal reach the same state without a second copy of the
+/// write (`T-one-front-door-per-capability`). A quota triage (#138) also
+/// creates the `quotas` row itself -- the `tasks` row it writes carries
+/// neither name nor target, so this is the one write that actually makes
+/// the quota exist.
 async fn write_task(
     pool: &SqlitePool,
     capture_id: i64,
@@ -208,6 +268,19 @@ async fn write_task(
     store::insert_task(pool, capture_id, kind, created_at_ms)
         .await
         .map_err(write_failed)?;
+    if let TaskKind::Quota {
+        name,
+        weekly_target,
+    } = kind
+    {
+        let definition = scheduler_core::quota::QuotaDefinition {
+            name: name.clone(),
+            weekly_target: *weekly_target,
+        };
+        crate::quota::create(pool, &definition, created_at_ms)
+            .await
+            .map_err(write_failed)?;
+    }
     inbox::close_capture(pool, capture_id, created_at_ms)
         .await
         .map_err(write_failed)?;
@@ -220,13 +293,53 @@ enum TriageOutcome {
     Rejected(Rejection),
 }
 
+/// Whether `confirmed` already carries this exact candidate name -- the
+/// resubmission a "Create anyway" tap sends, distinguished from a first
+/// attempt that has not been warned about yet
+/// (`quota-triage-validation-similar-name-warns-04`).
+fn already_confirmed(confirmed: Option<&str>, candidate_name: &str) -> bool {
+    confirmed == Some(candidate_name)
+}
+
+/// A quota's name checked against every existing quota (#138, moved from
+/// the retired quota-screen define form to triage's own front door): `None`
+/// when nothing is in the way, or the write-blocking rejection otherwise.
+async fn check_quota_name(
+    pool: &SqlitePool,
+    candidate_name: &str,
+    confirmed: Option<&str>,
+) -> Result<Option<Rejection>, sqlx::Error> {
+    let existing = crate::quota::existing_names(pool).await?;
+    let rejection = match scheduler_core::quota::check_name(candidate_name, &existing) {
+        Some(scheduler_core::quota::NameMatch::Exact(existing_name, existing_minutes)) => {
+            Some(Rejection::QuotaNameExists {
+                existing_name: existing_name.to_string(),
+                existing_minutes,
+            })
+        }
+        Some(scheduler_core::quota::NameMatch::Similar(existing_name, existing_minutes))
+            if !already_confirmed(confirmed, candidate_name) =>
+        {
+            Some(Rejection::QuotaNameSimilar {
+                existing_name: existing_name.to_string(),
+                existing_minutes,
+            })
+        }
+        _ => None,
+    };
+    Ok(rejection)
+}
+
 /// Only once the core calls a submission well-formed does the database enter
 /// it: whether the capture named by the URL is still open
-/// (`dismiss-capture-no-second-triage-07`, `-no-triage-after-dismissal-05`).
+/// (`dismiss-capture-no-second-triage-07`, `-no-triage-after-dismissal-05`),
+/// and, for a quota, whether its name collides with one that already exists
+/// (#138).
 async fn decide_triage(
     pool: &SqlitePool,
     capture_id: i64,
     fields: &TriageFields,
+    confirmed: Option<&str>,
 ) -> Result<TriageOutcome, StatusCode> {
     let kind = match TaskKind::from_fields(fields) {
         Ok(kind) => kind,
@@ -237,6 +350,14 @@ async fn decide_triage(
         .map_err(write_failed)?
     {
         return Ok(TriageOutcome::Rejected(Rejection::CaptureNotOpen));
+    }
+    if let TaskKind::Quota { name, .. } = &kind {
+        if let Some(rejection) = check_quota_name(pool, name, confirmed)
+            .await
+            .map_err(write_failed)?
+        {
+            return Ok(TriageOutcome::Rejected(rejection));
+        }
     }
     Ok(TriageOutcome::Accepted { kind })
 }
@@ -264,25 +385,39 @@ async fn page_response(
     inbox::render_lists(pool, status, error).await
 }
 
+/// Fields both transports carry alongside [`TriageFields`] without the core
+/// deciding either: `context_tag` decides no kind and fails no submission
+/// (`context-tags-taggable-at-triage-08`), and `confirmed` needs a database
+/// the core does not have (#138). Bundled rather than a longer tuple, since
+/// [`fields_from_input`] now has three things to return besides the fields
+/// themselves.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+struct SideFields {
+    context_tag: Option<String>,
+    confirmed: Option<String>,
+}
+
 /// The three things every branch of [`TriageInput`] must produce: the fields
 /// the core decides on, the raw `kind` a rejection echoes back
-/// (T-unknown-kind-rejected), and the raw context tag submitted alongside —
-/// present on both transports, decided by neither.
-fn fields_from_input(input: TriageInput) -> (TriageFields, Value, Option<String>) {
+/// (T-unknown-kind-rejected), and the side fields decided by neither
+/// transport nor core.
+fn fields_from_input(input: TriageInput) -> (TriageFields, Value, SideFields) {
     match input {
         TriageInput::Json(payload) => {
             let kind_submitted = payload.get("kind").cloned().unwrap_or(Value::Null);
-            let context_tag = string_field(&payload, "context_tag");
-            (triage_fields(&payload), kind_submitted, context_tag)
+            let side = SideFields {
+                context_tag: string_field(&payload, "context_tag"),
+                confirmed: string_field(&payload, "confirmed"),
+            };
+            (triage_fields(&payload), kind_submitted, side)
         }
         TriageInput::Form(form) => {
             let kind_submitted = json!(form.kind);
-            let context_tag = form.context_tag.clone();
-            (
-                TriageFields::from(form.as_ref()),
-                kind_submitted,
-                context_tag,
-            )
+            let side = SideFields {
+                context_tag: form.context_tag.clone(),
+                confirmed: form.confirmed.clone(),
+            };
+            (TriageFields::from(form.as_ref()), kind_submitted, side)
         }
     }
 }
@@ -314,7 +449,7 @@ pub async fn create_triage(
     input: TriageInput,
 ) -> Result<Response, StatusCode> {
     let from_page = matches!(input, TriageInput::Form(_));
-    let (mut fields, kind_submitted, context_tag) = fields_from_input(input);
+    let (mut fields, kind_submitted, side) = fields_from_input(input);
     let created_at_ms = clock.now_ms();
 
     // #110: the one piece of a `deadline_date` conversion the core cannot
@@ -328,10 +463,10 @@ pub async fn create_triage(
             .map_err(write_failed)?,
     );
 
-    let outcome = decide_triage(&pool, capture_id, &fields).await?;
+    let outcome = decide_triage(&pool, capture_id, &fields, side.confirmed.as_deref()).await?;
 
     if let TriageOutcome::Accepted { .. } = &outcome {
-        crate::capture::retag(&pool, capture_id, context_tag.as_deref())
+        crate::capture::retag(&pool, capture_id, side.context_tag.as_deref())
             .await
             .map_err(write_failed)?;
     }
@@ -698,38 +833,179 @@ mod tests {
         .await;
     }
 
+    /// #138: triaging as quota is what creates the quota. The `tasks` row
+    /// it writes carries no target of its own -- the name and weekly
+    /// target land in `quotas` instead, which is the fact this test pins.
     #[tokio::test]
-    async fn triaging_as_quota_records_the_recurring_target_and_leaves_deadline_empty() {
+    async fn triaging_as_quota_creates_a_quota_and_leaves_the_task_with_no_target() {
         let (_dir, pool) = test_pool().await;
-        let capture_id = insert_untriaged_capture(&pool, "buy milk").await;
+        let capture_id = insert_untriaged_capture(&pool, "practise piano").await;
 
         let response = triage_response(
             &pool,
             capture_id,
-            json!({
-                "kind": "quota",
-                "target_count": 3,
-                "target_minutes_each": 45,
-                "period": "week",
-                "life_area": "Work"
-            }),
+            json!({ "kind": "quota", "name": "Piano", "hours": "4" }),
         )
         .await;
 
         assert_eq!(response.status(), StatusCode::CREATED);
-        let row: (String, Option<i64>, Option<i64>, Option<String>, Option<String>) =
-            sqlx::query_as(
-                "SELECT kind, target_count, target_minutes_each, period, deadline FROM tasks WHERE capture_id = ?",
-            )
-            .bind(capture_id)
+        let row: (String, Option<i64>, Option<i64>) =
+            sqlx::query_as("SELECT kind, target_count, deadline FROM tasks WHERE capture_id = ?")
+                .bind(capture_id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(row.0, "quota");
+        assert_eq!(row.1, None, "quota task must carry no legacy target");
+        assert_eq!(row.2, None, "quota task must have no deadline");
+
+        let quota: (String, i64) = sqlx::query_as("SELECT name, weekly_target_minutes FROM quotas")
             .fetch_one(&pool)
             .await
             .unwrap();
-        assert_eq!(row.0, "quota");
-        assert_eq!(row.1, Some(3));
-        assert_eq!(row.2, Some(45));
-        assert_eq!(row.3.as_deref(), Some("week"));
-        assert_eq!(row.4, None, "quota task must have no deadline");
+        assert_eq!(quota, ("Piano".to_string(), 240));
+    }
+
+    #[tokio::test]
+    async fn triaging_as_quota_without_a_name_is_rejected_and_creates_neither_row() {
+        let (_dir, pool) = test_pool().await;
+        let capture_id = insert_untriaged_capture(&pool, "go to the gym").await;
+
+        assert_missing_field_rejected(
+            &pool,
+            capture_id,
+            json!({ "kind": "quota", "hours": "4" }),
+            "name",
+        )
+        .await;
+        let quota_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM quotas")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(quota_count, 0);
+    }
+
+    #[tokio::test]
+    async fn triaging_as_quota_without_hours_is_rejected() {
+        let (_dir, pool) = test_pool().await;
+        let capture_id = insert_untriaged_capture(&pool, "go to the gym").await;
+
+        assert_missing_field_rejected(
+            &pool,
+            capture_id,
+            json!({ "kind": "quota", "name": "Gym" }),
+            "hours",
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn triaging_as_quota_with_zero_hours_is_rejected_as_invalid() {
+        let (_dir, pool) = test_pool().await;
+        let capture_id = insert_untriaged_capture(&pool, "go to the gym").await;
+
+        assert_json_rejected(
+            &pool,
+            capture_id,
+            json!({ "kind": "quota", "name": "Gym", "hours": "0" }),
+            json!({ "invalid_field": "hours" }),
+        )
+        .await;
+    }
+
+    /// #138's own front door: a name that already exists (case, spaces and
+    /// punctuation folded) is refused outright, and nothing new is
+    /// written -- the existing quota is left exactly as it was.
+    #[tokio::test]
+    async fn triaging_as_quota_with_a_name_that_already_exists_is_refused() {
+        let (_dir, pool) = test_pool().await;
+        let existing =
+            scheduler_core::quota::QuotaDefinition::from_fields(Some("Piano"), Some("4")).unwrap();
+        crate::quota::store::create(&pool, &existing, 0)
+            .await
+            .unwrap();
+        let capture_id = insert_untriaged_capture(&pool, "practise piano more").await;
+
+        let response = triage_response(
+            &pool,
+            capture_id,
+            json!({ "kind": "quota", "name": "piano", "hours": "2" }),
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+        let body = response_json(response).await;
+        assert_eq!(
+            body.get("message").and_then(Value::as_str),
+            Some(
+                "\u{201c}Piano\u{201d} already exists at 4 h a week. Log your time against that \
+                 one, or give this a different name."
+            )
+        );
+        assert_eq!(
+            body.get("quota_conflict").and_then(Value::as_str),
+            Some("exact")
+        );
+        let quota_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM quotas")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(
+            quota_count, 1,
+            "the exact-match duplicate must not be created"
+        );
+    }
+
+    /// A merely similar name warns rather than refusing outright, and
+    /// offers a "Create anyway" control the resubmission's `confirmed`
+    /// field can use to get past it
+    /// (`quota-triage-validation-similar-name-warns-04`).
+    #[tokio::test]
+    async fn triaging_as_quota_with_a_similar_name_warns_and_can_be_confirmed() {
+        let (_dir, pool) = test_pool().await;
+        let existing =
+            scheduler_core::quota::QuotaDefinition::from_fields(Some("Piano"), Some("4")).unwrap();
+        crate::quota::store::create(&pool, &existing, 0)
+            .await
+            .unwrap();
+        let capture_id = insert_untriaged_capture(&pool, "learn piano theory").await;
+
+        let warned = triage_response(
+            &pool,
+            capture_id,
+            json!({ "kind": "quota", "name": "Piano theory", "hours": "2" }),
+        )
+        .await;
+
+        assert_eq!(warned.status(), StatusCode::UNPROCESSABLE_ENTITY);
+        let body = response_json(warned).await;
+        assert_eq!(
+            body.get("message").and_then(Value::as_str),
+            Some("That reads a lot like \u{201c}Piano\u{201d} (4 h a week). Same thing?")
+        );
+        assert_eq!(
+            body.get("confirm_control").and_then(Value::as_str),
+            Some("Create anyway")
+        );
+
+        let confirmed = triage_response(
+            &pool,
+            capture_id,
+            json!({
+                "kind": "quota",
+                "name": "Piano theory",
+                "hours": "2",
+                "confirmed": "Piano theory"
+            }),
+        )
+        .await;
+
+        assert_eq!(confirmed.status(), StatusCode::CREATED);
+        let quota_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM quotas")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(quota_count, 2);
     }
 
     #[tokio::test]
@@ -895,9 +1171,8 @@ mod tests {
             }),
             _ => json!({
                 "kind": "quota",
-                "target_count": 3,
-                "target_minutes_each": 45,
-                "period": "week",
+                "name": "Piano",
+                "hours": "4",
             }),
         };
         payload[field] = value;
@@ -990,41 +1265,23 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn triaging_as_quota_without_a_required_target_field_is_rejected() {
-        for field in ["target_count", "target_minutes_each", "period"] {
-            let (_dir, pool) = test_pool().await;
-            let capture_id = insert_untriaged_capture(&pool, "go to the gym").await;
-
-            let mut payload = json!({
-                "kind": "quota",
-                "target_count": 3,
-                "target_minutes_each": 45,
-                "period": "week",
-            });
-            payload.as_object_mut().unwrap().remove(field);
-
-            assert_missing_field_rejected(&pool, capture_id, payload, field).await;
-        }
-    }
-
-    #[tokio::test]
-    async fn triaging_as_quota_with_period_left_empty_is_rejected_the_same_as_absent() {
+    async fn triaging_as_quota_with_a_blank_name_is_rejected_the_same_as_absent() {
         one_bad_field_is_rejected(
             "quota",
-            "period",
-            json!(""),
-            json!({ "missing_field": "period" }),
+            "name",
+            json!("   "),
+            json!({ "missing_field": "name" }),
         )
         .await;
     }
 
     #[tokio::test]
-    async fn triaging_as_quota_with_an_invalid_period_is_rejected_naming_it_invalid() {
+    async fn triaging_as_quota_with_unparseable_hours_is_rejected_naming_it_invalid() {
         one_bad_field_is_rejected(
             "quota",
-            "period",
-            json!("fortnight"),
-            json!({ "invalid_field": "period" }),
+            "hours",
+            json!("four"),
+            json!({ "invalid_field": "hours" }),
         )
         .await;
     }
@@ -1140,9 +1397,8 @@ mod tests {
             "commitment": "at",
             "priority": "P1",
             "estimated_minutes": 180,
-            "target_count": 3,
-            "target_minutes_each": 45,
-            "period": "week"
+            "name": "Piano",
+            "hours": "4"
         });
 
         assert_eq!(
@@ -1153,9 +1409,8 @@ mod tests {
                 commitment: Some("at".to_string()),
                 priority: Some("P1".to_string()),
                 estimated_minutes: Some(180),
-                target_count: Some(3),
-                target_minutes_each: Some(45),
-                period: Some("week".to_string()),
+                quota_name: Some("Piano".to_string()),
+                quota_hours: Some("4".to_string()),
                 ..TriageFields::default()
             }
         );
@@ -1168,7 +1423,7 @@ mod tests {
 
     #[test]
     fn triage_fields_ignores_a_field_submitted_with_the_wrong_json_type() {
-        let payload = json!({ "kind": 7, "target_count": "three" });
+        let payload = json!({ "kind": 7, "name": 3 });
         assert_eq!(triage_fields(&payload), TriageFields::default());
     }
 
@@ -1236,12 +1491,8 @@ mod tests {
             "estimated_minutes",
             fields.estimated_minutes.map(Value::from),
         );
-        put("target_count", fields.target_count.map(Value::from));
-        put(
-            "target_minutes_each",
-            fields.target_minutes_each.map(Value::from),
-        );
-        put("period", fields.period.clone().map(Value::from));
+        put("name", fields.quota_name.clone().map(Value::from));
+        put("hours", fields.quota_hours.clone().map(Value::from));
         Value::Object(body)
     }
 
@@ -1254,10 +1505,10 @@ mod tests {
             commitment: fields.commitment.clone(),
             priority: fields.priority.clone(),
             estimated_minutes: fields.estimated_minutes,
-            target_count: fields.target_count,
-            target_minutes_each: fields.target_minutes_each,
-            period: fields.period.clone(),
+            name: fields.quota_name.clone(),
+            hours: fields.quota_hours.clone(),
             context_tag: None,
+            confirmed: None,
         }
     }
 
@@ -1279,9 +1530,8 @@ mod tests {
             commitment in proptest::option::of(".{0,10}"),
             priority in proptest::option::of(".{0,6}"),
             estimated_minutes in proptest::option::of(any::<i64>()),
-            target_count in proptest::option::of(any::<i64>()),
-            target_minutes_each in proptest::option::of(any::<i64>()),
-            period in proptest::option::of(".{0,10}"),
+            quota_name in proptest::option::of(".{0,20}"),
+            quota_hours in proptest::option::of(".{0,10}"),
         ) {
             let submission = TriageFields {
                 kind,
@@ -1289,9 +1539,8 @@ mod tests {
                 commitment,
                 priority,
                 estimated_minutes,
-                target_count,
-                target_minutes_each,
-                period,
+                quota_name,
+                quota_hours,
                 // #110's deadline_date/deadline_time/timezone are the page
                 // form's own fields, with no JSON equivalent to round-trip
                 // against -- left at their default `None` here and covered
@@ -1329,8 +1578,8 @@ mod tests {
             form.context_tag = context_tag.clone();
             let (_, _, from_form) = fields_from_input(TriageInput::Form(Box::new(form)));
 
-            prop_assert_eq!(from_json, context_tag.clone());
-            prop_assert_eq!(from_form, context_tag);
+            prop_assert_eq!(from_json.context_tag, context_tag.clone());
+            prop_assert_eq!(from_form.context_tag, context_tag);
         }
     }
 }

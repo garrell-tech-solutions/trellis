@@ -173,12 +173,11 @@ pub(super) fn committed_form_fields() -> [(&'static str, &'static str); 6] {
     ]
 }
 
-pub(super) fn quota_form_fields() -> [(&'static str, &'static str); 5] {
+pub(super) fn quota_form_fields() -> [(&'static str, &'static str); 4] {
     [
         ("kind", "quota"),
-        ("target_count", "3"),
-        ("target_minutes_each", "45"),
-        ("period", "week"),
+        ("name", payloads::VALID_QUOTA_NAME),
+        ("hours", payloads::VALID_QUOTA_HOURS),
         ("life_area", payloads::VALID_LIFE_AREA),
     ]
 }
@@ -626,8 +625,8 @@ mod tests {
             r#"</div>"#,
             r#"<div class="fields-panel">"#,
             r#"<form><input type="hidden" name="kind" value="quota">"#,
-            r#"<input type="number" name="target_count">"#,
-            r#"<input type="number" name="target_minutes_each"></form>"#,
+            r#"<input type="text" name="name">"#,
+            r#"<input type="number" name="hours"></form>"#,
             r#"</div>"#,
             r#"<form class="dismiss"><button type="submit">Dismiss</button></form>"#,
             r#"</li>"#,

@@ -6,29 +6,32 @@
 //! of their own, only parsing and the name each reports back.
 
 /// A field a triage submission must supply, or supply a valid value for.
+///
+/// `Name` and `Hours` (#138) are a quota triage's own two fields -- the
+/// same two `scheduler_core::quota::Field` names, restated here because
+/// this is the closed vocabulary a *triage* rejection reports from, not
+/// the quota screen's now-retired define form.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Field {
     Deadline,
     Commitment,
     Priority,
     EstimatedMinutes,
-    TargetCount,
-    TargetMinutesEach,
-    Period,
+    Name,
+    Hours,
 }
 
 /// Every field paired with the name reported back to whoever submitted the
 /// triage -- a table, not a match, for the reason a fixed lookup table
-/// already is one (`T-complexity-8`: seven arms of no logic beyond the
-/// lookup should not cost against the threshold).
-const FIELD_NAMES: [(Field, &str); 7] = [
+/// already is one (`T-complexity-8`: arms of no logic beyond the lookup
+/// should not cost against the threshold).
+const FIELD_NAMES: [(Field, &str); 6] = [
     (Field::Deadline, "deadline"),
     (Field::Commitment, "commitment"),
     (Field::Priority, "priority"),
     (Field::EstimatedMinutes, "estimated_minutes"),
-    (Field::TargetCount, "target_count"),
-    (Field::TargetMinutesEach, "target_minutes_each"),
-    (Field::Period, "period"),
+    (Field::Name, "name"),
+    (Field::Hours, "hours"),
 ];
 
 impl Field {
@@ -53,8 +56,7 @@ pub enum DeadlineType {
 impl DeadlineType {
     /// `pub` because a stored committed task's `deadline_type` column comes
     /// back as text: #75's schedule reads it back to reconstruct the task
-    /// it places, the same reason `Period::parse` is `pub` for a stored
-    /// quota row's `period`.
+    /// it places.
     pub fn parse(value: &str) -> Option<Self> {
         match value {
             "hard" => Some(Self::Hard),
@@ -123,35 +125,6 @@ impl Priority {
             Self::P2 => "P2",
             Self::P3 => "P3",
             Self::P4 => "P4",
-        }
-    }
-}
-
-/// `period`'s closed domain (T-period-closed-set): the same M8 cadence-math
-/// reason as [`DeadlineType`] and [`Priority`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Period {
-    Week,
-    Month,
-}
-
-impl Period {
-    /// `pub` because a stored quota row's `period` column comes back as
-    /// text: `#62`'s capacity number reads it back into this type to
-    /// prorate demand, the same reason `guardrail::Weekday::parse` is
-    /// `pub` for a stored band's weekday.
-    pub fn parse(value: &str) -> Option<Self> {
-        match value {
-            "week" => Some(Self::Week),
-            "month" => Some(Self::Month),
-            _ => None,
-        }
-    }
-
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Week => "week",
-            Self::Month => "month",
         }
     }
 }
@@ -339,20 +312,6 @@ mod tests {
         assert_eq!(Priority::parse("p1"), None, "the domain is case-sensitive");
     }
 
-    // --- Period --------------------------------------------------------
-
-    #[test]
-    fn period_parses_week_and_month() {
-        assert_eq!(Period::parse("week"), Some(Period::Week));
-        assert_eq!(Period::parse("month"), Some(Period::Month));
-    }
-
-    #[test]
-    fn period_rejects_values_outside_the_domain() {
-        assert_eq!(Period::parse("fortnight"), None);
-        assert_eq!(Period::parse("Week"), None, "the domain is case-sensitive");
-    }
-
     // --- Commitment --------------------------------------------------------
 
     #[test]
@@ -378,8 +337,8 @@ mod tests {
         assert_eq!(Field::Deadline.name(), "deadline");
         assert_eq!(Field::Commitment.name(), "commitment");
         assert_eq!(Field::Priority.name(), "priority");
-        assert_eq!(Field::TargetCount.name(), "target_count");
-        assert_eq!(Field::TargetMinutesEach.name(), "target_minutes_each");
-        assert_eq!(Field::Period.name(), "period");
+        assert_eq!(Field::EstimatedMinutes.name(), "estimated_minutes");
+        assert_eq!(Field::Name.name(), "name");
+        assert_eq!(Field::Hours.name(), "hours");
     }
 }

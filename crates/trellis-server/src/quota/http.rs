@@ -1,8 +1,9 @@
 //! `GET /quota`: the fourth screen, quotas grouped by nothing but the order
-//! they were defined in (#93). `POST /quota`: defines a new one, guarded
-//! against a mistyped name (`D-quotas-are-selected-not-typed`).
+//! they were triaged in (#138). Logging, correcting and deleting a session
+//! against one are this module's other routes; defining one is not --
+//! triage is the one door (#138, `crate::triage::http`).
 
-use super::body::{self, DefineFormView, DEFAULT_BUTTON_LABEL};
+use super::body;
 use crate::platform::clock::Clock;
 use crate::platform::nav::{self, NavLink, Page};
 use crate::platform::response::{render_template, write_failed};
@@ -12,7 +13,6 @@ use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::Response;
 use axum::Form;
-use scheduler_core::quota::{NameMatch, QuotaDefinition};
 use serde::Deserialize;
 use sqlx::SqlitePool;
 use std::collections::HashSet;
@@ -49,11 +49,6 @@ struct QuotaTemplate {
     quotas: Vec<QuotaRowView>,
     day_options: Vec<String>,
     today: String,
-    pending_name: String,
-    pending_hours: String,
-    warning: Option<String>,
-    button_label: &'static str,
-    confirm_name: Option<String>,
     nav: Vec<NavLink>,
 }
 
@@ -61,7 +56,7 @@ pub async fn show_quota(
     State(pool): State<SqlitePool>,
     State(clock): State<Clock>,
 ) -> Result<Response, StatusCode> {
-    let built = body::build(&pool, clock, DefineFormView::default(), &HashSet::new())
+    let built = body::build(&pool, clock, &HashSet::new())
         .await
         .map_err(write_failed)?;
     Ok(render_template(
@@ -72,246 +67,9 @@ pub async fn show_quota(
             quotas: built.quotas,
             day_options: built.day_options,
             today: built.today,
-            pending_name: built.pending_name,
-            pending_hours: built.pending_hours,
-            warning: built.warning,
-            button_label: built.button_label,
-            confirm_name: built.confirm_name,
             nav: nav::links(Page::Quota),
         },
     ))
-}
-
-/// The define form's own submission -- a plain HTML form, mirroring
-/// `triage::http::TriageFormRequest`'s reasoning: every field optional here
-/// too, since "missing" and "present but invalid" are different rejections
-/// (`quota-screen-both-fields-required-03` vs `-target-must-be-positive-04`)
-/// that only `scheduler_core::quota::QuotaDefinition::from_fields` can tell
-/// apart.
-#[derive(Deserialize, Default)]
-pub struct DefineQuotaForm {
-    name: Option<String>,
-    hours: Option<String>,
-    /// The name a *similar*-name warning was shown for, carried back by the
-    /// button's own resubmission -- present only when this exact name has
-    /// already been confirmed once (`quota-screen-similar-name-warns-07`).
-    /// An *exact* match ignores this field entirely: it is never
-    /// bypassable, confirmed or not.
-    #[serde(default)]
-    confirmed: Option<String>,
-}
-
-/// `minutes` the way the name-guard's own messages read it: `"4 h a week"`,
-/// never `"4h"` -- the row readout's compact form is a different context
-/// with its own established spelling, and this project does not invent a
-/// third.
-fn hours_a_week(minutes: i64) -> String {
-    if minutes % 60 == 0 {
-        format!("{} h a week", minutes / 60)
-    } else {
-        format!("{:.1} h a week", minutes as f64 / 60.0)
-    }
-}
-
-/// The re-rendered fragment for a rejected submission, echoing back what
-/// was typed (`T-forms-swap-one-fragment`, `T-422-is-product-wide`).
-async fn rejected(
-    pool: &SqlitePool,
-    clock: Clock,
-    pending_name: String,
-    pending_hours: String,
-    warning: Option<String>,
-    button_label: &'static str,
-    confirm_name: Option<String>,
-) -> Result<Response, StatusCode> {
-    body::respond(
-        pool,
-        clock,
-        StatusCode::UNPROCESSABLE_ENTITY,
-        DefineFormView {
-            pending_name,
-            pending_hours,
-            warning,
-            button_label,
-            confirm_name,
-        },
-        &HashSet::new(),
-    )
-    .await
-}
-
-/// Whether `confirmed` already carries this exact candidate name -- the
-/// resubmission a "Create anyway" tap sends, distinguished from a first
-/// attempt that has not been warned about yet.
-fn already_confirmed(confirmed: Option<&str>, candidate_name: &str) -> bool {
-    confirmed == Some(candidate_name)
-}
-
-/// Defines a new quota, or refuses and re-renders the same form carrying
-/// why (`T-one-front-door-per-capability`: one write path, `store::create`,
-/// reached only from here).
-pub async fn define_quota(
-    State(pool): State<SqlitePool>,
-    State(clock): State<Clock>,
-    Form(form): Form<DefineQuotaForm>,
-) -> Result<Response, StatusCode> {
-    let pending_name = form.name.clone().unwrap_or_default();
-    let pending_hours = form.hours.clone().unwrap_or_default();
-
-    let definition = match QuotaDefinition::from_fields(form.name.as_deref(), form.hours.as_deref())
-    {
-        Ok(definition) => definition,
-        // A missing name/hours and an out-of-domain hours value both
-        // re-render the same reset form (`quota-screen-both-fields-
-        // required-03`, `-target-must-be-positive-04`): neither scenario
-        // asserts a message here, only that nothing was created.
-        Err(_) => {
-            return rejected(
-                &pool,
-                clock,
-                pending_name,
-                pending_hours,
-                None,
-                DEFAULT_BUTTON_LABEL,
-                None,
-            )
-            .await;
-        }
-    };
-
-    let existing = super::store::existing_names(&pool)
-        .await
-        .map_err(write_failed)?;
-    let name_match = scheduler_core::quota::check_name(&definition.name, &existing);
-
-    respond_to_name_match(
-        &pool,
-        clock,
-        definition,
-        name_match,
-        form.confirmed.as_deref(),
-        pending_name,
-        pending_hours,
-    )
-    .await
-}
-
-/// The three ways a checked name can go: an exact duplicate, never
-/// bypassable; a similar one, warned once and created on confirmation
-/// (`quota-screen-similar-name-warns-07`); or nothing in its way, created
-/// outright. Split out of [`define_quota`] so each function's own branching
-/// stays under `T-complexity-8`.
-async fn respond_to_name_match(
-    pool: &SqlitePool,
-    clock: Clock,
-    definition: QuotaDefinition,
-    name_match: Option<NameMatch<'_>>,
-    confirmed: Option<&str>,
-    pending_name: String,
-    pending_hours: String,
-) -> Result<Response, StatusCode> {
-    match name_match {
-        Some(NameMatch::Exact(existing_name, existing_minutes)) => {
-            reject_exact_match(
-                pool,
-                clock,
-                pending_name,
-                pending_hours,
-                existing_name,
-                existing_minutes,
-            )
-            .await
-        }
-        Some(NameMatch::Similar(existing_name, existing_minutes))
-            if !already_confirmed(confirmed, &definition.name) =>
-        {
-            warn_similar_match(
-                pool,
-                clock,
-                pending_name,
-                pending_hours,
-                existing_name,
-                existing_minutes,
-                definition.name.clone(),
-            )
-            .await
-        }
-        _ => create_quota(pool, clock, definition).await,
-    }
-}
-
-/// An exact-match candidate is refused outright, never bypassable
-/// (`D-quotas-are-selected-not-typed`): the reset form carries only the
-/// existing quota's own name and target, nothing to confirm past.
-async fn reject_exact_match(
-    pool: &SqlitePool,
-    clock: Clock,
-    pending_name: String,
-    pending_hours: String,
-    existing_name: &str,
-    existing_minutes: i64,
-) -> Result<Response, StatusCode> {
-    let warning = format!(
-        "\u{201c}{existing_name}\u{201d} already exists at {}. File it there instead of making a second one.",
-        hours_a_week(existing_minutes)
-    );
-    rejected(
-        pool,
-        clock,
-        pending_name,
-        pending_hours,
-        Some(warning),
-        DEFAULT_BUTTON_LABEL,
-        None,
-    )
-    .await
-}
-
-/// A similar-match candidate is warned once; `candidate_name` rides back on
-/// the reset form's hidden `confirmed` field so a "Create anyway" resubmit
-/// can be told apart from a first attempt (`quota-screen-similar-name-
-/// warns-07`, [`already_confirmed`]).
-async fn warn_similar_match(
-    pool: &SqlitePool,
-    clock: Clock,
-    pending_name: String,
-    pending_hours: String,
-    existing_name: &str,
-    existing_minutes: i64,
-    candidate_name: String,
-) -> Result<Response, StatusCode> {
-    let warning = format!(
-        "That reads a lot like \u{201c}{existing_name}\u{201d} ({}). Same thing?",
-        hours_a_week(existing_minutes)
-    );
-    rejected(
-        pool,
-        clock,
-        pending_name,
-        pending_hours,
-        Some(warning),
-        "Create anyway",
-        Some(candidate_name),
-    )
-    .await
-}
-
-async fn create_quota(
-    pool: &SqlitePool,
-    clock: Clock,
-    definition: QuotaDefinition,
-) -> Result<Response, StatusCode> {
-    super::store::create(pool, &definition, clock.now_ms())
-        .await
-        .map_err(write_failed)?;
-    body::respond(
-        pool,
-        clock,
-        StatusCode::CREATED,
-        DefineFormView::default(),
-        &HashSet::new(),
-    )
-    .await
 }
 
 /// A session write's own submission -- the quick-log buttons' hidden
@@ -345,14 +103,8 @@ async fn validated_session(
     ) {
         Ok(session) => Ok(Ok((week.day_ms(session.day, &zone), session.minutes))),
         Err(_) => {
-            let rejection = body::respond(
-                pool,
-                clock,
-                StatusCode::UNPROCESSABLE_ENTITY,
-                DefineFormView::default(),
-                expanded_ids,
-            )
-            .await?;
+            let rejection =
+                body::respond(pool, clock, StatusCode::UNPROCESSABLE_ENTITY, expanded_ids).await?;
             Ok(Err(rejection))
         }
     }
@@ -377,14 +129,7 @@ pub async fn log_session(
     super::store::log_session(&pool, quota_id, day_ms, minutes, clock.now_ms())
         .await
         .map_err(write_failed)?;
-    body::respond(
-        &pool,
-        clock,
-        StatusCode::CREATED,
-        DefineFormView::default(),
-        &expanded_ids,
-    )
-    .await
+    body::respond(&pool, clock, StatusCode::CREATED, &expanded_ids).await
 }
 
 /// `POST /quota/sessions/{session_id}` -- corrects a logged session's day
@@ -404,14 +149,7 @@ pub async fn correct_session(
     super::store::update_session(&pool, session_id, day_ms, minutes)
         .await
         .map_err(write_failed)?;
-    body::respond(
-        &pool,
-        clock,
-        StatusCode::OK,
-        DefineFormView::default(),
-        &expanded_ids,
-    )
-    .await
+    body::respond(&pool, clock, StatusCode::OK, &expanded_ids).await
 }
 
 /// `POST /quota/sessions/{session_id}/delete` -- deletes a logged session
@@ -426,14 +164,7 @@ pub async fn delete_session(
     super::store::delete_session(&pool, session_id)
         .await
         .map_err(write_failed)?;
-    body::respond(
-        &pool,
-        clock,
-        StatusCode::OK,
-        DefineFormView::default(),
-        &expanded_ids(&expanded),
-    )
-    .await
+    body::respond(&pool, clock, StatusCode::OK, &expanded_ids(&expanded)).await
 }
 
 #[cfg(test)]
@@ -478,41 +209,28 @@ mod tests {
         out
     }
 
-    async fn post_define(pool: &SqlitePool, fields: &[(&str, &str)]) -> (StatusCode, String) {
-        let body = fields
-            .iter()
-            .map(|(name, value)| format!("{name}={}", urlencode(value)))
-            .collect::<Vec<_>>()
-            .join("&");
-        let app = crate::platform::app::build_app(pool.clone(), Clock::pinned_at(1_000));
-        let response = app
-            .oneshot(
-                Request::builder()
-                    .method("POST")
-                    .uri("/quota")
-                    .header("content-type", "application/x-www-form-urlencoded")
-                    .body(Body::from(body))
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-        let status = response.status();
-        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
-        (status, String::from_utf8(body.to_vec()).unwrap())
-    }
-
     #[tokio::test]
-    async fn the_quota_screen_is_reachable_and_shows_the_empty_state_when_nothing_is_defined() {
+    async fn the_quota_screen_is_reachable_and_shows_the_empty_state_when_nothing_is_triaged() {
         let (_dir, pool) = test_pool().await;
 
         let (status, body) = get_quota(&pool).await;
 
         assert_eq!(status, StatusCode::OK);
         assert!(
-            body.contains("A quota is a weekly hour target you keep"),
+            body.contains(
+                "A quota is a weekly hour target you keep — practice, study, running. Capture \
+                 one and triage it."
+            ),
             "got:\n{body}"
         );
-        assert!(body.contains("+ Define a new quota"), "got:\n{body}");
+        assert!(
+            body.contains(r#"<a href="/" class="quota-go-capture">Go to Capture &rarr;</a>"#),
+            "got:\n{body}"
+        );
+        assert!(
+            !body.contains("quota-define-form"),
+            "the quota screen must offer no way to define a quota, got:\n{body}"
+        );
     }
 
     #[tokio::test]
@@ -528,156 +246,15 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn defining_a_quota_creates_it_and_shows_its_target() {
+    async fn a_quota_created_by_triage_shows_its_target() {
         let (_dir, pool) = test_pool().await;
-
-        let (status, body) = post_define(&pool, &[("name", "Piano"), ("hours", "4")]).await;
-
-        assert_eq!(status, StatusCode::CREATED);
-        assert!(body.contains("Piano"), "got:\n{body}");
-        assert!(body.contains("0m / 4h"), "got:\n{body}");
-        assert!(body.contains("4h left this week"), "got:\n{body}");
-    }
-
-    #[tokio::test]
-    async fn defining_a_quota_without_a_name_is_rejected_and_creates_nothing() {
-        let (_dir, pool) = test_pool().await;
-
-        let (status, _) = post_define(&pool, &[("hours", "4")]).await;
-
-        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
-        let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM quotas")
-            .fetch_one(&pool)
-            .await
-            .unwrap();
-        assert_eq!(count, 0);
-    }
-
-    #[tokio::test]
-    async fn defining_a_quota_without_hours_is_rejected_and_creates_nothing() {
-        let (_dir, pool) = test_pool().await;
-
-        let (status, _) = post_define(&pool, &[("name", "Piano")]).await;
-
-        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
-        let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM quotas")
-            .fetch_one(&pool)
-            .await
-            .unwrap();
-        assert_eq!(count, 0);
-    }
-
-    #[tokio::test]
-    async fn defining_a_quota_with_zero_hours_is_rejected() {
-        let (_dir, pool) = test_pool().await;
-
-        let (status, _) = post_define(&pool, &[("name", "Piano"), ("hours", "0")]).await;
-
-        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
-    }
-
-    #[tokio::test]
-    async fn a_repeated_name_is_refused_with_a_message_naming_the_existing_quota() {
-        let (_dir, pool) = test_pool().await;
-        post_define(&pool, &[("name", "Piano"), ("hours", "4")]).await;
-
-        let (status, body) = post_define(&pool, &[("name", "piano"), ("hours", "2")]).await;
-
-        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
-        assert!(
-            body.contains(
-                "\u{201c}Piano\u{201d} already exists at 4 h a week. File it there instead of making a second one."
-            ),
-            "got:\n{body}"
-        );
-        let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM quotas")
-            .fetch_one(&pool)
-            .await
-            .unwrap();
-        assert_eq!(count, 1, "the exact-match duplicate must not be created");
-    }
-
-    #[tokio::test]
-    async fn an_exact_match_cannot_be_bypassed_by_confirming() {
-        let (_dir, pool) = test_pool().await;
-        post_define(&pool, &[("name", "Piano"), ("hours", "4")]).await;
-
-        let (status, _) = post_define(
-            &pool,
-            &[("name", "piano"), ("hours", "2"), ("confirmed", "piano")],
-        )
-        .await;
-
-        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
-        let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM quotas")
-            .fetch_one(&pool)
-            .await
-            .unwrap();
-        assert_eq!(count, 1);
-    }
-
-    #[tokio::test]
-    async fn a_similar_name_warns_but_offers_to_create_anyway() {
-        let (_dir, pool) = test_pool().await;
-        post_define(&pool, &[("name", "Piano"), ("hours", "4")]).await;
-
-        let (status, body) = post_define(&pool, &[("name", "Pianoo"), ("hours", "2")]).await;
-
-        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
-        assert!(
-            body.contains("That reads a lot like \u{201c}Piano\u{201d} (4 h a week). Same thing?"),
-            "got:\n{body}"
-        );
-        assert!(body.contains("Create anyway"), "got:\n{body}");
-        let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM quotas")
-            .fetch_one(&pool)
-            .await
-            .unwrap();
-        assert_eq!(count, 1, "the warned name must not be created yet");
-    }
-
-    #[tokio::test]
-    async fn confirming_a_similar_name_creates_it() {
-        let (_dir, pool) = test_pool().await;
-        post_define(&pool, &[("name", "Piano"), ("hours", "4")]).await;
-
-        let (status, body) = post_define(
-            &pool,
-            &[("name", "Pianoo"), ("hours", "2"), ("confirmed", "Pianoo")],
-        )
-        .await;
-
-        assert_eq!(status, StatusCode::CREATED);
-        assert!(body.contains("Pianoo"), "got:\n{body}");
-        let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM quotas")
-            .fetch_one(&pool)
-            .await
-            .unwrap();
-        assert_eq!(count, 2);
-    }
-
-    #[tokio::test]
-    async fn a_triaged_quota_task_does_not_appear_on_the_quota_screen() {
-        let (_dir, pool) = test_pool().await;
-        let capture_id = crate::capture::store::insert(&pool, "practise piano", "web", None, 0)
-            .await
-            .unwrap();
-        crate::triage::store::insert_task(
-            &pool,
-            capture_id,
-            &scheduler_core::task::TaskKind::Quota {
-                target_count: 3,
-                target_minutes_each: 45,
-                period: scheduler_core::task::Period::Week,
-            },
-            0,
-        )
-        .await
-        .unwrap();
+        given_a_quota(&pool, "Piano", "4").await;
 
         let (_, body) = get_quota(&pool).await;
 
-        assert!(!body.contains("practise piano"), "got:\n{body}");
+        assert!(body.contains("Piano"), "got:\n{body}");
+        assert!(body.contains("0m / 4h"), "got:\n{body}");
+        assert!(body.contains("4h left this week"), "got:\n{body}");
     }
 
     // --- sessions (#93, quota-sessions) -----------------------------------
@@ -722,8 +299,16 @@ mod tests {
         (status, String::from_utf8(body.to_vec()).unwrap())
     }
 
+    /// A quota is created by triage now (#138), not by a route this module
+    /// owns -- so its own tests build one directly through the store, the
+    /// same way `triage::http`'s tests build the `TaskKind` it decides on.
     async fn given_a_quota(pool: &SqlitePool, name: &str, hours: &str) -> i64 {
-        post_define(pool, &[("name", name), ("hours", hours)]).await;
+        let definition =
+            scheduler_core::quota::QuotaDefinition::from_fields(Some(name), Some(hours))
+                .expect("a valid fixture name and hours");
+        crate::quota::store::create(pool, &definition, 0)
+            .await
+            .unwrap();
         sqlx::query_scalar("SELECT id FROM quotas WHERE name = ?")
             .bind(name)
             .fetch_one(pool)

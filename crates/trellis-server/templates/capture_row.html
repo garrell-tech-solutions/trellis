@@ -62,14 +62,8 @@
 <div class="fields-panel">
 <form class="fields" hx-post="/captures/{{ capture.id }}/triage" hx-target="#lists" hx-swap="outerHTML">
 <input type="hidden" name="kind" value="quota">
-<label>Sessions <input type="number" name="target_count" placeholder="3"></label>
-<label>Minutes each <input type="number" name="target_minutes_each" placeholder="45"></label>
-<label>Per
-<select name="period">
-<option value="week">week</option>
-<option value="month">month</option>
-</select>
-</label>
+<label>Name <input type="text" name="name" value="{{ capture.text }}"></label>
+<label>Hours a week <input type="number" name="hours" step="0.5" min="0.5" placeholder="4"></label>
 <label>Tag <input type="text" name="context_tag" list="context-tag-suggestions" placeholder="@homedepot"></label>
 <div class="actions"><button type="submit">Add</button></div>
 </form>

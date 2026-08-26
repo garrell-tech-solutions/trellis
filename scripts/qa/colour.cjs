@@ -39,6 +39,7 @@ const SCREENS = [
   { path: '/', label: 'Capture', expectOverflow: true },
   { path: '/pool', label: 'Pool', expectOverflow: false },
   { path: '/committed', label: 'Committed', expectOverflow: false },
+  { path: '/quota', label: 'Quota', expectOverflow: false },
 ];
 const SCHEMES = ['light', 'dark'];
 

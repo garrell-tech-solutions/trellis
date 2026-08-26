@@ -8,7 +8,7 @@ use crate::platform::nav::{self, NavLink, Page};
 use crate::platform::response::{render_template, write_failed};
 use crate::quota::view::QuotaRowView;
 use askama::Template;
-use axum::extract::State;
+use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::Response;
 use axum::Form;
@@ -26,6 +26,8 @@ struct QuotaTemplate {
     meta: String,
     empty: bool,
     quotas: Vec<QuotaRowView>,
+    day_options: Vec<String>,
+    today: String,
     pending_name: String,
     pending_hours: String,
     warning: Option<String>,
@@ -34,8 +36,11 @@ struct QuotaTemplate {
     nav: Vec<NavLink>,
 }
 
-pub async fn show_quota(State(pool): State<SqlitePool>) -> Result<Response, StatusCode> {
-    let built = body::build(&pool, DefineFormView::default())
+pub async fn show_quota(
+    State(pool): State<SqlitePool>,
+    State(clock): State<Clock>,
+) -> Result<Response, StatusCode> {
+    let built = body::build(&pool, clock, DefineFormView::default())
         .await
         .map_err(write_failed)?;
     Ok(render_template(
@@ -44,6 +49,8 @@ pub async fn show_quota(State(pool): State<SqlitePool>) -> Result<Response, Stat
             meta: built.meta,
             empty: built.empty,
             quotas: built.quotas,
+            day_options: built.day_options,
+            today: built.today,
             pending_name: built.pending_name,
             pending_hours: built.pending_hours,
             warning: built.warning,
@@ -89,6 +96,7 @@ fn hours_a_week(minutes: i64) -> String {
 /// was typed (`T-forms-swap-one-fragment`, `T-422-is-product-wide`).
 async fn rejected(
     pool: &SqlitePool,
+    clock: Clock,
     pending_name: String,
     pending_hours: String,
     warning: Option<String>,
@@ -97,6 +105,7 @@ async fn rejected(
 ) -> Result<Response, StatusCode> {
     body::respond(
         pool,
+        clock,
         StatusCode::UNPROCESSABLE_ENTITY,
         DefineFormView {
             pending_name,
@@ -137,6 +146,7 @@ pub async fn define_quota(
         Err(_) => {
             return rejected(
                 &pool,
+                clock,
                 pending_name,
                 pending_hours,
                 None,
@@ -182,6 +192,7 @@ async fn respond_to_name_match(
         Some(NameMatch::Exact(existing_name, existing_minutes)) => {
             reject_exact_match(
                 pool,
+                clock,
                 pending_name,
                 pending_hours,
                 existing_name,
@@ -194,6 +205,7 @@ async fn respond_to_name_match(
         {
             warn_similar_match(
                 pool,
+                clock,
                 pending_name,
                 pending_hours,
                 existing_name,
@@ -211,6 +223,7 @@ async fn respond_to_name_match(
 /// existing quota's own name and target, nothing to confirm past.
 async fn reject_exact_match(
     pool: &SqlitePool,
+    clock: Clock,
     pending_name: String,
     pending_hours: String,
     existing_name: &str,
@@ -222,6 +235,7 @@ async fn reject_exact_match(
     );
     rejected(
         pool,
+        clock,
         pending_name,
         pending_hours,
         Some(warning),
@@ -237,6 +251,7 @@ async fn reject_exact_match(
 /// warns-07`, [`already_confirmed`]).
 async fn warn_similar_match(
     pool: &SqlitePool,
+    clock: Clock,
     pending_name: String,
     pending_hours: String,
     existing_name: &str,
@@ -249,6 +264,7 @@ async fn warn_similar_match(
     );
     rejected(
         pool,
+        clock,
         pending_name,
         pending_hours,
         Some(warning),
@@ -266,7 +282,101 @@ async fn create_quota(
     super::store::create(pool, &definition, clock.now_ms())
         .await
         .map_err(write_failed)?;
-    body::respond(pool, StatusCode::CREATED, DefineFormView::default()).await
+    body::respond(pool, clock, StatusCode::CREATED, DefineFormView::default()).await
+}
+
+/// A session write's own submission -- the quick-log buttons' hidden
+/// fields and the `Other…`/correction forms' visible ones all land here the
+/// same way (`T-one-front-door-per-capability`).
+#[derive(Deserialize, Default)]
+pub struct SessionForm {
+    day: Option<String>,
+    minutes: Option<String>,
+}
+
+/// Validates a session submission against the current week, or refuses --
+/// shared by [`log_session`] and [`correct_session`], which differ only in
+/// which store write and which success status follow
+/// (`quota-sessions-a-session-must-be-positive-09`,
+/// `-only-days-that-have-happened-03`'s server-side half: a guard that only
+/// lives in the day picker's own options is not a guard).
+async fn validated_session(
+    pool: &SqlitePool,
+    clock: Clock,
+    form: &SessionForm,
+) -> Result<Result<(i64, i64), Response>, StatusCode> {
+    let (week, zone) = body::current_week(pool, clock)
+        .await
+        .map_err(write_failed)?;
+    match scheduler_core::quota::validate_session(
+        form.day.as_deref(),
+        form.minutes.as_deref(),
+        &week,
+    ) {
+        Ok(session) => Ok(Ok((week.day_ms(session.day, &zone), session.minutes))),
+        Err(_) => {
+            let rejection = body::respond(
+                pool,
+                clock,
+                StatusCode::UNPROCESSABLE_ENTITY,
+                DefineFormView::default(),
+            )
+            .await?;
+            Ok(Err(rejection))
+        }
+    }
+}
+
+/// `POST /quota/{quota_id}/sessions` -- logs a session against `quota_id`.
+/// The quick-log buttons submit this with a hidden `day` already set to
+/// today and `minutes` fixed at `30`/`60`; `Other…` submits whatever the
+/// picker and the minutes field held.
+pub async fn log_session(
+    State(pool): State<SqlitePool>,
+    State(clock): State<Clock>,
+    Path(quota_id): Path<i64>,
+    Form(form): Form<SessionForm>,
+) -> Result<Response, StatusCode> {
+    let (day_ms, minutes) = match validated_session(&pool, clock, &form).await? {
+        Ok(session) => session,
+        Err(rejection) => return Ok(rejection),
+    };
+    super::store::log_session(&pool, quota_id, day_ms, minutes, clock.now_ms())
+        .await
+        .map_err(write_failed)?;
+    body::respond(&pool, clock, StatusCode::CREATED, DefineFormView::default()).await
+}
+
+/// `POST /quota/sessions/{session_id}` -- corrects a logged session's day
+/// and minutes in place (`quota-sessions-correcting-a-session-06`).
+pub async fn correct_session(
+    State(pool): State<SqlitePool>,
+    State(clock): State<Clock>,
+    Path(session_id): Path<i64>,
+    Form(form): Form<SessionForm>,
+) -> Result<Response, StatusCode> {
+    let (day_ms, minutes) = match validated_session(&pool, clock, &form).await? {
+        Ok(session) => session,
+        Err(rejection) => return Ok(rejection),
+    };
+    super::store::update_session(&pool, session_id, day_ms, minutes)
+        .await
+        .map_err(write_failed)?;
+    body::respond(&pool, clock, StatusCode::OK, DefineFormView::default()).await
+}
+
+/// `POST /quota/sessions/{session_id}/delete` -- deletes a logged session
+/// outright, taking its minutes with it
+/// (`quota-sessions-deleting-a-session-07`).
+pub async fn delete_session(
+    State(pool): State<SqlitePool>,
+    State(clock): State<Clock>,
+    Path(session_id): Path<i64>,
+) -> Result<Response, StatusCode> {
+    super::store::delete_session(&pool, session_id)
+        .await
+        .map_err(write_failed)?;
+    body::respond(&pool, clock, StatusCode::OK, DefineFormView::default()).await
 }
 
 #[cfg(test)]
@@ -511,5 +621,193 @@ mod tests {
         let (_, body) = get_quota(&pool).await;
 
         assert!(!body.contains("practise piano"), "got:\n{body}");
+    }
+
+    // --- sessions (#93, quota-sessions) -----------------------------------
+
+    /// A Tuesday, both in UTC and in every zone a fresh database's own
+    /// default settings row resolves to -- these tests do not touch
+    /// `settings`, so `UTC` (`0006_guardrails.sql`) is what `Week::of`
+    /// actually sees.
+    fn tuesday_clock() -> Clock {
+        let ms = "2026-08-25T14:00:00Z"
+            .parse::<jiff::Timestamp>()
+            .unwrap()
+            .as_millisecond();
+        Clock::pinned_at(ms)
+    }
+
+    async fn post_path(
+        pool: &SqlitePool,
+        clock: Clock,
+        path: &str,
+        fields: &[(&str, &str)],
+    ) -> (StatusCode, String) {
+        let body = fields
+            .iter()
+            .map(|(name, value)| format!("{name}={}", urlencode(value)))
+            .collect::<Vec<_>>()
+            .join("&");
+        let app = crate::platform::app::build_app(pool.clone(), clock);
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(path)
+                    .header("content-type", "application/x-www-form-urlencoded")
+                    .body(Body::from(body))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let status = response.status();
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        (status, String::from_utf8(body.to_vec()).unwrap())
+    }
+
+    async fn given_a_quota(pool: &SqlitePool, name: &str, hours: &str) -> i64 {
+        post_define(pool, &[("name", name), ("hours", hours)]).await;
+        sqlx::query_scalar("SELECT id FROM quotas WHERE name = ?")
+            .bind(name)
+            .fetch_one(pool)
+            .await
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn logging_a_session_creates_it_and_updates_the_readout() {
+        let (_dir, pool) = test_pool().await;
+        let quota_id = given_a_quota(&pool, "Piano", "4").await;
+
+        let (status, body) = post_path(
+            &pool,
+            tuesday_clock(),
+            &format!("/quota/{quota_id}/sessions"),
+            &[("day", "Tue"), ("minutes", "20")],
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::CREATED);
+        assert!(body.contains("20m / 4h"), "got:\n{body}");
+        assert!(body.contains("Tue 20m"), "got:\n{body}");
+    }
+
+    #[tokio::test]
+    async fn logging_a_session_for_an_earlier_day_this_week_counts_the_same() {
+        let (_dir, pool) = test_pool().await;
+        let quota_id = given_a_quota(&pool, "Piano", "4").await;
+
+        let (status, body) = post_path(
+            &pool,
+            tuesday_clock(),
+            &format!("/quota/{quota_id}/sessions"),
+            &[("day", "Mon"), ("minutes", "20")],
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::CREATED);
+        assert!(body.contains("20m / 4h"), "got:\n{body}");
+        assert!(body.contains("Mon 20m"), "got:\n{body}");
+    }
+
+    #[tokio::test]
+    async fn logging_a_session_for_a_day_that_has_not_happened_yet_is_refused() {
+        let (_dir, pool) = test_pool().await;
+        let quota_id = given_a_quota(&pool, "Piano", "4").await;
+
+        let (status, _) = post_path(
+            &pool,
+            tuesday_clock(),
+            &format!("/quota/{quota_id}/sessions"),
+            &[("day", "Wed"), ("minutes", "20")],
+        )
+        .await;
+
+        assert_eq!(
+            status,
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "not by the picker, and not by posting one directly"
+        );
+        let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM quota_sessions")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(count, 0);
+    }
+
+    #[tokio::test]
+    async fn logging_a_session_of_zero_minutes_is_refused() {
+        let (_dir, pool) = test_pool().await;
+        let quota_id = given_a_quota(&pool, "Piano", "4").await;
+
+        let (status, _) = post_path(
+            &pool,
+            tuesday_clock(),
+            &format!("/quota/{quota_id}/sessions"),
+            &[("day", "Tue"), ("minutes", "0")],
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    }
+
+    #[tokio::test]
+    async fn correcting_a_session_changes_its_day_and_minutes() {
+        let (_dir, pool) = test_pool().await;
+        let quota_id = given_a_quota(&pool, "Piano", "4").await;
+        post_path(
+            &pool,
+            tuesday_clock(),
+            &format!("/quota/{quota_id}/sessions"),
+            &[("day", "Mon"), ("minutes", "25")],
+        )
+        .await;
+        let session_id: i64 = sqlx::query_scalar("SELECT id FROM quota_sessions")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+
+        let (status, body) = post_path(
+            &pool,
+            tuesday_clock(),
+            &format!("/quota/sessions/{session_id}"),
+            &[("day", "Tue"), ("minutes", "45")],
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::OK);
+        assert!(body.contains("45m / 4h"), "got:\n{body}");
+        assert!(body.contains("Tue 45m"), "got:\n{body}");
+        assert!(!body.contains("Mon 25m"), "got:\n{body}");
+    }
+
+    #[tokio::test]
+    async fn deleting_a_session_removes_it_and_leaves_the_quota() {
+        let (_dir, pool) = test_pool().await;
+        let quota_id = given_a_quota(&pool, "Piano", "4").await;
+        post_path(
+            &pool,
+            tuesday_clock(),
+            &format!("/quota/{quota_id}/sessions"),
+            &[("day", "Mon"), ("minutes", "25")],
+        )
+        .await;
+        let session_id: i64 = sqlx::query_scalar("SELECT id FROM quota_sessions")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+
+        let (status, body) = post_path(
+            &pool,
+            tuesday_clock(),
+            &format!("/quota/sessions/{session_id}/delete"),
+            &[],
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::OK);
+        assert!(body.contains("Piano"), "the quota itself must survive");
+        assert!(body.contains("0m / 4h"), "got:\n{body}");
+        assert!(body.contains("No sessions yet this week"), "got:\n{body}");
     }
 }

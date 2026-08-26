@@ -34,6 +34,7 @@ mod one_screen;
 mod payloads;
 mod pool_screen;
 mod quota_screen;
+mod quota_sessions;
 mod quota_triage_validation;
 mod triage;
 mod triage_from_page;
@@ -296,6 +297,9 @@ pub async fn dispatch(
         return outcome;
     }
     if let Some(outcome) = quota_screen::dispatch(world, text, example).await {
+        return outcome;
+    }
+    if let Some(outcome) = quota_sessions::dispatch(world, text, example).await {
         return outcome;
     }
 

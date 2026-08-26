@@ -32,13 +32,16 @@ const executablePath = process.env.PHONE_LAYOUT_CHROME || '/usr/bin/google-chrom
 const VIEWPORT = { width: 390, height: 844 };
 const TAB_BAR_TOLERANCE_PX = 2;
 
-// Quota (#93) does not exist yet -- D-four-screens names four, this checks
-// the three that answer 200 today. The next screen must extend this list
-// rather than inherit a pass.
+// D-four-screens names four; all four answer 200 now that #93 has shipped
+// both its halves. Quota carries the densest header this product draws --
+// a name, a readout, a note, two quick-log buttons and an `Other…`
+// disclosure all in one row at 390px -- so a tap-target or overflow
+// regression is more likely to show up here first than on the other three.
 const SCREENS = [
   { path: '/', label: 'Capture', expectOverflow: true },
   { path: '/pool', label: 'Pool', expectOverflow: false },
   { path: '/committed', label: 'Committed', expectOverflow: false },
+  { path: '/quota', label: 'Quota', expectOverflow: false },
 ];
 
 let failures = 0;

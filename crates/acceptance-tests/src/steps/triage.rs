@@ -63,7 +63,7 @@ pub async fn dispatch(
         return Some(given_empty_task_list(world).await);
     }
     if let Some(caps) = GIVEN_SERVER_BELIEVES_IT_IS.captures(text) {
-        return Some(given_server_believes_it_is(world, &caps[1]));
+        return Some(dispatch_server_believes_it_is(world, example, &caps));
     }
     if let Some(caps) = GIVEN_CAPTURE_WAITING.captures(text) {
         return Some(given_capture_waiting(world, &caps[1]).await);
@@ -183,6 +183,20 @@ async fn dispatch_has_priority(
     then_task_has_priority(world, priority).await
 }
 
+/// See `pool_screen.rs`'s own copy of this function for the full reasoning;
+/// duplicated rather than shared per this project's established convention.
+/// `given_server_believes_it_is`'s own step is the first caller in this
+/// module that names a placeholder (`quota_sessions.feature`'s `"<now>"`)
+/// rather than always a literal timestamp -- every step above it happens to
+/// have been written with literals only, which is what let the gap stand.
+fn resolve(example: &BTreeMap<String, String>, raw: &str) -> Result<String, String> {
+    static PLACEHOLDER: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^<(\w+)>$").unwrap());
+    match PLACEHOLDER.captures(raw) {
+        Some(caps) => Ok(example_value(example, &caps[1])?.to_string()),
+        None => Ok(raw.to_string()),
+    }
+}
+
 async fn dispatch_has_quota_target(
     world: &World,
     example: &BTreeMap<String, String>,
@@ -200,6 +214,15 @@ fn dispatch_rejection_names(
 ) -> Result<(), String> {
     let missing_field = example_value(example, &caps[1])?;
     then_rejection_names(world, missing_field)
+}
+
+fn dispatch_server_believes_it_is(
+    world: &mut World,
+    example: &BTreeMap<String, String>,
+    caps: &regex::Captures<'_>,
+) -> Result<(), String> {
+    let timestamp = resolve(example, &caps[1])?;
+    given_server_believes_it_is(world, &timestamp)
 }
 
 pub async fn given_empty_task_list(world: &mut World) -> Result<(), String> {
@@ -514,6 +537,40 @@ mod tests {
         let mut world = World::new();
         world.last_status = Some(422);
         assert_eq!(then_triage_is_rejected(&mut world), Ok(()));
+    }
+
+    #[test]
+    fn resolve_returns_a_literal_timestamp_unchanged() {
+        let example = BTreeMap::new();
+        assert_eq!(
+            resolve(&example, "2026-08-25T14:00:00Z"),
+            Ok("2026-08-25T14:00:00Z".to_string())
+        );
+    }
+
+    #[test]
+    fn resolve_looks_up_a_placeholder_in_the_example_row() {
+        let example = super::super::example(&[("now", "2026-08-25T14:00:00Z")]);
+        assert_eq!(
+            resolve(&example, "<now>"),
+            Ok("2026-08-25T14:00:00Z".to_string())
+        );
+    }
+
+    /// The bug the quota-sessions brief named: `given_server_believes_it_is`
+    /// used to receive the captured text raw, so a step written as `the
+    /// server believes it is "<now>"` pinned the literal string `"<now>"`
+    /// rather than looking it up -- failing with "bad pinned instant" rather
+    /// than the missing-step error a reader would expect.
+    #[tokio::test]
+    async fn dispatch_resolves_the_now_placeholder_before_pinning_the_clock() {
+        let mut world = migrated_world().await;
+        let example = super::super::example(&[("now", "2026-08-25T14:00:00Z")]);
+
+        let outcome = dispatch(&mut world, r#"the server believes it is "<now>""#, &example).await;
+
+        assert_eq!(outcome, Some(Ok(())));
+        assert_eq!(world.pinned_now_ms, Some(1787666400000));
     }
 
     #[tokio::test]

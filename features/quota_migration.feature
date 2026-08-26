@@ -1,3 +1,7 @@
+# acceptance-mutation-manifest-begin
+# {"version":1,"tested_at":"2026-08-26T17:13:56.866499632Z","feature_name":"Quotas triaged before the quota screen existed appear on it","feature_path":"features/quota_migration.feature","background_hash":"f421fc66d06a0859aaedbc32143033d9bcb61eda4df569c1c77d214253346da0","implementation_hash":"sha256:75684c8c6afc0562225d276c770d990e818c22c4a9ed1dd4d676ef5ee87ad012","scenarios":[]}
+# acceptance-mutation-manifest-end
+
 # quota-migration-converts-what-was-triaged-01: quotas triaged before the quota screen existed appear on it, with their targets multiplied out
 # quota-migration-no-second-counter-02: a converted quota does not become a second counter beside a quota of the same name
 #

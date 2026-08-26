@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 759fe5161178528d631db755f7975d17b7f9272d4d782183c2d1f2fbbbddb7fc # shrinks to (week, zone) = (Week { monday: 2014-12-29, today: Wed }, TimeZone(TZif("America/Sao_Paulo")))

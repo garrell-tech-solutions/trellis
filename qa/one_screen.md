@@ -49,8 +49,9 @@ again, it is recomputable from the same rows. Confirm the task rows survive.
 
 1. `cargo run -p trellis-server -- serve --db <fresh path>`.
 2. Open `http://localhost:8080`. Confirm the capture box and the inbox are
-   there, and that the tab bar offers **Capture, Pool and
-   Committed** — three tabs, not four.
+   there, and that the tab bar offers **Capture, Pool, Committed and
+   Quota** — four tabs. **Updated by #93**, which built the fourth route;
+   this said "three tabs, not four" while Quota did not exist.
 3. Quick-add a capture. Triage it. Dismiss another. Confirm all three still
    work exactly as before.
 4. Type `http://localhost:8080/stats` by hand. Confirm a 404.

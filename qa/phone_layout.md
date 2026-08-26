@@ -117,10 +117,15 @@ looking at a branch.
 1. Start the server against a fresh database.
 2. Seed enough captures that Capture overflows 844px.
 3. Drive the browser at 390×844 and run the three assertions on each of the
-   three screens.
+   four screens.
 
 ### Expected Observable Outcomes
-- All three assertions hold on all three screens.
+- All three assertions hold on all four screens.
+- **Quota is the fourth and it arrived after this document did** (#93), added
+  to `SCREENS` in `quota-sessions`. It is the densest header the product has
+  — a name, a readout, a progress track and three log controls in one row —
+  so **it is the likeliest of the four to overflow 390px.** If it does,
+  **that is the finding**: report it rather than widening the tolerance.
 - **Deliberately break it to prove the check works**, before trusting it:
   restore `min-height` on `body` and confirm the check **fails**. A check
   that has never failed is a check nobody has shown to work — and this

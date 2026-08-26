@@ -4,18 +4,27 @@ Covers: `features/quota_sessions.feature`, and the two halves no acceptance
 scenario can hold — **the expand and `Other…` disclosures**, and **a real week
 boundary.**
 
-## If this half was deferred, stop here
+## This document is now due, and it is what turns `trunk` green
 
-The brief named a line: *the entity, the screen, the tab and `+ Define a new
-quota` land; the session surface does not.* **If the pull request says it
-stopped there, this document is not yet due** — confirm `quota_sessions.feature`
-is absent rather than present-and-failing, confirm `qa/quota_screen.md` passes
-in full, and say so.
+**Written for `quota-screen`, which stopped at the line the brief drew and was
+then merged red.** `quota_sessions.feature` went to `trunk` at `bf8c7f9`
+carrying nine failing scenarios, and the cost is wider than the one red check:
+no release published for that commit, so **the owner's live Trellis cannot be
+updated to the version with the fourth screen in it**; `migrations are
+append-only` skipped, so `0014` merged without that gate reporting; the
+language-mutation run gone `trunk`-wide, because `cargo-mutants` aborts on a
+failed baseline; and the preview poller (**#146**) selecting on run-level
+success, so the phone never showed the fourth tab at all.
+
+**All of it clears the moment these nine scenarios pass.** That is what this
+slice is for.
 
 **What is not acceptable is a half-built session surface**: a `+30m` that
 writes nothing, a `This week` that cannot delete, or a Monday reset that is a
 `TODO`. **If you find one, that is the finding**, and it outranks everything
-else in this document.
+else in this document. **Nor is a green reached by weakening, deleting or
+parking the feature file** — the only acceptable green is nine scenarios
+passing against a real implementation.
 
 ## Interface used
 
@@ -218,6 +227,16 @@ assertion it must trip; confirm the named one goes red.
 - **Breakages 1, 3 and 4 are the ones to do if you do only three.** All three
   leave the entire acceptance suite green, which is precisely why this document
   exists.
+- **⚠️ These nine scenarios have never been observed failing against an
+  implementation.** They were written before one existed and have only ever
+  been red on "no route yet", which is not the same thing at all
+  (`T-a-check-must-be-seen-to-fail`). **Going red-to-green is not evidence.**
+  Every breakage above must be run once the feature works.
+- **⚠️ Do not read the mutation manifest as evidence either.** **#145**:
+  a scenario with a surviving mutant is dropped from the manifest rather than
+  recorded, so every checked-in manifest reads 100% killed whether or not it
+  is, and `quota_sessions.feature`'s will too. **Report what the tool printed
+  on the run**, not what the file says afterwards — and do not hand-edit it.
 
 ## By-hand walkthrough — on a real phone
 
@@ -246,6 +265,40 @@ assertion it must trip; confirm the named one goes red.
 - **#137 re-did the palette and typeface** — this screen has never been seen in
   the new one. Report how the 6px progress track and the tabular readout look
   before anything about behaviour.
+
+## Procedure — nothing else changed
+
+1. Run the acceptance suite and every QA suite.
+2. Run `scripts/analyzers/dry.sh` and **say what it measured.**
+
+### Expected Observable Outcomes
+- **All 26 acceptance features pass, `quota_sessions` included.** `trunk` has
+  been red on exactly this one feature and green on the other 25 since
+  `bf8c7f9`; **if a 27th thing is failing, it is new and it is yours** — do not
+  fold it into the known red.
+- **The language-mutation run returns with this slice**, having been
+  unavailable for a whole slice. **Expect it to have something to say**, and
+  report it rather than the manifest (**#145**).
+- **`/quota` joins `colour.cjs` and `phone_layout.cjs`'s `SCREENS` lists.**
+  Both had a hardcoded three, so the fourth screen has never been measured for
+  palette, dark mode, contrast, tap targets or overflow. **If adding it turns
+  either gate red, that is the point** — report what it found rather than
+  adjusting the screen to suit the check. **The quota row is the densest header
+  the product has**, so phone layout is the likelier of the two to bite.
+- **`qa/installable.md` still says "three screens" and was not in this slice's
+  scope.** Worth thirty seconds anyway: **confirm `/quota` links the same
+  manifest the other three do.** A screen that does not is a real defect for an
+  installable app, and nothing currently checks it. Report it; do not fix it
+  here.
+- **DRY: report the number and the formats.** #144 measured 2.05% against a 3%
+  product-code threshold. **A second step module for the same screen is the
+  thing most likely to cross it** — say whether a shared family was extracted
+  early or bolted on at the end.
+- **#118 is not fixed here and is now load-bearing twice.** The Monday boundary
+  reads the owner's timezone, which `/timezone` can only set by `POST` from no
+  page. The live database reads `America/New_York`; **the schema default is
+  `UTC`**, so a fresh install gets a Monday that is not the owner's Monday.
+  **Say so in the report.**
 
 ## Independent of Implementation
 

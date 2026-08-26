@@ -13,16 +13,6 @@ writes `archived_at` directly proves nothing here — **this slice is entirely
 about what that route leaves behind**, so the shortcut is both more tempting
 and more wrong than usual (`T-cross-capability-invariants-need-an-owner`).
 
-## The defect, and why it mattered
-
-`pool/store.rs:31` filtered `archived_at IS NULL`, so a completed task left
-the query; `pool.rs:101` re-tested the threshold on every render. **The third
-check-off mid-shop dissolved the panel** and scattered the rest into loose
-ends — with no record of what had already been got.
-
-**The screen destroyed the list at the moment it was being used for its only
-purpose.**
-
 ## Two rules that are not the same rule
 
 - **Formation** needs **three open items.** Completed ones never conjure a
@@ -30,41 +20,28 @@ purpose.**
 - **Persistence** counts **everything displayed.** Working a trip never
   dissolves it.
 
-**"Displayed" is the word that failed, and #129 replaced it.** Clearing is
-precisely what stops something being displayed, so five with three cleared
-counted as two and fell to loose ends. The rule is now stated over the *run*
-rather than the render — a run ends when the last thing waiting at a tag is
-cleared away — and it is written out in `qa/trip_persistence.md`. Everything
-in this document below still holds; only the clearing procedure moved.
-
 **If those are ever collapsed into one predicate, one of the two behaviours
-is wrong** — and #103 got there by fixing the number without the experience.
-A panel of one open item that reads *"1 of 3 done"* is right; a panel of one
-that reads *"3 things"* is the half-pass trap that slice named.
+is wrong.** #129 replaced "displayed" — clearing is precisely what stops
+something being displayed — with a rule stated over the *run*, written out in
+`qa/trip_persistence.md`. Everything below still holds; only the clearing
+procedure moved.
 
 ## Nothing clears itself
 
 **There is no time window and no automatic sweep.** A struck item is a record
-of what you did until you tap the clear control. The screen changes state only
-when touched.
+of what you did until you tap the clear control. **If you find items
+disappearing on their own — overnight, on reload, on revisiting the screen —
+that is a defect**, and specifically the option the owner rejected.
 
 **The control is a bare `✕` immediately after the progress label**, with an
-accessible name of *Clear done*, and it appears only once something is
-struck. **Find it by its accessible name, never by its glyph or position**
-(`T-qa-binds-tolerantly-to-markup`) — the glyph is the thing most likely to
-change.
-
-**Its position is doing the work, and that is worth knowing when you look at
-it.** There is no conventional icon for "clear completed": `✕` means close or
-delete, a bin means discard, an eye-slash means temporarily hidden. It reads
-correctly here **only because it sits directly after the count of done
-things.** **The misreading to watch for is "close this group"** — if that is
-what it looks like on the phone, say so, because the fix is placement rather
-than a different glyph.
-
-**If you find items disappearing on their own — overnight, on reload, on
-revisiting the screen — that is a defect**, and specifically the option the
-owner rejected.
+accessible name of *Clear done*, appearing only once something is struck.
+**Find it by its accessible name, never by its glyph or position**
+(`T-qa-binds-tolerantly-to-markup`). **Its position is doing the work**:
+there is no conventional icon for "clear completed", and it reads correctly
+only because it sits directly after the count of done things. **The
+misreading to watch for is "close this group"** — if that is what it looks
+like on the phone, say so, because the fix is placement rather than a
+different glyph.
 
 ## What can and cannot be undone
 
@@ -73,10 +50,9 @@ owner rejected.
 - **Clearing is final.** Nothing brings back a cleared item, and there is no
   list of completed work anywhere (`D-kill-means-archive`).
 
-**#103 asserted that nothing offers an un-do. That assertion was narrowed by
-this slice, not dropped** — `mark_done.feature` changed with it. The rule is
-now: **you can uncheck what you can see, and nothing brings back what has
-cleared.** Check both halves.
+**#103's no-undo assertion was narrowed by this slice, not dropped** —
+`mark_done.feature` changed with it. The rule is now: **you can uncheck what
+you can see, and nothing brings back what has cleared.** Check both halves.
 
 ## By-hand walkthrough — on a phone
 
@@ -110,14 +86,10 @@ cleared.** Check both halves.
 
 ## Procedure — clearing, and what it does not take with it
 
-**Changed by #129 (`qa/trip_persistence.md`), and an earlier version of this
-document asserted the opposite.** It said the second case below "drops to
-loose ends, because clearing took it to two open items and formation needs
-three". **That was the defect**, found by the owner within an hour of merging
-this slice: clearing dissolved the panel with the owner still standing in the
-shop. `D-a-trip-survives-being-worked` was extended on 2026-08-24 —
-**clearing tidies the panel, it does not dissolve it** — and both cases now
-hold.
+**Changed by #129 (`qa/trip_persistence.md`): `D-a-trip-survives-being-worked`
+was extended on 2026-08-24 so that clearing tidies the panel rather than
+dissolving it.** An earlier version of this document asserted the opposite
+for case 2 below; both cases now hold.
 
 1. Five tasks at one tag, three done. Clear done. Read the screen.
 2. On a fresh database: **three** tasks at one tag, **one** done. Confirm a
@@ -186,15 +158,11 @@ hold.
 - `pool_screen`'s threshold and ordering procedures still pass untouched:
   **order stays derived**, most items first, alphabetical tiebreak, and
   `pool-screen-nothing-reorders-05` still holds.
-- **Correction to an earlier version of this document**, which said the
-  canvas's priority arrows are "not approved". **That was wrong and
-  overbroad**, and I inherited it from a brief the PM has since corrected.
-  `D-menu-is-a-worklist` names manual priority and **the arrows are approved
-  — for loose ends** (#95). The split is the point: **a trip is a unit you
-  clear in one stop, so its item order is noise; a loose end is a thing you
-  decide about, so it earns a control.** What must not appear *here* is a
-  reorder control **on a trip**, which is exactly what
-  `pool-screen-nothing-reorders-05` asserts.
+- **Reorder arrows are approved — for loose ends** (#95,
+  `D-menu-is-a-worklist`); an earlier version of this document said they were
+  not approved at all, which was overbroad. What must not appear is a reorder
+  control **on a trip**, which is what `pool-screen-nothing-reorders-05`
+  asserts.
 - **#108 is open on this exact query and is not this slice's** — if the
   `WHERE` moved out of the store to make this work, say so; that is the
   thing #108 exists to prevent.

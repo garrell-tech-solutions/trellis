@@ -13,75 +13,44 @@
 # trip-progress-loose-ends-unchanged-08: a completed loose end still leaves the screen at once
 #
 # THE SCREEN DESTROYED THE LIST AT THE MOMENT IT WAS BEING USED FOR ITS ONLY
-# PURPOSE. pool/store.rs:31 filters archived_at IS NULL, so a completed task
-# left the query; pool.rs:101 then re-tested the threshold on every render, so
-# the third check-off mid-shop dissolved the panel and scattered the rest into
-# loose ends.
+# PURPOSE. pool/store.rs filters archived_at IS NULL, so a completed task left
+# the query; pool.rs then re-tested the threshold on every render, so the third
+# check-off mid-shop dissolved the panel and scattered the rest into loose ends.
 #
 # THIS NARROWS #103, IT DOES NOT REVERSE IT. That slice rejected counting done
 # items toward the threshold as the half-pass trap -- a trip panel of one that
-# reads correctly until you look at the number. That was right about the
-# NUMBER and wrong about the EXPERIENCE, and the fix is the half it did not
-# consider: change the label, not the visibility. FORMATION still requires
-# three OPEN items, so completed ones can never conjure a trip; PERSISTENCE
-# counts everything displayed, so working a trip never dissolves it.
+# reads correctly until you look at the number. That was right about the NUMBER
+# and wrong about the EXPERIENCE, and the fix is the half it did not consider:
+# change the label, not the visibility. FORMATION still requires three OPEN
+# items, so completed ones can never conjure a trip; PERSISTENCE counts
+# everything displayed, so working a trip never dissolves it.
 #
-# NOTHING CLEARS ITSELF. The owner chose an explicit control over any time
-# window: this screen changes state only when tapped, and a struck item is a
-# record of what you did until you say otherwise.
+# NOTHING CLEARS ITSELF: this screen changes state only when tapped, and a
+# struck item is a record of what you did until you say otherwise. THE CLEAR
+# CONTROL IS A GLYPH WHOSE POSITION CARRIES ITS MEANING -- there is no
+# conventional icon for "clear completed", so `X` reads correctly only sitting
+# immediately after the "3 of 5 done" label. qa/trip_progress.md carries the
+# misreading to watch for. The canvas is silent here
+# (T-canvas-is-authoritative-where-it-speaks): `poolRow` has no completed state
+# at all and `g.count` reads "3 things", never progress. Flagged, not filled.
 #
-# THE CONTROL IS A GLYPH, AND ITS POSITION CARRIES THE MEANING. `X` sits
-# immediately after the "3 of 5 done" label, with aria-label="Clear done",
-# and appears only once something is struck. The owner prefers icons to text
-# buttons and the canvas agrees -- every glyph it draws is a bare button with
-# an aria-label (up, down, enter, caret). But every one of those is
-# DIRECTIONAL OR LITERAL: the design has never asked a glyph to carry an
-# abstract meaning, and THERE IS NO CONVENTIONAL ICON FOR "CLEAR COMPLETED".
-# X means close or delete, a bin means discard, an eye-slash means temporarily
-# hidden -- all adjacent, all subtly wrong. So the glyph is placed where its
-# neighbour explains it: directly after the count of done things. Somewhere
-# else on the panel the same glyph would read as "close this group", which is
-# the one misreading QA is told to watch for.
+# #103'S NO-UNDO ASSERTION IS NARROWED, NOT DELETED. What survives: no
+# browsable list of completed work (D-kill-means-archive) and no reorder arrow.
+# WHAT CHANGES: a struck item still on the screen can be unchecked, because
+# that is the direct inverse of the tap that struck it. The rule is now YOU CAN
+# UNCHECK WHAT YOU CAN SEE, AND NOTHING BRINGS BACK WHAT HAS CLEARED.
 #
-# THE CANVAS IS SILENT HERE, checked rather than assumed
-# (T-canvas-is-authoritative-where-it-speaks). `poolRow` has no completed
-# state at all -- no strike-through, no dimming, its only variation is a
-# priority highlight this project does not build -- and `g.count` reads
-# "3 things", never progress. That is the SIXTH and SEVENTH gap the canvas has
-# left, after the done control, the date input, a settings surface, the app
-# icon and the committed panel. Flagged, not filled silently.
+# NO MIGRATION, AND THIS IS DELIBERATE -- #126 bought a permanent column for a
+# display preference on a premise that had already expired. archived_at carries
+# everything: struck means archived and still displayed, cleared means archived
+# and no longer displayed, and "no longer displayed" is a consequence of the
+# clear tap rather than a stored fact.
 #
-# #103'S NO-UNDO ASSERTION IS NARROWED, NOT DELETED, and mark_done.feature
-# changes with this slice. What survives: no browsable list of completed work
-# (D-kill-means-archive -- "the moment an archive is browsable it becomes a
-# place to hide from decisions") and no reorder arrow. WHAT CHANGES: a struck
-# item still on the screen can be unchecked, because that is the direct
-# inverse of the tap that struck it and a deliberate act in its own right.
-# The rule is now: YOU CAN UNCHECK WHAT YOU CAN SEE, AND NOTHING BRINGS BACK
-# WHAT HAS CLEARED.
-#
-# NO MIGRATION, AND THIS IS DELIBERATE. #126 bought a permanent column for a
-# display preference on a premise that had already expired, and could not
-# un-buy it. archived_at already carries everything this slice needs: struck
-# means archived and still displayed, cleared means archived and no longer
-# displayed, and "no longer displayed" is a consequence of the clear tap
-# rather than a stored fact.
-#
-# --- TWO SCENARIOS HERE CHANGED IN #129 (`trip_persistence.feature`) ------
-# THE WORD THAT FAILED WAS "DISPLAYED", four lines up. Persistence counting
-# "everything displayed" is right until CLEARING is the thing that stops
-# something being displayed -- so five with three cleared counted as two and
-# fell to loose ends, with the owner still standing in the shop. The owner
-# EXTENDED `D-a-trip-survives-being-worked` on 2026-08-24: once a tag has
-# formed a trip it stays one for the rest of the run, and clearing tidies the
-# panel rather than dissolving it.
-#
-# `-05` ASSERTED THAT DEFECT and is REVERSED, deliberately and in the open --
-# it was green, it had to go red, and it is neither deleted nor weakened.
-# `-04` is the consequence: its two survivors used to land in loose ends and
-# now stay in the panel, so its `loose` count is zero. Everything else in
-# this file, `-06` above all, stands exactly as written. The rule that
-# replaces the single predicate is in `trip_persistence.feature`'s header.
+# -05 AND -04 CHANGED IN #129: the word that failed was "displayed", because
+# persistence counting everything displayed is right until CLEARING is what
+# stops something being displayed. -05 asserted that defect and is reversed;
+# -04 is the consequence, its `loose` count going to zero. The rule that
+# replaces the single predicate is in trip_persistence.feature's header.
 Feature: A trip survives being worked
 
   Background:

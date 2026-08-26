@@ -15,49 +15,21 @@ the production route the screens depend on, and every procedure below would
 then pass against an implementation whose control does nothing. **Use the
 checkbox, through the page.**
 
-## Why this slice exists
-
-**The capture side has an exit and the task side did not.** #48 gave the
-inbox a "no"; once a capture became a task it was permanent.
-
-That is worse than merely missing, because of `T-trips-are-derived-not-ranked`:
-**completed items keep counting toward the trip threshold**, so the grouping
-that makes Pool worth opening is the first thing to rot. A Pool screen that
-only grows is worse after a week than no Pool screen.
-
 ## The model, and what is deliberately not built
 
-**One column.** Marking done writes `tasks.archived_at`, which has existed
-since `0002` and which nothing has ever written. `T-archived-at-only` stays
-literally true — it remains the single archive signal.
+**One column**, `tasks.archived_at` (`T-archived-at-only`), and **no
+done-versus-killed discriminator** — the reasoning is in
+`features/mark_done.feature`'s header. **If you find a second timestamp or an
+outcome column, that is a defect**, not foresight.
 
-**No done-versus-killed discriminator, on purpose.** `T-capture-leaves-inbox-once`
-managed with one column because the exit was *derivable* — a triaged capture
-has a `tasks` row referencing it and a dismissed one does not. **Here there
-is no such row**, so the distinction would have to be *stored* — and **nothing
-in Trellis can kill a task today**, so the column could only ever hold one
-value. That is the speculative schema this project refuses. When a kill
-control arrives it adds the discriminator and backfills every existing row as
-`done`, which is provably correct because nothing else could have set it.
-
-**If you find a second timestamp or an outcome column, that is a defect**, not
-foresight.
-
-## The canvas does not draw this control
-
-Its complete set of `aria-label`s is `Raise priority` ×3, `Lower priority`
-×3, `Minutes`, `Day`, `Save capture`, `Hours a week`, `Delete session`.
-**There is no done control anywhere in the design.**
-
-`D-four-screens` makes the canvas authoritative on layout, so **this is a gap
-in the design rather than a disagreement with it.** The checkbox at each
-row's leading edge was chosen by the owner and is **not drawn**. Say so in
-the report, so the design can be corrected rather than quietly diverged from.
+**The canvas draws no done control** — a gap in the design rather than a
+disagreement with it. The checkbox at each row's leading edge was chosen by
+the owner and is not drawn anywhere. **Say so in the report**, so the design
+can be corrected rather than quietly diverged from.
 
 **It must not be an arrow.** `pool-screen-nothing-reorders-05` asserts the
-absence of every reorder control and its document calls finding one a defect;
-#95 owns those. **A checkbox that renders as ▲ or ▼, or a done action wired
-to an existing arrow, breaks that assertion.**
+absence of every reorder control; **a checkbox that renders as ▲ or ▼, or a
+done action wired to an existing arrow, breaks that assertion.**
 
 ## By-hand walkthrough — do this once, in a real browser, on a phone
 
@@ -65,30 +37,33 @@ to an existing arrow, breaks that assertion.**
 2. Capture and triage three errands tagged `@homedepot`. Tap **Pool** and
    confirm they form a trip — three things, one stop.
 3. Tick **two** of them done.
-4. Reload. Confirm **`@homedepot` is no longer a trip**: one item left, below
-   the threshold, sitting in loose ends **still carrying its tag**.
+4. Reload. Confirm **`@homedepot` is still a trip**, showing its progress —
+   working a trip does not dissolve it.
 5. Restart the server. Confirm the two you did have not come back.
 6. Confirm there is **no list of completed work** anywhere.
 
 ### Expected Observable Outcomes
 - All six steps hold literally, per `D-visible-slices`.
-- **Step 4 is the point of the slice.** Without it the screen keeps sending
-  you on a trip you already made.
-- **Step 6 is refused by decision, not omitted.** `D-kill-means-archive`:
-  *"the moment an archive is browsable it becomes a place to hide from
-  decisions"* — so no completed list, ever.
+- **⚠️ Step 4 was reversed by #122 and this document was stale until
+  2026-08-26.** It used to say the trip dissolved into loose ends once two of
+  three were done — true when this slice landed, **false since persistence
+  began counting everything displayed** (`D-a-trip-survives-being-tidied`).
+  `mark-done-trip-drops-below-three-02` was removed from the feature file for
+  exactly this reason and the QA document was not updated with it. **A group
+  drops to loose ends only when the owner explicitly clears its done items**,
+  which is `trip-progress-clearing-can-drop-a-group-05` and belongs to
+  `qa/trip_progress.md`, not here.
+- **Step 6 is refused by decision, not omitted** (`D-kill-means-archive`) —
+  no completed list, ever.
 - **Un-do was narrowed by #122, not refused.** A completed *pool* item now
-  stays on screen struck through and unchecking it puts it back — the direct
-  inverse of the tap that struck it. `qa/trip_progress.md` owns that
-  behaviour. The rule here is the half that still holds: **nothing brings
-  back what has left the screen.**
+  stays on screen struck through and unchecking it puts it back;
+  `qa/trip_progress.md` owns that. The rule here is the half that still
+  holds: **nothing brings back what has left the screen.**
 - **Check the checkbox is a real tap target at phone width**, and check the
-  Committed row hardest. The checkbox goes at the **leading edge on both
-  screens** — so a Committed row is four columns wide: checkbox, 66px date,
-  text, context tag. **The worst case is a long item beside `BY THU 17:00`
-  and a tag**, and it is the tightest thing on the phone. Nobody has seen it.
-  If it wraps or clips, say so — the layout is a gap the design never filled,
-  so this is the first sighting rather than a regression.
+  Committed row hardest: leading-edge checkbox, 66px date, text, context tag
+  is four columns, and **a long item beside `BY THU 17:00` and a tag** is the
+  tightest thing on the phone. Nobody has seen it — if it wraps or clips, say
+  so; this is a first sighting rather than a regression.
 
 ## Setup — repeat below
 
@@ -109,19 +84,23 @@ to an existing arrow, breaks that assertion.**
   removes it, which is what lets a later reckoning ask what was done at
   `@homedepot`.
 
-## Procedure — the trip that falls apart
+## Procedure — a trip you are working through
 
 1. Create three pool tasks at one tag. Confirm they form a trip.
 2. Mark **two** done.
 3. Reload.
 
 ### Expected Observable Outcomes
-- **No trip.** The survivor is in loose ends, **still showing its tag**.
-- **This is the case the slice exists for**, and the one a naive
-  implementation passes halfway: hiding done items from the list while still
-  counting them toward the threshold leaves a trip panel of one, which looks
-  fine until you read the number.
-- Mark the third done. The screen shows its empty state.
+- **Still a trip**, with the two done items shown struck through and the
+  third outstanding. **Working a trip never dissolves it**
+  (`D-a-trip-survives-being-tidied`).
+- **⚠️ This procedure asserted the opposite until 2026-08-26** — that the trip
+  fell apart into loose ends. **#122 reversed it and this document was not
+  updated**, so QA running it would have reported a defect that is now the
+  correct behaviour. Recorded rather than quietly rewritten.
+- Mark the third done. **The trip is still there**, all three struck through.
+- **Clearing the done items is the only thing that drops the group**, and that
+  is `qa/trip_progress.md`'s to assert, not this document's.
 
 ## Procedure — a committed task leaves the screen
 

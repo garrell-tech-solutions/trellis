@@ -10,84 +10,51 @@
 # trip-persistence-unchecking-inside-a-run-05: unchecking inside a run puts the item back without re-earning the trip
 #
 # THE SAME DEFECT ONE TAP LATER. #122 stopped the panel dissolving when you
-# CHECKED things off; it still dissolved when you CLEARED them. Five things
-# at @homedepot, three got, tap the clear control to tidy -- and the last two
-# scattered into loose ends among everything else with the owner still
-# standing in the shop. `D-a-trip-survives-being-worked` was EXTENDED by the
-# owner 2026-08-24: CLEARING TIDIES THE PANEL, IT DOES NOT DISSOLVE IT.
+# CHECKED things off; it still dissolved when you CLEARED them -- five things
+# at @homedepot, three got, tap clear to tidy, and the last two scatter into
+# loose ends with the owner still standing in the shop.
+# D-a-trip-survives-being-worked was EXTENDED by the owner 2026-08-24:
+# CLEARING TIDIES THE PANEL, IT DOES NOT DISSOLVE IT.
 #
-# --- TWO RULES, AND THIS SLICE IS WHERE THEY STOP BEING ONE PREDICATE -----
-# #122 could get away with one count because nothing left the uncleared set
-# while a trip was being worked. Clearing is the first thing that removes an
-# item from that set mid-run, so the single predicate now has to split:
+# TWO RULES, WHERE #122 HAD ONE PREDICATE. Clearing is the first thing that
+# removes an item from the uncleared set mid-run, so the single count splits:
 #
 #   A RUN at a tag begins when something lands there with nothing else
 #   waiting, and ends when the last thing waiting there is cleared away.
 #   FORMATION: a run of three or more things is a trip.
 #   PERSISTENCE: it stays one for as long as the run lasts.
 #
-# THE RUN IS THE UNIT, NOT THE MOMENT. `pool.rs:121` re-derives trip-ness on
-# every render from the uncleared set alone, and `list_pool_tasks` never
-# returns a cleared row -- so the current run's own history is not in the
-# data the rule can see. HOW THE STORE KNOWS A TAG IS INSIDE A RUN IS THE
-# CODER'S CALL AND THE PULL REQUEST'S ARGUMENT, not something this file
-# asserts. `cleared_at` is a millisecond timestamp rather than a flag, so the
-# clears are ordered in time and a derivation is worth attempting;
-# `T-ephemeral-view-state-rides-the-request` is the test if it needs a
-# column, and a trip that dissolves when you lock your phone in the car park
-# is this same defect one gesture further out -- SO A COLUMN MAY WELL BE THE
-# HONEST ANSWER, and reaching for one without the argument is not.
+# THE RUN IS THE UNIT, NOT THE MOMENT, and the current run's own history is not
+# in the data the rule can see -- `list_pool_tasks` never returns a cleared
+# row. How the store knows a tag is inside a run is THE CODER'S CALL AND THE
+# PULL REQUEST'S ARGUMENT. `cleared_at` is a millisecond timestamp rather than
+# a flag, so a derivation is worth attempting;
+# T-ephemeral-view-state-rides-the-request is the test if it needs a column,
+# and since a trip that dissolves when you lock your phone in the car park is
+# this same defect one gesture further out, A COLUMN MAY WELL BE THE HONEST
+# ANSWER -- reaching for one without the argument is not.
 #
-# THE PANEL LEAVES ON A TAP, NEVER ON A TICK. Settled by the owner
-# 2026-08-25, and it is the one thing here that was genuinely open. Tick the
-# last open thing in a trip that clearing has taken down to two, and THE
-# PANEL HOLDS, reading "2 of 2 done" with the clear control still on it (01).
-# The brief's demo said it goes at that moment; it goes one tap later. THREE
-# REASONS, and the third is the one that decides it:
-#   - `trip-progress-fully-done-06` ALREADY DOES EXACTLY THIS at three items
-#     -- a full trip with everything done keeps its panel reading "3 of 3
-#     done" until you clear it. Going at two and staying at three would make
-#     the item count decide whether finishing a trip wipes it, which is not
-#     explicable to anyone holding a basket.
-#   - YOU CAN UNCHECK WHAT YOU CAN SEE (#122). A panel that vanishes on the
-#     last tick takes the undo with it (05).
-#   - NOTHING CLEARS ITSELF. The owner chose an explicit control over any
-#     automatic sweep, and a panel that swept its own leftovers away would be
-#     that sweep wearing a trigger instead of a timer. The alternative that
-#     does NOT sweep them is worse: the leftovers stay uncleared and
-#     invisible, and the next thing captured at that tag resurrects the panel
-#     reading "2 of 3 done" over month-old strikes -- WHICH IS PRECISELY THE
-#     RUNAWAY #129 WAS FILED ABOUT, arriving through the fix for it.
+# THE PANEL LEAVES ON A TAP, NEVER ON A TICK (01), settled by the owner
+# 2026-08-25 against the brief's demo. Three reasons, and the third decides it:
+# trip-progress-fully-done-06 already does exactly this at three items, so
+# going at two would let the item count decide whether finishing a trip wipes
+# it; a panel that vanishes on the last tick takes the undo with it (05); and
+# NOTHING CLEARS ITSELF -- a panel sweeping its own leftovers is the automatic
+# sweep the owner refused, while not sweeping them leaves them uncleared and
+# invisible until the next capture resurrects the panel over month-old strikes,
+# WHICH IS PRECISELY THE RUNAWAY #129 WAS FILED ABOUT.
 #
-# A TAG MUST RE-EARN ITS TRIP (03). This is the bound #129 asked for and the
-# reason the naive derivation -- *ever reached three, counting cleared ones*
-# -- is wrong: a tag cleared last month with one thing on it today is not a
-# trip, and over a year every frequently-used tag would become a permanent
-# panel. The run ending is the bound, and it is a real event rather than a
-# time window: the owner has refused a time window once already (#127) and
-# this does not ask for one.
+# A TAG MUST RE-EARN ITS TRIP (03) -- the bound #129 asked for, and the reason
+# the naive derivation (ever reached three, counting cleared ones) is wrong:
+# over a year every frequently-used tag would become a permanent panel. The run
+# ending is a real event rather than a time window, which the owner refused
+# once already (#127).
 #
-# TWO SCENARIOS IN `trip_progress.feature` CHANGE WITH THIS SLICE, BOTH IN
-# THE OPEN. `trip-progress-clearing-can-drop-a-group-05` ASSERTED THE
-# DEFECT -- it is green today and had to go red -- and is reversed, not
-# deleted and not weakened. `trip-progress-clear-done-04` also moves: its
-# two survivors used to land in loose ends and now stay in the panel, so its
-# `loose` count goes to zero. THE BRIEF SAID ONE SCENARIO REVERSES; IT IS
-# ONE REVERSAL AND ONE CONSEQUENCE, and the second is named here rather than
-# edited quietly. `trip-progress-fully-done-06` stays exactly as written, and
-# so does every scenario in `trip_controls.feature`.
-#
-# WHAT IS NOT ASSERTED HERE. Reloading between every step is the demo's own
-# instruction and every `the pool screen is viewed` above is a fresh request,
-# so this file already proves the rule is not per-render state -- but a REAL
-# reload, and a restart, are facts about a rendered page and a running
-# server, and they live in `qa/trip_persistence.md`
-# (`T-ephemeral-view-state-rides-the-request`: choose the tier from the
-# nature of the state). Also not here: expanding and collapsing (#120, in the
-# browser tier for the same reason), reordering loose ends (#95 --
-# `T-trips-are-derived-not-ranked` still forbids a reorder control on a trip)
-# and the query's in-memory grouping (#108, open on this exact query and not
-# this slice's to fix).
+# TWO SCENARIOS IN trip_progress.feature CHANGE, BOTH IN THE OPEN:
+# trip-progress-clearing-can-drop-a-group-05 ASSERTED THE DEFECT and is
+# reversed, not deleted and not weakened; trip-progress-clear-done-04 is the
+# consequence, its `loose` count going to zero. A real reload and a restart are
+# facts about a running server and live in qa/trip_persistence.md.
 
 Feature: A trip survives being tidied
 

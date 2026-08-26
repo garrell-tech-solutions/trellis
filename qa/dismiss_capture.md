@@ -10,22 +10,15 @@ project library, module, or test helper is used.
 
 Throughout, "dismiss X" means submitting the page's own dismiss control for
 that capture's row. **Read the endpoint out of the page's markup; do not
-assume a route.** The dismiss affordance is page-only — there is no JSON
-dismissal API to fall back on, so if the control cannot be found in the
-markup, that is a failure of this procedure, not a reason to compose a
-request by hand.
+assume a route.** The affordance is page-only — if the control cannot be
+found in the markup, that is a failure of this procedure, not a reason to
+compose a request by hand.
 
-**What this procedure can and cannot honestly claim**, as established for
-`inbox_view` (#30) and `triage_from_page` (#33): `curl` verifies every
-server-side fact, but not that a real browser's DOM updates without a visible
-reload. The by-hand walkthrough below covers that once; every procedure after
-it is `curl`-only.
-
-**The row-count guarantee is deliberately invisible on every page.**
-`D-kill-means-archive` keeps the row and builds no browsable archive, so a
-dismissed capture appears on no surface at all. Read-only `sqlite3` is
-therefore the only way to observe it, and it is the durable state itself, not
-a project API.
+`curl` verifies every server-side fact but not that a real browser's DOM
+updates without a visible reload; the by-hand walkthrough covers that once,
+and every procedure after it is `curl`-only. **The row-count guarantee is
+deliberately invisible on every page** (`D-kill-means-archive`), so read-only
+`sqlite3` is the only way to observe it.
 
 ## By-hand walkthrough — do this once, in a real browser
 
@@ -38,11 +31,10 @@ a project API.
    a feature in exactly one place in this system, and this is not it), and no
    task appears in the task list.
 5. Confirm the inbox now shows its **ordinary** empty state, not a
-   dismissal-specific variant. As of PR #87 that reads `Nothing to triage.
-   Start with the thing you keep half-remembering.` — **read the current
-   wording out of the page rather than trusting this line**; what is under
-   test is that dismissing everything produces the same message as never
-   having captured anything.
+   dismissal-specific variant. **Read the current wording out of the page
+   rather than trusting any quoted here**; what is under test is that
+   dismissing everything produces the same message as never having captured
+   anything.
 6. Capture `buy milk`, pick a life area, click **Pool**.
 7. Restart the server and reload. Confirm the inbox is empty, `buy milk` is
    still in the task list, and `asdfgh` has not come back.
@@ -52,11 +44,9 @@ a project API.
 ### Expected Observable Outcomes
 - All eight steps hold literally, per `D-visible-slices` — steps 1–7 are the
   demo the handoff brief specifies as the acceptance criterion.
-- Step 8 is the negative half of `D-kill-means-archive`, and it is a real
-  check rather than a formality: *"the moment an archive is browsable it
-  becomes a place to hide from decisions."* A dismissed-captures view is the
-  most natural thing in the world to add while building this, which is
-  exactly why QA looks for it.
+- Step 8 is the negative half of `D-kill-means-archive` and a real check
+  rather than a formality: a dismissed-captures view is the most natural
+  thing in the world to add while building this.
 
 ## Setup — repeat before each procedure below
 
@@ -103,16 +93,13 @@ a project API.
 
 ### Expected Observable Outcomes
 - The inbox lists nothing; both captures have left it by different doors.
-- The captures table still holds **two** rows. This is `#9` AC-4, and it is
-  the whole point of the slice: the row feeds M8's reckoning ("47 archived
-  this quarter, 31 Learning" is real signal), which a deleted row cannot.
+- The captures table still holds **two** rows — the row feeds M8's reckoning,
+  which a deleted row cannot.
 - The tasks table holds **one** row — the triaged one only.
 - Which door each capture left by is **derivable**: both carry the stamp that
   records leaving, and the triaged one — and only the triaged one — is
   referenced by a `tasks` row. Read the stamp column's name off the schema
-  (`PRAGMA table_info(captures)`); do not assume it. As shipped that is one
-  column, `left_inbox_at`, and the `tasks` reference is the whole of the
-  discriminator; the procedure is written to hold either way.
+  (`PRAGMA table_info(captures)`); do not assume it.
 
 ## Procedure — a capture leaves the inbox exactly once
 
@@ -131,16 +118,12 @@ a project API.
   back the current lists, so the stale page corrects itself on the swap.
 - Step 4's JSON rejection names the reason: `not_in_inbox`, echoing the
   capture id — the same "report what was submitted" shape
-  `unknown_life_area` established for a value that does not resolve.
+  `unknown_life_area` established.
 - The captures table holds exactly two rows and the tasks table exactly one.
   **No rejected second exit created, deleted, or re-stamped anything.**
-- This is what makes the impossible state impossible in practice rather than
-  on paper. `T-archived-at-only` warns that two fields for one state give
-  every path two chances to set one and forget the other — and the shipped
-  schema answers it by having only one field: a capture cannot be stamped
-  both triaged and dismissed when there is a single stamp for leaving. What
-  this procedure exercises is the remaining question that no schema can
-  answer — that the **first** exit wins and every later one is refused,
+- **The single stamp makes the impossible state impossible in the schema**
+  (`T-archived-at-only`); what this procedure exercises is the half no schema
+  can answer — that the **first** exit wins and every later one is refused,
   rather than the second quietly overwriting the first.
 
 ## Procedure — a dismissed capture stays gone across a restart
@@ -166,13 +149,11 @@ a project API.
 
 ### Expected Observable Outcomes
 - The inbox shows **the existing empty-state message, unchanged** — the same
-  one an inbox that was never filled shows. As of PR #87 that is `Nothing to
-  triage. Start with the thing you keep half-remembering.`, and it has
-  changed once already, which is why what this asserts is **sameness with the
-  ordinary empty state** rather than a literal string. It is still true, and a
-  dismissal-specific variant ("nothing left, you dismissed it all") would be
-  the first step toward the browsable archive `D-kill-means-archive` refuses:
-  it invites the user to reflect on what they threw away.
+  one an inbox that was never filled shows. The wording has changed once
+  already, which is why this asserts **sameness with the ordinary empty
+  state** rather than a literal string. A dismissal-specific variant
+  ("nothing left, you dismissed it all") would be the first step toward the
+  browsable archive `D-kill-means-archive` refuses.
 
 ## Procedure — hostile capture text stays escaped in what a dismissal returns
 
@@ -185,10 +166,9 @@ a project API.
 ### Expected Observable Outcomes
 - The response does not contain an unescaped `<script>` tag.
 - The word `boom` is still present — escaped, not stripped.
-- The dismiss control adds no new render surface of its own, but it adds a new
-  **response path** that returns the shared fragment, and htmx swaps that
-  response straight into the DOM. `#30`, `#33` and `#47` each re-asserted
-  escaping on their own new surface; this asserts it on the new path.
+- The dismiss control adds no new render surface, but it adds a new
+  **response path** that htmx swaps straight into the DOM; this asserts
+  escaping on that path.
 
 ## Procedure — nothing else changed
 

@@ -12,40 +12,30 @@
 # context-tags-taggable-at-triage-08: a tag can be given at triage as well as at capture
 # context-tags-escapes-hostile-text-09: a hostile tag stays escaped wherever it renders
 #
-# A context tag is free text and optional (D-context-tags-are-the-taxonomy):
-# a typo costs one badly-grouped item, not an unschedulable one. Its whole
-# value is that the second errand at a place lands in the same bucket as the
-# first, which is what 06 is for -- typing slips more readily than picking,
-# and a Menu showing two Home Depot lists sends the owner twice.
+# A context tag is free text and optional (D-context-tags-are-the-taxonomy): a
+# typo costs one badly-grouped item, not an unschedulable one. 06 is why case
+# folding matters -- a Menu showing two Home Depot lists sends the owner twice.
 #
-# THE ASYMMETRY IS DELIBERATE and worth stating where it will be read:
-# D-quotas-are-selected-not-typed makes a quota picked and never typed,
-# because a mistyped quota name splits a week's hours across two counters and
-# makes both wrong. A mistyped context tag mis-files one item. Same product,
-# opposite rules, for a reason -- so nothing here should grow a managed set.
+# THE ASYMMETRY WITH D-quotas-are-selected-not-typed IS DELIBERATE and worth
+# stating where it will be read. A mistyped quota name splits a week's hours
+# across two counters and makes both wrong; a mistyped context tag mis-files
+# one item. Same product, opposite rules -- so nothing here should grow a
+# managed set.
 #
-# WHAT THE SUGGESTIONS SCENARIO CAN AND CANNOT ASSERT. The control offers the
-# whole set of prior tags and the browser narrows it as the owner types. 05
-# asserts what the server sends -- every tag used before, exactly once -- and
-# CANNOT assert prefix narrowing, which is the browser's and untestable over
-# HTTP with no browser automation in this stack. qa/context_tags.md says the
-# same rather than implying coverage.
+# 05 ASSERTS WHAT THE SERVER SENDS -- every tag used before, exactly once --
+# and CANNOT assert prefix narrowing, which is the browser's and untestable
+# over HTTP in this stack; qa/context_tags.md says the same rather than
+# implying coverage. 06's two columns carry the same value on purpose: the
+# suggestion set and the spelling each row displays are different assertions
+# that happen to coincide here, and collapsing them would make the step text
+# disagree with 05's for no gain.
 #
 # THE TAG LIVES ON THE CAPTURE and a task reads it through the capture it came
-# from. One fact, one row: a copy on the task is two places to edit and two
-# chances to disagree. A dismissed capture keeps a tag nothing reads, which
-# costs nothing -- D-kill-means-archive keeps that row regardless.
+# from. One fact, one row.
 #
-# 06's two columns carry the same value on purpose. The suggestion set and
-# the spelling each row displays are different assertions that happen to
-# coincide here, and collapsing them to one placeholder would make the step
-# text disagree with 05's for no gain.
-#
-# T-latency-is-a-qa-assertion: this adds a field to POST /captures, which the
-# 50 ms budget describes. Adding a nullable column does not change that
-# endpoint's work. THE SUGGESTION SET MUST NOT BE COMPUTED IN THAT PATH --
-# it is a distinct-values query belonging to the page render, and a capture
-# that pays for it has quietly moved the budget's subject.
+# T-latency-is-a-qa-assertion: THE SUGGESTION SET MUST NOT BE COMPUTED IN THE
+# CAPTURE PATH. It is a distinct-values query belonging to the page render, and
+# a capture that pays for it has quietly moved the budget's subject.
 Feature: A capture carries a context tag, and the tags autocomplete on what came before
 
   Background:

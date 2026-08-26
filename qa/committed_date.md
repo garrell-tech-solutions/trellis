@@ -9,51 +9,28 @@ timezone control on... **see below — there isn't one.** Plus read-only
 `sqlite3`, and `scripts/qa/phone_layout.cjs` for the one assertion that needs
 a browser.
 
-## What this replaces
+## Three things that will be got wrong
 
-`templates/capture_row.html:13` was:
-
-```html
-<input type="text" name="deadline" placeholder="2026-08-20T17:00:00Z">
-```
-
-**Typed, in UTC, on a touch keyboard, where one wrong character is a `422`.**
-The owner is meant to be living in this product by 2026-09-03, and committing
-anything was the most hostile interaction in it.
-
-## Three things that are not obvious, and will be got wrong
-
-**1. The canvas draws no date input at all.** Verified rather than assumed:
-zero occurrences of `type="date"`, `type="time"` or `type="datetime-local"`.
-`D-four-screens` makes the canvas authoritative on layout, so this is a
-**gap** of the same class as the missing done control, filled at the owner's
-direction and flagged rather than invented quietly. **Its 44px touch height
-is a real precedent and is kept.**
-
-**Its seven-day weekday `<select>` is not a precedent for this**, and that
-matters: it sits under **"Log a session"** — retrospective, bounded to the
-week just gone. A deadline is prospective and unbounded.
+**1. The canvas draws no date input at all**, verified rather than assumed —
+a gap filled at the owner's direction, argued in
+`features/committed_date.feature`'s header. **Its 44px touch height is a real
+precedent and is kept.**
 
 **2. A `by` takes a day and no time on the page — but the boundary still
 accepts one.** `committed-screen-at-and-by-02` asserts a `by` carrying a time
-still renders as a `by` rather than silently becoming an `at`. **The page
-stops asking; the API must not stop accepting.** If a JSON `by` with a time
-is now rejected, that is a defect — the form was narrowed and the contract
-was narrowed with it by accident.
+still renders as a `by`. **The page stops asking; the API must not stop
+accepting.** A JSON `by` with a time being rejected is a defect: the form was
+narrowed and the contract narrowed with it by accident.
 
-**3. The display was UTC and is part of this slice.** `date_cell`'s own doc
-comment said *"Always UTC — this product has no per-user timezone applied to
-display yet."* The brief frames this as an input problem; **a date entered
-correctly at 23:00 local and then shown on the wrong day is the same bug from
-the other end.**
+**3. The display was UTC and is part of this slice.** `date_cell` said so in
+its own doc comment. **A date entered correctly at 23:00 local and then shown
+on the wrong day is the same bug from the other end.**
 
-## There is no way to set the timezone from the app
-
-`T-timezone-is-a-setting` put the owner's zone in the database, and #88
-removed the life-areas page it was edited on. **It is stored, read, and
-unsettable until #85 brings the Menu back.** Set it directly for these
-procedures and **say in the report that you had to** — a QA procedure that
-reaches past the interface is a finding, not a technique.
+**There is no way to set the timezone from the app.**
+`T-timezone-is-a-setting` put the owner's zone in the database and #88
+removed the page it was edited on. Set it directly for these procedures and
+**say in the report that you had to** — a QA procedure that reaches past the
+interface is a finding, not a technique.
 
 ## By-hand walkthrough — on a phone
 
@@ -143,11 +120,9 @@ reaches past the interface is a finding, not a technique.
 
 ### Expected Observable Outcomes
 - The date cell does not overflow or wrap.
-- **This is the first slice that can check this.** Three phone-first screens
-  shipped saying the layout was unverified; #105 added a browser that can see
-  geometry, and the date cell is exactly the kind of thing it was built for.
-  **If the check cannot currently assert this, say so and say what it would
-  take** rather than checking it by eye and calling it verified.
+- **This is the first slice that can check this** — #105 added a browser that
+  can see geometry. **If the check cannot currently assert it, say so and say
+  what it would take** rather than checking it by eye and calling it verified.
 
 ## Procedure — nothing else changed
 

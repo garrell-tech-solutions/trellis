@@ -12,55 +12,31 @@
 # committed-screen-triage-takes-at-or-by-07: committed triage asks at or by, on every transport
 # committed-screen-escapes-hostile-text-08: hostile text stays escaped on this screen
 #
-# AT AND BY ARE AN EXPLICIT CHOICE AT TRIAGE, not derived from how precisely
-# the deadline was typed. D-committed-is-at-or-by says a committed item is one
-# or the other and that they behave differently; the canvas draws neither, and
-# D-four-screens makes the canvas authoritative on layout and the decisions
-# log on behaviour. So the distinction is real and the drawing of it is ours:
-# a `by` carries a BY prefix in the same 66px cell an `at` uses for its time.
+# AT AND BY ARE AN EXPLICIT CHOICE AT TRIAGE (D-committed-is-at-or-by). The
+# canvas draws neither and D-four-screens makes it authoritative on layout
+# only, so the drawing of it is ours: a `by` carries a BY prefix in the same
+# 66px cell an `at` uses for its time. Explicit rather than derived from how
+# precisely the deadline was typed, because a derived rule cannot express a
+# HARD BY -- "the tax return, by Jan 31, and that one cannot slip" -- which
+# would have been silently unrepresentable.
 #
-# The owner chose the explicit control over deriving it from whether a time
-# was given, because a derived rule cannot express a HARD BY -- "the tax
-# return, by Jan 31, and that one cannot slip" -- which is a real commitment
-# and would have been silently unrepresentable.
+# THE deadline_type COLUMN STAYS, UNREAD, on #88's ground: unlike
+# scheduler_core::ratio, a hard/soft judgement is not recomputable from the
+# rows that remain. When the scheduler returns the distinction is derived
+# (T-hard-refuses-soft-slips: an `at` is hard, a `by` is soft) rather than
+# typed twice.
 #
-# AT/BY REPLACES deadline_type ON THE FORM. `deadline_type`'s only behaviour
-# was T-hard-refuses-soft-slips', which lives in the scheduler D-dogfood-first
-# paused, so it currently changes nothing -- the exact state U2 complained of
-# before that decision fixed it. When the scheduler returns, an `at` is hard
-# (a fixed block cannot slip) and a `by` is soft (that is what slack means),
-# so the behaviour is derived rather than typed twice.
+# ORDER IS CHRONOLOGICAL AND `ord` IS NOT BUILT. The canvas sorts by a bare
+# sort key whose only derivation anywhere gives `ord: 99` to a committed item
+# with no time; Trellis requires a deadline at triage, so that state cannot
+# arise here and chronological is total.
 #
-# THE COLUMN STAYS, UNREAD. #88 kept `tasks.life_area_id` on exactly this
-# ground: dropping a column throws away what the owner already typed, and
-# unread columns cost SQLite nothing. This is not the `scheduler_core::ratio`
-# case -- that was a derivable number, recomputable from rows that stayed;
-# a hard/soft judgement is not recoverable once dropped.
+# A PAST DEADLINE STILL SHOWS, marked. A commitments screen that silently drops
+# what you missed is the one failure it cannot have. It falls out of
+# chronological order without special casing: past items are simply first.
 #
-# ORDER IS CHRONOLOGICAL. The canvas sorts by `ord`, a bare sort key whose
-# fixture happens to agree with its dates (3/1/4 against Thu/Tue/Fri) and
-# whose only derivation anywhere is line 637 -- a committed item with no time
-# gets `at: "Unset"` and `ord: 99`, sorting last. Trellis requires a deadline
-# for committed triage, so that state cannot arise here and chronological is
-# total. `ord` is not built.
-#
-# A PAST DEADLINE STILL SHOWS, marked. A commitments screen that silently
-# drops what you missed is the one failure it cannot have -- the product's
-# value is that the owner trusts what it shows. It falls out of chronological
-# order without special casing: past items are simply first.
-#
-# THE GAP THIS EXPOSES, raised rather than resolved: NOTHING IN TRELLIS CAN
-# MARK A TASK DONE. So past items accumulate with no way to clear them, and
-# this screen is the first place that becomes visible daily. Not this slice's
-# to fix; worth an issue before the fortnight of dogfooding fills it.#
-# --- THE FOURTH TAB ARRIVES IN #93 (`quota_screen.feature`) ---------------
-# THIS SCENARIO ASSERTED THREE TABS AND NOW ASSERTS FOUR, with a fourth
-# example row for the Quota screen itself. `nav.rs:21` has carried
-# `ALL: [Page; 3]` and the comment "A DEAD LINK IS WORSE THAN NO LINK" since
-# #92, naming only what `platform::app` can actually route to -- so the tab
-# could not arrive before the route did, and it arrives with it. This is the
-# ONE existing scenario #93 changes; if any other needed editing, the change
-# leaked.
+# 06 ASSERTS FOUR TABS, NOT THREE, since #93: `nav.rs` names only what
+# `platform::app` can route to, so a tab cannot arrive before its route.
 
 Feature: The committed screen lists what has a date on it
 

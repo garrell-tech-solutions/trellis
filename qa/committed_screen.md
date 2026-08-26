@@ -18,41 +18,19 @@ owned classes, never to attribute order, adjacency, or copy quoted verbatim.
 Where a procedure quotes text it says whether the text is the contract or an
 example.
 
-## At and by, and why the screen draws them at all
+## At and by
 
-`D-committed-is-at-or-by`: an **at** is a fixed block — *2pm dentist*. A
-**by** is a deadline with slack — *done by Thursday*. **They behave
-differently, and the canvas draws no distinction at all.**
+`D-committed-is-at-or-by`: an **at** is a fixed block — *2pm dentist*; a
+**by** is a deadline with slack — *done by Thursday*. The canvas draws no
+distinction, so how it looks is ours: a `by` carries a **BY** prefix in the
+same 66px cell an `at` fills with its time. **It is an explicit choice at
+triage, not derived from how precisely the deadline was typed** — the
+reasoning is in `features/committed_screen.feature`'s header.
 
-`D-four-screens` makes the canvas authoritative on **layout** and the
-decisions log on **behaviour**, so the distinction is real and how it looks
-is ours: a `by` carries a **BY** prefix in the same 66px cell an `at` fills
-with its time.
-
-**It is an explicit choice at triage, not derived from how precisely the
-deadline was typed.** The owner chose that deliberately: a derived rule
-cannot express a **hard by** — *"the tax return, by Jan 31, and that one
-cannot slip"* — which is a real commitment that would have been silently
-unrepresentable.
-
-## `deadline_type` left the form and stayed in the schema
-
-`at`/`by` replaced `hard`/`soft` on the committed triage form. **The column is
-still there and nothing reads it.** That is intended, on #88's ground:
-dropping a column throws away what the owner already typed, and unlike
-`scheduler_core::ratio` — a derivable number, recomputable from rows that
-stayed — a hard/soft judgement is not recoverable.
-
-**Do not report the unread column as dead code**, and **do not expect a
-migration that drops it.**
-
-## The gap this screen exposes
-
-**Nothing in Trellis can mark a task done.** So a past deadline stays on this
-screen forever, and this is the first place that becomes visible daily.
-**Raised, not fixed here.** If the screen fills with history during
-dogfooding, that is the known gap and not a defect of this slice — say so
-rather than filing it twice.
+`at`/`by` replaced `hard`/`soft` on the form and **the `deadline_type` column
+is still there with nothing reading it.** That is intended. **Do not report
+the unread column as dead code**, and **do not expect a migration dropping
+it.**
 
 ## By-hand walkthrough — do this once, in a real browser, on a phone
 
@@ -66,10 +44,8 @@ rather than filing it twice.
 5. Confirm the committed triage form asks **at or by** and **does not ask
    hard or soft**.
 6. Confirm the tab bar shows **four** tabs and marks the current one, on all
-   four screens. **Updated by #93** — this said three, and `nav.rs` had been
-   holding `ALL: [Page; 3]` since #92 with the comment *"a dead link is worse
-   than no link"*, waiting for the Quota route to exist. It does now, so the
-   tab arrived with it and `committed-screen-tabs-06` counts four.
+   four screens (four since #93, when the Quota route arrived to make the
+   fourth link live).
 
 ### Expected Observable Outcomes
 - All six steps hold literally, per `D-visible-slices`.
@@ -77,11 +53,10 @@ rather than filing it twice.
   three jobs — a time, a BY, and a past marker. **Check it at phone width**;
   `BY THU 17:00` is the longest thing it must hold and it is the one most
   likely to wrap or clip.
-- **This screen shipped without a phone**, and #101 is what that produced.
-  `qa/phone_layout.md` now drives a real browser at 390×844 and asserts the
-  geometry on this screen among others — **so the date cell's width is still
-  unchecked, but the scroll and the tab bar are not.** Report anything the
-  automated check cannot see, and do not claim what it does not assert.
+- `qa/phone_layout.md` drives a real browser at 390×844 and asserts geometry
+  on this screen — **so the scroll and the tab bar are checked and the date
+  cell's width is not.** Report what the automated check cannot see, and do
+  not claim what it does not assert.
 
 ## Setup — repeat below
 
@@ -161,9 +136,10 @@ rather than filing it twice.
 
 ### Expected Observable Outcomes
 - **Both are rejected**, and each names `commitment`.
-- **Both transports, every time.** `T-required-fields-are-specified-per-transport`
-  exists because #73 shipped a page whose committed form could never succeed
-  while twenty-one features stayed green — the suite triaged over JSON.
+- **Both transports, every time**
+  (`T-required-fields-are-specified-per-transport`): #73 shipped a page whose
+  committed form could never succeed while the suite, triaging over JSON,
+  stayed green.
 - The form **does not ask hard or soft**, and a submission carrying
   `deadline_type` is not rejected for it — the column is unread, not
   forbidden.
@@ -187,18 +163,15 @@ rather than filing it twice.
 
 ### Expected Observable Outcomes
 - All pass.
-- **`one_screen` legitimately changed** — `/committed` now answers 200, a
-  third row in a column that could not fail at all until `/pool` gave it its
-  first 200.
+- **`one_screen` legitimately changed** — `/committed` now answers 200.
 - **`committed_triage_validation` legitimately changed** — it enumerates the
   required fields by name, and `commitment` replaced `deadline_type`.
 - **`pool_screen` must still pass untouched**, including
-  `pool-screen-nothing-reorders-05`. The canvas draws reorder arrows on every
-  screen including this one; **if any appeared here, that assertion is the
-  only thing standing between the design and a feature nobody approved.**
+  `pool-screen-nothing-reorders-05`. The canvas draws reorder arrows on this
+  screen too; **if any appeared, that assertion is the only thing standing
+  between the design and a feature nobody approved.**
 - **Believe the re-run.** A restyle has broken QA scripts three times in this
-  project without CI noticing, and this slice adds a screen to that
-  stylesheet.
+  project without CI noticing.
 
 ## Independent of Implementation
 

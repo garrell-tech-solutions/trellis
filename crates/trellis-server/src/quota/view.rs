@@ -3,7 +3,7 @@
 
 use crate::quota::store::{QuotaRow, SessionRow};
 use scheduler_core::quota::{self, Week};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 /// One logged session, as "This week" lists it (#93, quota-sessions). The
 /// list entry is always raw minutes (`"Tue 60m"`, never `"Tue 1h"`) --
@@ -39,6 +39,12 @@ pub struct QuotaRowView {
     pub sessions_message: Option<String>,
     /// `"nothing logged"`, or `"N session(s) · Xh Ym"`.
     pub summary: String,
+    /// Whether this row renders already expanded -- client state ridden
+    /// along on the request that produced this render (the same shape
+    /// `pool::view::TripView::expanded` takes for `#120`), never stored:
+    /// which quota is expanded is a thing you did with your thumb, not a
+    /// durable consequence of one.
+    pub expanded: bool,
 }
 
 pub struct QuotaScreenView {
@@ -86,11 +92,12 @@ pub(super) fn build(
     sessions: Vec<SessionRow>,
     week: &Week,
     zone: &jiff::tz::TimeZone,
+    expanded_ids: &HashSet<i64>,
 ) -> QuotaScreenView {
     let mut sessions_by_quota = group_sessions_by_quota(sessions);
     let empty = rows.is_empty();
     let meta = quota_count_meta(rows.len());
-    let quotas = quota_row_views(rows, &mut sessions_by_quota, zone);
+    let quotas = quota_row_views(rows, &mut sessions_by_quota, zone, expanded_ids);
     QuotaScreenView {
         meta,
         empty,
@@ -120,11 +127,13 @@ fn quota_row_views(
     rows: Vec<QuotaRow>,
     sessions_by_quota: &mut HashMap<i64, Vec<SessionRow>>,
     zone: &jiff::tz::TimeZone,
+    expanded_ids: &HashSet<i64>,
 ) -> Vec<QuotaRowView> {
     rows.into_iter()
         .map(|row| {
             let sessions = sessions_by_quota.remove(&row.id).unwrap_or_default();
-            quota_row_view(row, sessions, zone)
+            let expanded = expanded_ids.contains(&row.id);
+            quota_row_view(row, sessions, zone, expanded)
         })
         .collect()
 }
@@ -140,6 +149,7 @@ fn quota_row_view(
     row: QuotaRow,
     sessions: Vec<SessionRow>,
     zone: &jiff::tz::TimeZone,
+    expanded: bool,
 ) -> QuotaRowView {
     let logged_minutes: i64 = sessions.iter().map(|s| s.minutes).sum();
     let progress = quota::progress(row.weekly_target, logged_minutes);
@@ -167,6 +177,7 @@ fn quota_row_view(
         sessions_message,
         summary,
         name: row.name,
+        expanded,
     }
 }
 
@@ -229,7 +240,11 @@ mod tests {
     }
 
     fn build_with(rows: Vec<QuotaRow>) -> QuotaScreenView {
-        build(rows, vec![], &tuesday_week(), &zone())
+        build(rows, vec![], &tuesday_week(), &zone(), &HashSet::new())
+    }
+
+    fn build_with_expanded(rows: Vec<QuotaRow>, expanded_ids: &HashSet<i64>) -> QuotaScreenView {
+        build(rows, vec![], &tuesday_week(), &zone(), expanded_ids)
     }
 
     #[test]
@@ -306,6 +321,7 @@ mod tests {
             vec![session(1, monday_ms, 20)],
             &week,
             &zone(),
+            &HashSet::new(),
         );
         assert_eq!(view.quotas[0].readout, "20m / 4h");
         assert_eq!(view.quotas[0].note, "3h 40m left this week · 8%");
@@ -320,6 +336,7 @@ mod tests {
             vec![session(1, monday_ms, 20)],
             &week,
             &zone(),
+            &HashSet::new(),
         );
         assert_eq!(view.quotas[0].readout, "20m / 4h");
         assert_eq!(view.quotas[1].readout, "0m / 3h");
@@ -334,6 +351,7 @@ mod tests {
             vec![session(1, monday_ms, 60)],
             &week,
             &zone(),
+            &HashSet::new(),
         );
         assert_eq!(view.quotas[0].sessions[0].label, "Mon 60m");
         assert_eq!(view.quotas[0].sessions[0].day, "Mon");
@@ -360,6 +378,7 @@ mod tests {
             vec![session(1, monday_ms, 25), session(1, tuesday_ms, 35)],
             &week,
             &zone,
+            &HashSet::new(),
         );
         assert_eq!(view.quotas[0].sessions_message, None);
         assert_eq!(view.quotas[0].summary, "2 sessions · 1h");
@@ -375,7 +394,37 @@ mod tests {
             vec![session(1, monday_ms, 20)],
             &week,
             &zone,
+            &HashSet::new(),
         );
         assert_eq!(view.quotas[0].summary, "1 session · 20m");
+    }
+
+    // --- #93 (quota-sessions): a row survives being worked ---------------
+
+    #[test]
+    fn a_fresh_build_with_no_expanded_ids_renders_every_row_collapsed() {
+        let view = build_with(vec![row(1, "Piano", 240), row(2, "Running", 180)]);
+        assert!(!view.quotas[0].expanded);
+        assert!(!view.quotas[1].expanded);
+    }
+
+    #[test]
+    fn a_row_named_in_the_expanded_set_renders_expanded() {
+        let mut expanded_ids = HashSet::new();
+        expanded_ids.insert(1);
+        let view = build_with_expanded(vec![row(1, "Piano", 240)], &expanded_ids);
+        assert!(view.quotas[0].expanded);
+    }
+
+    #[test]
+    fn a_different_rows_expanded_state_is_independent() {
+        let mut expanded_ids = HashSet::new();
+        expanded_ids.insert(1);
+        let view = build_with_expanded(
+            vec![row(1, "Piano", 240), row(2, "Running", 180)],
+            &expanded_ids,
+        );
+        assert!(view.quotas[0].expanded);
+        assert!(!view.quotas[1].expanded);
     }
 }

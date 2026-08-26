@@ -8,13 +8,34 @@ use crate::platform::nav::{self, NavLink, Page};
 use crate::platform::response::{render_template, write_failed};
 use crate::quota::view::QuotaRowView;
 use askama::Template;
-use axum::extract::{Path, State};
+use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::Response;
 use axum::Form;
 use scheduler_core::quota::{NameMatch, QuotaDefinition};
 use serde::Deserialize;
 use sqlx::SqlitePool;
+use std::collections::HashSet;
+
+/// Which quota rows render already expanded (#93, quota-sessions): the
+/// same shape `pool::http::ExpandedQuery` takes for `#120` -- client state
+/// the browser echoes back on every request from inside `#quota-body`, so
+/// a row you opened stays open across the `outerHTML` swap logging a
+/// session causes. Comma-separated quota ids; absent or empty means
+/// nothing is expanded, which is every request `GET /quota` itself sends.
+#[derive(Deserialize, Default)]
+pub struct ExpandedQuery {
+    #[serde(default)]
+    expanded: String,
+}
+
+fn expanded_ids(query: &ExpandedQuery) -> HashSet<i64> {
+    query
+        .expanded
+        .split(',')
+        .filter_map(|id| id.parse().ok())
+        .collect()
+}
 
 /// The full page is the only thing that is not the `#quota-body` fragment,
 /// so it is the only caller that takes `body::build`'s fields apart instead
@@ -40,7 +61,7 @@ pub async fn show_quota(
     State(pool): State<SqlitePool>,
     State(clock): State<Clock>,
 ) -> Result<Response, StatusCode> {
-    let built = body::build(&pool, clock, DefineFormView::default())
+    let built = body::build(&pool, clock, DefineFormView::default(), &HashSet::new())
         .await
         .map_err(write_failed)?;
     Ok(render_template(
@@ -114,6 +135,7 @@ async fn rejected(
             button_label,
             confirm_name,
         },
+        &HashSet::new(),
     )
     .await
 }
@@ -282,7 +304,14 @@ async fn create_quota(
     super::store::create(pool, &definition, clock.now_ms())
         .await
         .map_err(write_failed)?;
-    body::respond(pool, clock, StatusCode::CREATED, DefineFormView::default()).await
+    body::respond(
+        pool,
+        clock,
+        StatusCode::CREATED,
+        DefineFormView::default(),
+        &HashSet::new(),
+    )
+    .await
 }
 
 /// A session write's own submission -- the quick-log buttons' hidden
@@ -304,6 +333,7 @@ async fn validated_session(
     pool: &SqlitePool,
     clock: Clock,
     form: &SessionForm,
+    expanded_ids: &HashSet<i64>,
 ) -> Result<Result<(i64, i64), Response>, StatusCode> {
     let (week, zone) = body::current_week(pool, clock)
         .await
@@ -320,6 +350,7 @@ async fn validated_session(
                 clock,
                 StatusCode::UNPROCESSABLE_ENTITY,
                 DefineFormView::default(),
+                expanded_ids,
             )
             .await?;
             Ok(Err(rejection))
@@ -335,16 +366,25 @@ pub async fn log_session(
     State(pool): State<SqlitePool>,
     State(clock): State<Clock>,
     Path(quota_id): Path<i64>,
+    Query(expanded): Query<ExpandedQuery>,
     Form(form): Form<SessionForm>,
 ) -> Result<Response, StatusCode> {
-    let (day_ms, minutes) = match validated_session(&pool, clock, &form).await? {
+    let expanded_ids = expanded_ids(&expanded);
+    let (day_ms, minutes) = match validated_session(&pool, clock, &form, &expanded_ids).await? {
         Ok(session) => session,
         Err(rejection) => return Ok(rejection),
     };
     super::store::log_session(&pool, quota_id, day_ms, minutes, clock.now_ms())
         .await
         .map_err(write_failed)?;
-    body::respond(&pool, clock, StatusCode::CREATED, DefineFormView::default()).await
+    body::respond(
+        &pool,
+        clock,
+        StatusCode::CREATED,
+        DefineFormView::default(),
+        &expanded_ids,
+    )
+    .await
 }
 
 /// `POST /quota/sessions/{session_id}` -- corrects a logged session's day
@@ -353,16 +393,25 @@ pub async fn correct_session(
     State(pool): State<SqlitePool>,
     State(clock): State<Clock>,
     Path(session_id): Path<i64>,
+    Query(expanded): Query<ExpandedQuery>,
     Form(form): Form<SessionForm>,
 ) -> Result<Response, StatusCode> {
-    let (day_ms, minutes) = match validated_session(&pool, clock, &form).await? {
+    let expanded_ids = expanded_ids(&expanded);
+    let (day_ms, minutes) = match validated_session(&pool, clock, &form, &expanded_ids).await? {
         Ok(session) => session,
         Err(rejection) => return Ok(rejection),
     };
     super::store::update_session(&pool, session_id, day_ms, minutes)
         .await
         .map_err(write_failed)?;
-    body::respond(&pool, clock, StatusCode::OK, DefineFormView::default()).await
+    body::respond(
+        &pool,
+        clock,
+        StatusCode::OK,
+        DefineFormView::default(),
+        &expanded_ids,
+    )
+    .await
 }
 
 /// `POST /quota/sessions/{session_id}/delete` -- deletes a logged session
@@ -372,11 +421,19 @@ pub async fn delete_session(
     State(pool): State<SqlitePool>,
     State(clock): State<Clock>,
     Path(session_id): Path<i64>,
+    Query(expanded): Query<ExpandedQuery>,
 ) -> Result<Response, StatusCode> {
     super::store::delete_session(&pool, session_id)
         .await
         .map_err(write_failed)?;
-    body::respond(&pool, clock, StatusCode::OK, DefineFormView::default()).await
+    body::respond(
+        &pool,
+        clock,
+        StatusCode::OK,
+        DefineFormView::default(),
+        &expanded_ids(&expanded),
+    )
+    .await
 }
 
 #[cfg(test)]
@@ -809,5 +866,143 @@ mod tests {
         assert!(body.contains("Piano"), "the quota itself must survive");
         assert!(body.contains("0m / 4h"), "got:\n{body}");
         assert!(body.contains("No sessions yet this week"), "got:\n{body}");
+    }
+
+    // --- #93 (quota-sessions): expand state rides along the request,
+    // never stored -- the same shape pool::http's own `?expanded=` tests
+    // take for #120. ---
+
+    fn expanded_row(body: &str, quota_id: i64) -> bool {
+        body.contains("<details class=\"quota-expand\" open>")
+            && body.contains(&format!("id=\"quota-row-{quota_id}\""))
+    }
+
+    #[tokio::test]
+    async fn a_quota_named_in_the_expanded_query_renders_expanded_after_logging_a_session() {
+        let (_dir, pool) = test_pool().await;
+        let quota_id = given_a_quota(&pool, "Piano", "4").await;
+
+        let (status, body) = post_path(
+            &pool,
+            tuesday_clock(),
+            &format!("/quota/{quota_id}/sessions?expanded={quota_id}"),
+            &[("day", "Tue"), ("minutes", "20")],
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::CREATED);
+        assert!(expanded_row(&body, quota_id), "got:\n{body}");
+    }
+
+    #[tokio::test]
+    async fn a_plain_log_with_no_expanded_query_renders_collapsed() {
+        let (_dir, pool) = test_pool().await;
+        let quota_id = given_a_quota(&pool, "Piano", "4").await;
+
+        let (_, body) = post_path(
+            &pool,
+            tuesday_clock(),
+            &format!("/quota/{quota_id}/sessions"),
+            &[("day", "Tue"), ("minutes", "20")],
+        )
+        .await;
+
+        assert!(
+            !body.contains("<details class=\"quota-expand\" open>"),
+            "expected no quota rendered expanded, got:\n{body}"
+        );
+    }
+
+    #[tokio::test]
+    async fn correcting_a_session_preserves_the_expanded_query() {
+        let (_dir, pool) = test_pool().await;
+        let quota_id = given_a_quota(&pool, "Piano", "4").await;
+        post_path(
+            &pool,
+            tuesday_clock(),
+            &format!("/quota/{quota_id}/sessions"),
+            &[("day", "Mon"), ("minutes", "25")],
+        )
+        .await;
+        let session_id: i64 = sqlx::query_scalar("SELECT id FROM quota_sessions")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+
+        let (status, body) = post_path(
+            &pool,
+            tuesday_clock(),
+            &format!("/quota/sessions/{session_id}?expanded={quota_id}"),
+            &[("day", "Mon"), ("minutes", "45")],
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::OK);
+        assert!(expanded_row(&body, quota_id), "got:\n{body}");
+    }
+
+    #[tokio::test]
+    async fn deleting_a_session_preserves_the_expanded_query() {
+        let (_dir, pool) = test_pool().await;
+        let quota_id = given_a_quota(&pool, "Piano", "4").await;
+        post_path(
+            &pool,
+            tuesday_clock(),
+            &format!("/quota/{quota_id}/sessions"),
+            &[("day", "Mon"), ("minutes", "25")],
+        )
+        .await;
+        let session_id: i64 = sqlx::query_scalar("SELECT id FROM quota_sessions")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+
+        let (status, body) = post_path(
+            &pool,
+            tuesday_clock(),
+            &format!("/quota/sessions/{session_id}/delete?expanded={quota_id}"),
+            &[],
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::OK);
+        assert!(expanded_row(&body, quota_id), "got:\n{body}");
+    }
+
+    #[tokio::test]
+    async fn a_rejected_session_still_preserves_the_expanded_query() {
+        let (_dir, pool) = test_pool().await;
+        let quota_id = given_a_quota(&pool, "Piano", "4").await;
+
+        let (status, body) = post_path(
+            &pool,
+            tuesday_clock(),
+            &format!("/quota/{quota_id}/sessions?expanded={quota_id}"),
+            &[("day", "Tue"), ("minutes", "0")],
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+        assert!(expanded_row(&body, quota_id), "got:\n{body}");
+    }
+
+    #[tokio::test]
+    async fn the_quota_screen_never_renders_expanded_on_a_fresh_get() {
+        let (_dir, pool) = test_pool().await;
+        let quota_id = given_a_quota(&pool, "Piano", "4").await;
+        post_path(
+            &pool,
+            tuesday_clock(),
+            &format!("/quota/{quota_id}/sessions?expanded={quota_id}"),
+            &[("day", "Tue"), ("minutes", "20")],
+        )
+        .await;
+
+        let (_, body) = get_quota(&pool).await;
+
+        assert!(
+            !body.contains("<details class=\"quota-expand\" open>"),
+            "a fresh GET must always start collapsed, got:\n{body}"
+        );
     }
 }

@@ -98,7 +98,11 @@ qa_quota_row_block() {
   python3 -c '
 import re, sys
 page, name = sys.argv[1], sys.argv[2]
-for m in re.finditer(r"<li class=\"quota-row\"[^>]*>(?:(?!</li>).)*?</li>", page, re.S):
+# quota-sessions (#93) changed the row from <li> to <div>, so a session
+# list nested inside can use its own <ul><li>: scanning to the next
+# quota-row marker (or end of string) rather than a matching </li>, the
+# same technique quota_sessions.sh already uses for this shape.
+for m in re.finditer(r"<div class=\"quota-row\"[^>]*>(?:(?!<div class=\"quota-row\").)*", page, re.S):
     block = m.group(0)
     nm = re.search(r"<div class=\"quota-name\">([^<]*)</div>", block)
     if nm and nm.group(1) == name:

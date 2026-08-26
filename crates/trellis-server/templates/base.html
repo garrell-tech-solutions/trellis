@@ -63,6 +63,31 @@ document.addEventListener("htmx:configRequest", function (event) {
   var query = "expanded=" + expandedTags.map(encodeURIComponent).join(",");
   event.detail.path += (event.detail.path.indexOf("?") === -1 ? "?" : "&") + query;
 });
+
+/* The same move as the pool's own hook above, for the Quota screen's
+   <details class="quota-expand"> rows (#93, quota-sessions): a native
+   <details> already tracks its own open/closed state, so this reads that
+   state directly rather than toggling a class first. Logging, correcting
+   or deleting a session swaps #quota-body's own outerHTML, which would
+   otherwise reset every <details> to closed and take the row you were
+   just looking at off the screen -- D-a-trip-survives-being-worked's
+   failure arriving on a third screen through a third door. Scoped to
+   #quota-body the same way, so a define-quota submission (which has no
+   expanded row to preserve) is unaffected. */
+document.addEventListener("htmx:configRequest", function (event) {
+  var quotaBody = document.getElementById("quota-body");
+  if (!quotaBody || !quotaBody.contains(event.detail.elt)) return;
+  var expandedIds = Array.from(quotaBody.querySelectorAll(".quota-row"))
+    .filter(function (row) {
+      var details = row.querySelector("details.quota-expand");
+      return details && details.open;
+    })
+    .map(function (row) { return row.id.replace("quota-row-", ""); })
+    .filter(Boolean);
+  if (!expandedIds.length) return;
+  var query = "expanded=" + expandedIds.map(encodeURIComponent).join(",");
+  event.detail.path += (event.detail.path.indexOf("?") === -1 ? "?" : "&") + query;
+});
 </script>
 </head>
 <body>

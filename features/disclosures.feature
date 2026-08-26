@@ -8,6 +8,7 @@
 # disclosures-switching-replaces-04: choosing a second kind replaces the first kind's fields
 # disclosures-rows-are-independent-05: choosing on one capture leaves every other capture alone
 # disclosures-submissions-unchanged-06: every kind still submits exactly what it submitted before
+# disclosures-quota-offers-the-captures-words-07: the quota panel starts with the capture's own words as the name
 #
 # THE CANVAS SPEAKS HERE AND THE IMPLEMENTATION DID NOT MATCH IT. Checked
 # rather than assumed, per T-canvas-is-authoritative-where-it-speaks: the
@@ -50,6 +51,27 @@
 # them while tidying, a cosmetic defect becomes a data defect. Pool also
 # stays the cheapest path (D-pool-is-default) -- one tap, no fields, and it
 # must not gain a panel to make the layout symmetrical.
+#
+# THE QUOTA PANEL CHANGED ITS FIELDS AND KEPT ITS SHAPE (#138). It used to
+# ask target_count, target_minutes_each and period; it now asks A NAME AND
+# HOURS A WEEK, because triaging as a quota is what CREATES the quota
+# (`quota_triage_validation.feature` carries the owner's words and the
+# reversal they imply). 01, 03, 04 and 05 do not move a character: what they
+# assert is WHICH PANEL IS OPEN, never what is inside it, which is why a
+# change of this size costs them nothing.
+#
+# 07 IS THE ONE NEW THING AND IT IS THE ESCAPE HATCH, not a convenience. The
+# name box arrives holding the capture's own words, so the common case is
+# "type the hours and go" -- but it is EDITABLE, and that is the half that
+# matters: RENAMING A QUOTA IS #148 AND IS NOT BUILT, so the name triage
+# writes is the name forever. Without an editable box, "finish chapter 3"
+# becomes a permanent quota called that, and a name colliding with an
+# existing quota has no way out but capturing the thing again.
+#
+# THE TWO ROWS ARE NOT DECORATION. "learning with lev" is one of the owner's
+# two real quota rows and carries spaces; a prefill that survives one word
+# and drops the rest would pass on a single-word fixture, which is
+# T-a-check-must-be-seen-to-fail in the shape #90 named.
 Feature: A capture row offers three kinds, and shows one set of fields
 
   Background:
@@ -126,3 +148,16 @@ Feature: A capture row offers three kinds, and shows one set of fields
       | commitment        |
       | priority          |
       | estimated_minutes |
+
+  # disclosures-quota-offers-the-captures-words-07: the quota panel starts with the capture's own words as the name
+  Scenario: The quota panel starts with the capture's own words as the name, and lets them be changed
+    Given a capture with raw text "<text>" is waiting in the untriaged queue
+    When the kind "Quota" is chosen for "<text>"
+    Then the row for "<text>" offers "<text>" as the quota name
+    And the row for "<text>" offers the quota name as something that can be changed
+    And the row for "<text>" asks for hours a week
+
+    Examples:
+      | text              |
+      | practise piano    |
+      | learning with lev |

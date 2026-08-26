@@ -100,12 +100,12 @@ the parametrized procedures after it are `curl`-only.
 ## Procedure — quota rejection through the page
 
 1. Submit a capture with raw text `go to the gym`.
-2. Submit the page's quota-triage control with `target_count` omitted.
+2. Submit the page's quota-triage control with `hours` omitted.
 3. Observe the response status and body.
 4. Query the tasks table and count its rows.
 
 ### Expected Observable Outcomes
-- Triage is rejected, and the response body names `target_count` — proving
+- Triage is rejected, and the response body names `hours` — proving
   the page uses the same contract `quota_triage_validation` establishes over
   the API. As above, this is a wiring check, not a re-verification of every
   quota rule.

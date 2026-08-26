@@ -451,6 +451,14 @@ jobs:
       - name: Trip controls (real browser, expand/collapse and placement)
         run: ./scripts/qa/trip_controls.sh
 
+      # #93, qa/quota_screen.md. Tap-target size and whether typing in the
+      # define form costs a network request are both facts about the
+      # rendered page, not something an HTTP assertion can hold. Same
+      # no-skip contract: scripts/qa/quota_screen.sh fails closed when
+      # node or playwright-core is missing.
+      - name: Quota screen (real browser, tap targets and as-you-type)
+        run: ./scripts/qa/quota_screen.sh
+
       # Runs `cargo build --release --target x86_64-unknown-linux-musl` and
       # then asserts via ldd that the produced binary is actually static --
       # a release build that exits 0 but links dynamically is not a pass.

@@ -74,6 +74,21 @@
 # REQUIRED. A session is the clearest yes this product has had; the expand
 # state is a clear no; decide anything between them on its own merits.
 #
+# ONE STEP IN -03 AND -08 NEEDS THE CLOCK STEP TO TAKE A PLACEHOLDER, AND
+# TODAY IT DOES NOT. `the server believes it is "<now>"` is an existing step
+# (`steps/triage.rs:10`) but its handler passes the captured text straight to
+# the instant parser without looking the placeholder up in the example row --
+# every existing caller writes a literal timestamp. So these four rows fail
+# with `bad pinned instant "<now>"` rather than `unsupported step`, which is a
+# DIFFERENT RED and worth telling apart when reading the deferred file.
+#
+# THE GHERKIN IS RIGHT AND THE HANDLER IS THE THING TO CHANGE: every other
+# step module already has the four-line `resolve` helper for exactly this, and
+# WHICH INSTANT THE SERVER BELIEVES IN IS THE PARAMETER THIS FEATURE MOST
+# NEEDS TO MUTATE -- a week boundary asserted against one hardcoded Monday is
+# a week boundary asserted once. DO NOT "FIX" THIS BY WRITING THE TIMESTAMPS
+# OUT AS LITERALS; that trades the whole Examples table for a passing parse.
+#
 # ALSO NOT HERE: `Filed here` and the triage change (#138), retiring
 # `TaskKind::Quota` and deciding `period` (#138), and the reorder controls
 # (#139) -- whose absence is NOT asserted, because on a quota that absence

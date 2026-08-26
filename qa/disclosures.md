@@ -143,3 +143,44 @@ This procedure depends only on what a capture row offers, what it shows once
 a kind is chosen, and what each form submits. It does not depend on whether
 the panel is swapped from the server or revealed by CSS, nor on how the
 chosen kind is remembered.
+
+## Procedure — the quota panel's name box (#138)
+
+**The quota panel changed its fields and kept its shape.** It used to ask
+`target_count`, `target_minutes_each` and `period`; it now asks **a name and
+hours a week**, because triaging as a quota is what **creates** the quota.
+**Nothing about which-panel-is-open moved**, which is why the procedures above
+are unedited — they assert which panel is showing, never what is inside it.
+
+1. Capture `learning with lev`. Tap `Quota` on its row.
+2. Capture `practise piano`. Tap `Quota` on that row too.
+3. Edit the first row's name box to `Reading`. Do not submit.
+4. Tap `Committed` on the first row, then `Quota` again.
+
+### Expected Observable Outcomes
+- Steps 1–2: **each name box already holds that row's own capture text, in
+  full.** `learning with lev` carries spaces — **a prefill that survives one
+  word and drops the rest would pass on a single-word fixture**, which is
+  `T-a-check-must-be-seen-to-fail` in the shape #90 named.
+- **The box is editable**, and that is the half that matters: **renaming a
+  quota is #148 and is not built**, so the name triage writes is the name
+  forever. Without an editable box, `finish chapter 3` becomes a permanent
+  quota called that.
+- Step 2 must not disturb step 1's row — **rows are independent**, and the
+  name box is new per-row state that could break that.
+- Step 4: **switching away and back does not leave `Reading` behind.** An
+  unsubmitted edit is ephemeral (`T-ephemeral-view-state-rides-the-request`).
+  **Check the schema for a column holding a draft name — if one exists, say
+  that before anything else in the report**; `T-migrations-append-only` means
+  it can never be taken back.
+- **The panel shows no sessions field, no minutes-each field and no period
+  dropdown.** If any survives, the retirement was cosmetic.
+
+### Prove it can fail
+- **Prefill the name box with a constant instead of the row's text.** →
+  **`disclosures-quota-offers-the-captures-words-07` fails on both rows**, and
+  it must fail on *both* — a breakage that reddens only one row means the
+  scenario is reading a fixture rather than the capture.
+- **Make the name box read-only.** → **`-07` fails on its "can be changed"
+  step alone**, with the prefill steps still green. **That is the pairing to
+  confirm**: if the prefill steps go red too, the two assertions are entangled.

@@ -54,9 +54,9 @@ Feature: Triage happens on the page, using the same validation as the API
   # triage-from-page-quota-rejected-05: triaging as quota through the page with a required field omitted is rejected the same way as the API
   Scenario: Triaging as quota through the page without a required field is rejected the same way as the API
     Given a capture with raw text "go to the gym" is waiting in the untriaged queue
-    When the capture is triaged as a quota task through the page with "target_count" omitted
+    When the capture is triaged as a quota task through the page with "hours" omitted
     Then the triage is rejected
-    And the rejection names "target_count"
+    And the rejection names "hours"
     And the task list is still empty
     And the capture is still waiting in the untriaged queue
 

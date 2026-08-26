@@ -87,39 +87,53 @@ pub(super) fn build(
     week: &Week,
     zone: &jiff::tz::TimeZone,
 ) -> QuotaScreenView {
-    let mut sessions_by_quota: HashMap<i64, Vec<SessionRow>> = HashMap::new();
-    for session in sessions {
-        sessions_by_quota
-            .entry(session.quota_id)
-            .or_default()
-            .push(session);
-    }
-
+    let mut sessions_by_quota = group_sessions_by_quota(sessions);
     let empty = rows.is_empty();
-    let meta = match rows.len() {
-        0 => "none yet".to_string(),
-        1 => "1 quota".to_string(),
-        n => format!("{n} quotas"),
-    };
-    let quotas = rows
-        .into_iter()
-        .map(|row| {
-            let sessions = sessions_by_quota.remove(&row.id).unwrap_or_default();
-            quota_row_view(row, sessions, zone)
-        })
-        .collect();
-    let day_options = week
-        .days_so_far()
-        .iter()
-        .map(|day| day.label().to_string())
-        .collect();
+    let meta = quota_count_meta(rows.len());
+    let quotas = quota_row_views(rows, &mut sessions_by_quota, zone);
     QuotaScreenView {
         meta,
         empty,
         quotas,
-        day_options,
+        day_options: day_option_labels(week),
         today: week.today().label().to_string(),
     }
+}
+
+fn group_sessions_by_quota(sessions: Vec<SessionRow>) -> HashMap<i64, Vec<SessionRow>> {
+    let mut by_quota: HashMap<i64, Vec<SessionRow>> = HashMap::new();
+    for session in sessions {
+        by_quota.entry(session.quota_id).or_default().push(session);
+    }
+    by_quota
+}
+
+fn quota_count_meta(count: usize) -> String {
+    match count {
+        0 => "none yet".to_string(),
+        1 => "1 quota".to_string(),
+        n => format!("{n} quotas"),
+    }
+}
+
+fn quota_row_views(
+    rows: Vec<QuotaRow>,
+    sessions_by_quota: &mut HashMap<i64, Vec<SessionRow>>,
+    zone: &jiff::tz::TimeZone,
+) -> Vec<QuotaRowView> {
+    rows.into_iter()
+        .map(|row| {
+            let sessions = sessions_by_quota.remove(&row.id).unwrap_or_default();
+            quota_row_view(row, sessions, zone)
+        })
+        .collect()
+}
+
+fn day_option_labels(week: &Week) -> Vec<String> {
+    week.days_so_far()
+        .iter()
+        .map(|day| day.label().to_string())
+        .collect()
 }
 
 fn quota_row_view(

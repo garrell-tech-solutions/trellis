@@ -237,17 +237,12 @@ impl Weekday {
         ORDERED[usize::from(index)]
     }
 
+    /// `jiff`'s own Monday-zero ordinal ([`jiff::civil::Weekday::
+    /// to_monday_zero_offset`]) already lines up with [`ORDERED`], so this
+    /// delegates to [`Weekday::from_index`] rather than a sixth,
+    /// wildcard-free match to keep under `T-complexity-8`.
     fn from_jiff(weekday: jiff::civil::Weekday) -> Self {
-        use jiff::civil::Weekday::*;
-        match weekday {
-            Monday => Weekday::Mon,
-            Tuesday => Weekday::Tue,
-            Wednesday => Weekday::Wed,
-            Thursday => Weekday::Thu,
-            Friday => Weekday::Fri,
-            Saturday => Weekday::Sat,
-            Sunday => Weekday::Sun,
-        }
+        Weekday::from_index(weekday.to_monday_zero_offset() as u8)
     }
 
     /// `"Mon"` .. `"Sun"` -- the spelling every acceptance scenario and the

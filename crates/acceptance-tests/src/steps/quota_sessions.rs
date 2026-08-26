@@ -17,18 +17,13 @@ use axum::http::Request;
 /// independently of `scheduler_core::quota::Weekday`, in `jiff` terms
 /// directly, the way `given_server_believes_it_is` already works with
 /// clock instants. This harness verifies the product's own day labels; it
-/// does not borrow the product's derivation to check the product's output.
+/// does not borrow the product's derivation to check the product's output:
+/// `LABELS` is this file's own table, indexed by `jiff`'s own Monday-zero
+/// ordinal, never `scheduler_core::quota`'s.
+const LABELS: [&str; 7] = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+
 fn weekday_label(weekday: jiff::civil::Weekday) -> &'static str {
-    use jiff::civil::Weekday::*;
-    match weekday {
-        Monday => "Mon",
-        Tuesday => "Tue",
-        Wednesday => "Wed",
-        Thursday => "Thu",
-        Friday => "Fri",
-        Saturday => "Sat",
-        Sunday => "Sun",
-    }
+    LABELS[weekday.to_monday_zero_offset() as usize]
 }
 
 static WHEN_TAPPED: LazyLock<Regex> =
@@ -107,6 +102,26 @@ fn html_body(world: &World) -> Result<&str, String> {
     super::html_body(world, "no quota response recorded")
 }
 
+/// `caps[1]` and `caps[2]` resolved together -- see `quota_screen.rs`'s own
+/// copy for the full reasoning; duplicated rather than shared per this
+/// project's established convention.
+fn resolve_pair(
+    example: &BTreeMap<String, String>,
+    caps: &regex::Captures<'_>,
+) -> Result<(String, String), String> {
+    Ok((resolve(example, &caps[1])?, resolve(example, &caps[2])?))
+}
+
+/// See `quota_screen.rs`'s own copy for the full reasoning; duplicated
+/// rather than shared per this project's established convention.
+fn expect_eq(actual: &str, expected: &str, mismatch: String) -> Result<(), String> {
+    if actual == expected {
+        Ok(())
+    } else {
+        Err(mismatch)
+    }
+}
+
 /// The database id of the one quota named `name` -- every session route
 /// this module drives needs it, and the scenario has just as certainly
 /// created it (`a quota named ... with a target of ...`) before naming it
@@ -177,8 +192,7 @@ async fn dispatch_tapped(
     example: &BTreeMap<String, String>,
     caps: &regex::Captures<'_>,
 ) -> Result<(), String> {
-    let control = resolve(example, &caps[1])?;
-    let name = resolve(example, &caps[2])?;
+    let (control, name) = resolve_pair(example, caps)?;
     let minutes = quick_log_minutes(&control)?;
     let zone = owner_zone(world).await?;
     let today = weekday_of(world.clock().now_ms(), &zone);
@@ -223,8 +237,7 @@ fn dispatch_offers_days(
     example: &BTreeMap<String, String>,
     caps: &regex::Captures<'_>,
 ) -> Result<(), String> {
-    let name = resolve(example, &caps[1])?;
-    let expected = resolve(example, &caps[2])?;
+    let (name, expected) = resolve_pair(example, caps)?;
     let body = html_body(world)?;
     let row = html::quota_row(body, &name)?;
     let select = html::between(row, r#"<select name="day">"#, "</select>")?;
@@ -269,18 +282,15 @@ fn dispatch_week_summarises(
     example: &BTreeMap<String, String>,
     caps: &regex::Captures<'_>,
 ) -> Result<(), String> {
-    let name = resolve(example, &caps[1])?;
-    let expected = resolve(example, &caps[2])?;
+    let (name, expected) = resolve_pair(example, caps)?;
     let body = html_body(world)?;
     let row = html::quota_row(body, &name)?;
     let summary = html::between(row, r#"<div class="quota-sessions-summary">"#, "</div>")?;
-    if summary == expected {
-        Ok(())
-    } else {
-        Err(format!(
-            "expected this week for {name:?} to summarise {expected:?}, got {summary:?}"
-        ))
-    }
+    expect_eq(
+        summary,
+        &expected,
+        format!("expected this week for {name:?} to summarise {expected:?}, got {summary:?}"),
+    )
 }
 
 fn dispatch_week_says(
@@ -288,18 +298,15 @@ fn dispatch_week_says(
     example: &BTreeMap<String, String>,
     caps: &regex::Captures<'_>,
 ) -> Result<(), String> {
-    let name = resolve(example, &caps[1])?;
-    let expected = resolve(example, &caps[2])?;
+    let (name, expected) = resolve_pair(example, caps)?;
     let body = html_body(world)?;
     let row = html::quota_row(body, &name)?;
     let message = html::between(row, r#"<p class="quota-sessions-empty">"#, "</p>")?;
-    if message == expected {
-        Ok(())
-    } else {
-        Err(format!(
-            "expected this week for {name:?} to say {expected:?}, got {message:?}"
-        ))
-    }
+    expect_eq(
+        message,
+        &expected,
+        format!("expected this week for {name:?} to say {expected:?}, got {message:?}"),
+    )
 }
 
 /// The most recently logged session in the whole database -- unambiguous
@@ -349,11 +356,15 @@ async fn quota_session_days(world: &World, name: &str) -> Result<Vec<(i64, i64)>
 async fn session_id_on_day(world: &World, name: &str, day: &str) -> Result<i64, String> {
     let zone = owner_zone(world).await?;
     let sessions = quota_session_days(world, name).await?;
+    find_session_id(sessions, day, &zone)
+        .ok_or_else(|| format!("no session logged on {day:?} for {name:?}"))
+}
+
+fn find_session_id(sessions: Vec<(i64, i64)>, day: &str, zone: &jiff::tz::TimeZone) -> Option<i64> {
     sessions
         .into_iter()
-        .find(|(_, day_ms)| weekday_of(*day_ms, &zone) == day)
+        .find(|(_, day_ms)| weekday_of(*day_ms, zone) == day)
         .map(|(id, _)| id)
-        .ok_or_else(|| format!("no session logged on {day:?} for {name:?}"))
 }
 
 async fn dispatch_deleted(

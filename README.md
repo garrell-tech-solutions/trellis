@@ -84,11 +84,22 @@ Every slice from here on is meant to add something visible on that page.
 
 ## Running the acceptance suite
 
-Regenerates test entry points from `features/*.feature` and runs them:
+Two commands, and both are needed:
 
 ```sh
-./scripts/acceptance/run.sh
+./scripts/acceptance/run.sh   # regenerate the entry points from features/
+cargo test --workspace        # unit + property + acceptance, once each
 ```
+
+`run.sh` regenerates only; it does not run the suite. `crates/acceptance-tests`
+is a workspace member, so once the entry points exist `cargo test --workspace`
+compiles and runs every one of them — and while `run.sh` also ended in a test
+run, the whole acceptance suite executed twice on every verification.
+
+Generation is idempotent: an entry point whose feature has not changed is left
+alone, mtime included, so regenerating when nothing moved does not make Cargo
+rebuild every acceptance test binary. Entry points with no feature behind them
+are pruned by name at the end of the run.
 
 ## Running QA scripts
 

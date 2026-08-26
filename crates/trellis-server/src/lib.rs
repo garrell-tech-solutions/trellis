@@ -65,5 +65,6 @@ pub mod inbox;
 pub mod mark_done;
 pub mod platform;
 pub mod pool;
+pub mod quota;
 pub mod settings;
 pub mod triage;

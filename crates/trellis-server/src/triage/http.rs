@@ -8,252 +8,27 @@
 //! swap in, carrying a rejection message on the failing row when triage was
 //! refused; a JSON request (the existing API) gets back exactly what it
 //! always has, unchanged.
+//!
+//! Which transport arrived is [`super::input`]'s business and stops being
+//! visible here after `fields_from_input`; what a refusal says is
+//! [`super::rejection`]'s. What is left in this module is the order things
+//! happen in: well-formedness, then the questions that need a database,
+//! then the writes.
 
 use crate::inbox;
-use crate::inbox::CAPTURE_NOT_OPEN_MESSAGE;
 use crate::platform::clock::Clock;
-use crate::platform::request::content_type_is_json;
 use crate::platform::response::write_failed;
+use crate::quota::NameStanding;
+use crate::triage::input::{fields_from_input, TriageInput};
+use crate::triage::rejection::{rejected, rejection_message, Rejection};
 use crate::triage::store;
-use axum::extract::{FromRequest, Path, Request, State};
+use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use axum::{Form, Json};
-use scheduler_core::task::{TaskKind, TriageFields, TriageRejection};
-use serde::Deserialize;
+use axum::Json;
+use scheduler_core::task::{TaskKind, TriageFields};
 use serde_json::{json, Value};
 use sqlx::SqlitePool;
-
-fn string_field(payload: &Value, name: &str) -> Option<String> {
-    payload
-        .get(name)
-        .and_then(Value::as_str)
-        .map(str::to_string)
-}
-
-/// Translates the JSON body into the core's triage input. This function is
-/// the whole of the JSON transport's involvement: nothing it calls sees
-/// `serde_json`.
-fn triage_fields(payload: &Value) -> TriageFields {
-    TriageFields {
-        kind: string_field(payload, "kind"),
-        deadline: string_field(payload, "deadline"),
-        commitment: string_field(payload, "commitment"),
-        priority: string_field(payload, "priority"),
-        estimated_minutes: payload.get("estimated_minutes").and_then(Value::as_i64),
-        quota_name: string_field(payload, "name"),
-        quota_hours: string_field(payload, "hours"),
-        // #110's date/time/zone trio is the page form's alternative to
-        // `deadline`, never JSON's -- the API keeps sending one complete
-        // instant, per `committed-date-json-still-takes-an-instant-05`.
-        deadline_date: None,
-        deadline_time: None,
-        timezone: None,
-    }
-}
-
-/// The page's triage controls submit as a plain HTML form: url-encoded,
-/// every field optional, since which fields matter depends on `kind`. Mirrors
-/// `scheduler_core::task::TriageFields` rather than being that type directly
-/// — the core must not depend on `serde` (T-module-boundary).
-///
-/// `context_tag` rides along but is not part of `TriageFields`: it never
-/// decides a kind or fails a submission (`context-tags-taggable-at-triage-08`
-/// is a second chance to supply a fact the core does not adjudicate), so it
-/// is extracted separately rather than smuggled into the type that exists to
-/// answer "what kind of task is this".
-#[derive(Deserialize, Default)]
-pub struct TriageFormRequest {
-    kind: Option<String>,
-    deadline: Option<String>,
-    /// `"2026-08-25"` -- the committed date-picker's value (#110). Absent
-    /// for every other kind, and for a committed submission that still
-    /// sends a complete `deadline` (an older client, or a test fixture).
-    #[serde(default)]
-    deadline_date: Option<String>,
-    /// `"08:30"` -- the committed time-picker's value, present only for an
-    /// *at*. A *by* never asks the page for one.
-    #[serde(default)]
-    deadline_time: Option<String>,
-    commitment: Option<String>,
-    priority: Option<String>,
-    estimated_minutes: Option<i64>,
-    /// A quota's name (#138) -- prefilled by the page with the capture's
-    /// own words, but always required and editable.
-    name: Option<String>,
-    /// A quota's weekly hour target, as free text -- the canvas's own
-    /// `step="0.5"` input.
-    hours: Option<String>,
-    #[serde(default)]
-    context_tag: Option<String>,
-    /// The candidate name a *similar*-name warning was already shown for,
-    /// carried back by a "Create anyway" resubmission
-    /// (`quota-triage-validation-similar-name-warns-04`) -- rides outside
-    /// `TriageFields` for the same reason `context_tag` does: it decides no
-    /// kind and fails no submission on its own, and the core has no
-    /// database to check it against.
-    #[serde(default)]
-    confirmed: Option<String>,
-}
-
-impl From<&TriageFormRequest> for TriageFields {
-    fn from(form: &TriageFormRequest) -> Self {
-        TriageFields {
-            kind: form.kind.clone(),
-            deadline: form.deadline.clone(),
-            deadline_date: form.deadline_date.clone(),
-            deadline_time: form.deadline_time.clone(),
-            // Set by `create_triage`, which has the database this
-            // conversion does not (`T-core-owns-validation-order`: the
-            // adapter keeps only what the core genuinely cannot have).
-            timezone: None,
-            commitment: form.commitment.clone(),
-            priority: form.priority.clone(),
-            estimated_minutes: form.estimated_minutes,
-            quota_name: form.name.clone(),
-            quota_hours: form.hours.clone(),
-        }
-    }
-}
-
-/// Either transport this endpoint accepts. JSON keeps the raw `Value`: a
-/// wrong-typed `kind` (e.g. `7`) must still be echoed back by the rejection
-/// (T-unknown-kind-rejected), which a strongly-typed `Option<String>` field
-/// cannot represent — it would fail to deserialize at all. A form field has
-/// no such case; every value a browser form submits is already a string.
-pub enum TriageInput {
-    Json(Value),
-    Form(Box<TriageFormRequest>),
-}
-
-impl<S: Send + Sync> FromRequest<S> for TriageInput {
-    type Rejection = StatusCode;
-
-    async fn from_request(req: Request, state: &S) -> Result<Self, Self::Rejection> {
-        if content_type_is_json(&req) {
-            let Json(payload) = Json::<Value>::from_request(req, state)
-                .await
-                .map_err(|_| StatusCode::BAD_REQUEST)?;
-            Ok(Self::Json(payload))
-        } else {
-            let Form(form) = Form::<TriageFormRequest>::from_request(req, state)
-                .await
-                .map_err(|_| StatusCode::BAD_REQUEST)?;
-            Ok(Self::Form(Box::new(form)))
-        }
-    }
-}
-
-/// Every way triage can be refused. `Core` wraps `scheduler_core`'s own
-/// rejection — well-formedness, decidable without a database.
-enum Rejection {
-    Core(TriageRejection),
-    /// The capture named by the URL has already left the inbox -- by triage
-    /// or by dismissal, either of which needs the database to know
-    /// (`dismiss-capture-no-triage-after-dismissal-05`). Which of the two it
-    /// was is not reported: the rejection is the same either way, "not open
-    /// for business", and nothing downstream needs to tell them apart.
-    CaptureNotOpen,
-    /// A well-formed quota name collides with an existing quota once case,
-    /// spaces and punctuation are folded away
-    /// (`D-quotas-are-selected-not-typed`'s guard, moved from the retired
-    /// define form to triage's own front door, #138). Never bypassable --
-    /// filing into an existing quota is deferred, so the only way out is a
-    /// different name.
-    QuotaNameExists {
-        existing_name: String,
-        existing_minutes: i64,
-    },
-    /// A well-formed quota name merely resembles an existing one -- warned
-    /// once, and created on confirmation
-    /// (`quota-triage-validation-similar-name-warns-04`). The candidate
-    /// name itself already decided [`check_quota_name`]'s outcome, so
-    /// nothing further downstream needs to carry it.
-    QuotaNameSimilar {
-        existing_name: String,
-        existing_minutes: i64,
-    },
-}
-
-/// The JSON body for a `Rejection::Core` -- the well-formedness half, shared
-/// between [`rejected`] and [`rejection_message`], split out so neither has
-/// to match both the outer `Rejection` and the inner `TriageRejection` at
-/// once.
-fn core_rejection_body(core: &TriageRejection, kind_submitted: &Value) -> Value {
-    match core {
-        TriageRejection::MissingField(field) => json!({ "missing_field": field.name() }),
-        TriageRejection::InvalidField(field) => json!({ "invalid_field": field.name() }),
-        TriageRejection::UnknownKind => json!({ "unknown_kind": kind_submitted }),
-    }
-}
-
-/// The prose half of a `Rejection::Core`, for the same reason as
-/// [`core_rejection_body`].
-fn core_rejection_message(core: &TriageRejection, kind_submitted: &Value) -> String {
-    match core {
-        TriageRejection::MissingField(field) => format!("{} is required", field.name()),
-        TriageRejection::InvalidField(field) => format!("{} is invalid", field.name()),
-        TriageRejection::UnknownKind => format!("unrecognised kind: {kind_submitted}"),
-    }
-}
-
-/// The rejection contract: a client error whose body names what was wrong.
-/// A rejection that does not say what was wrong is a failure even with the
-/// right status code.
-///
-/// `kind_submitted` comes from the request rather than from the rejection:
-/// the core sees `kind` only after `string_field` has turned a wrong-typed
-/// value into `None`, so this module holds the only surviving copy of what
-/// actually arrived. That is what lets `{"kind": 7}` echo back `7` instead
-/// of `null` (T-unknown-kind-rejected: report what was submitted).
-fn rejected(rejection: &Rejection, kind_submitted: &Value) -> (StatusCode, Json<Value>) {
-    let body = match rejection {
-        Rejection::Core(core) => core_rejection_body(core, kind_submitted),
-        Rejection::CaptureNotOpen => {
-            json!({ "capture_not_open": CAPTURE_NOT_OPEN_MESSAGE })
-        }
-        Rejection::QuotaNameExists { .. } => {
-            json!({ "quota_conflict": "exact", "message": rejection_message(rejection, kind_submitted) })
-        }
-        Rejection::QuotaNameSimilar { .. } => json!({
-            "quota_conflict": "similar",
-            "message": rejection_message(rejection, kind_submitted),
-            "confirm_control": QUOTA_CONFIRM_CONTROL,
-        }),
-    };
-    (StatusCode::UNPROCESSABLE_ENTITY, Json(body))
-}
-
-/// A one-line summary of a rejection for the page's per-row error slot. Not
-/// the API's rejection contract (that stays `rejected`'s job) — this is
-/// prose for a human reading the form they just submitted.
-fn rejection_message(rejection: &Rejection, kind_submitted: &Value) -> String {
-    match rejection {
-        Rejection::Core(core) => core_rejection_message(core, kind_submitted),
-        Rejection::CaptureNotOpen => CAPTURE_NOT_OPEN_MESSAGE.to_string(),
-        Rejection::QuotaNameExists {
-            existing_name,
-            existing_minutes,
-        } => format!(
-            "\u{201c}{existing_name}\u{201d} already exists at {}. Log your time against that \
-             one, or give this a different name.",
-            crate::quota::hours_a_week(*existing_minutes)
-        ),
-        Rejection::QuotaNameSimilar {
-            existing_name,
-            existing_minutes,
-            ..
-        } => format!(
-            "That reads a lot like \u{201c}{existing_name}\u{201d} ({}). Same thing?",
-            crate::quota::hours_a_week(*existing_minutes)
-        ),
-    }
-}
-
-/// The "Create anyway" control a similar-name warning offers, on both
-/// transports -- the JSON contract's own `confirm_control` and the page's
-/// button label alike (`quota-triage-validation-similar-name-warns-04`).
-const QUOTA_CONFIRM_CONTROL: &str = "Create anyway";
 
 /// The instant is passed in rather than read here: reading the clock is the
 /// handler's business, and a triage stamps the task and the capture it
@@ -309,30 +84,35 @@ fn already_confirmed(confirmed: Option<&str>, candidate_name: &str) -> bool {
     confirmed == Some(candidate_name)
 }
 
-/// A quota's name checked against every existing quota (#138, moved from
-/// the retired quota-screen define form to triage's own front door): `None`
-/// when nothing is in the way, or the write-blocking rejection otherwise.
+/// A quota's name put to the quota capability (#138, moved from the retired
+/// quota-screen define form to triage's own front door): `None` when
+/// nothing is in the way, or the write-blocking rejection otherwise.
+///
+/// Triage asks where the name *stands* rather than reading the quotas
+/// itself. Which quotas exist, and how the comparison is reached, are
+/// `crate::quota`'s business; what triage adds is the half the quota
+/// capability has no way to know -- that this submission already carried a
+/// "Create anyway", so a resemblance has been warned about once already.
 async fn check_quota_name(
     pool: &SqlitePool,
     candidate_name: &str,
     confirmed: Option<&str>,
 ) -> Result<Option<Rejection>, sqlx::Error> {
-    let existing = crate::quota::existing_names(pool).await?;
-    let rejection = match scheduler_core::quota::check_name(candidate_name, &existing) {
-        Some(scheduler_core::quota::NameMatch::Exact(existing_name, existing_minutes)) => {
-            Some(Rejection::QuotaNameExists {
-                existing_name: existing_name.to_string(),
-                existing_minutes,
-            })
-        }
-        Some(scheduler_core::quota::NameMatch::Similar(existing_name, existing_minutes))
-            if !already_confirmed(confirmed, candidate_name) =>
-        {
-            Some(Rejection::QuotaNameSimilar {
-                existing_name: existing_name.to_string(),
-                existing_minutes,
-            })
-        }
+    let rejection = match crate::quota::name_standing(pool, candidate_name).await? {
+        NameStanding::Taken {
+            name,
+            weekly_target_minutes,
+        } => Some(Rejection::QuotaNameExists {
+            existing_name: name,
+            existing_minutes: weekly_target_minutes,
+        }),
+        NameStanding::Resembles {
+            name,
+            weekly_target_minutes,
+        } if !already_confirmed(confirmed, candidate_name) => Some(Rejection::QuotaNameSimilar {
+            existing_name: name,
+            existing_minutes: weekly_target_minutes,
+        }),
         _ => None,
     };
     Ok(rejection)
@@ -413,43 +193,6 @@ async fn page_response(
     inbox::render_lists(pool, status, error).await
 }
 
-/// Fields both transports carry alongside [`TriageFields`] without the core
-/// deciding either: `context_tag` decides no kind and fails no submission
-/// (`context-tags-taggable-at-triage-08`), and `confirmed` needs a database
-/// the core does not have (#138). Bundled rather than a longer tuple, since
-/// [`fields_from_input`] now has three things to return besides the fields
-/// themselves.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-struct SideFields {
-    context_tag: Option<String>,
-    confirmed: Option<String>,
-}
-
-/// The three things every branch of [`TriageInput`] must produce: the fields
-/// the core decides on, the raw `kind` a rejection echoes back
-/// (T-unknown-kind-rejected), and the side fields decided by neither
-/// transport nor core.
-fn fields_from_input(input: TriageInput) -> (TriageFields, Value, SideFields) {
-    match input {
-        TriageInput::Json(payload) => {
-            let kind_submitted = payload.get("kind").cloned().unwrap_or(Value::Null);
-            let side = SideFields {
-                context_tag: string_field(&payload, "context_tag"),
-                confirmed: string_field(&payload, "confirmed"),
-            };
-            (triage_fields(&payload), kind_submitted, side)
-        }
-        TriageInput::Form(form) => {
-            let kind_submitted = json!(form.kind);
-            let side = SideFields {
-                context_tag: form.context_tag.clone(),
-                confirmed: form.confirmed.clone(),
-            };
-            (TriageFields::from(form.as_ref()), kind_submitted, side)
-        }
-    }
-}
-
 /// The JSON-API-originated response: the existing contract, unchanged --
 /// `{}` on success, `rejected`'s body on refusal.
 async fn json_response(
@@ -512,8 +255,6 @@ mod tests {
     use crate::platform::test_support::{stored_context_tag, test_pool};
     use axum::body::Body;
     use axum::http::Request;
-    use proptest::prelude::*;
-    use scheduler_core::task::Field;
     use tower::ServiceExt;
 
     async fn insert_untriaged_capture(pool: &SqlitePool, raw_text: &str) -> i64 {
@@ -1415,199 +1156,5 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(task_count, 0);
-    }
-
-    #[test]
-    fn triage_fields_reads_every_field_the_core_asks_for() {
-        let payload = json!({
-            "kind": "quota",
-            "deadline": "2026-08-20T17:00:00Z",
-            "commitment": "at",
-            "priority": "P1",
-            "estimated_minutes": 180,
-            "name": "Piano",
-            "hours": "4"
-        });
-
-        assert_eq!(
-            triage_fields(&payload),
-            TriageFields {
-                kind: Some("quota".to_string()),
-                deadline: Some("2026-08-20T17:00:00Z".to_string()),
-                commitment: Some("at".to_string()),
-                priority: Some("P1".to_string()),
-                estimated_minutes: Some(180),
-                quota_name: Some("Piano".to_string()),
-                quota_hours: Some("4".to_string()),
-                ..TriageFields::default()
-            }
-        );
-    }
-
-    #[test]
-    fn triage_fields_treats_an_empty_body_as_nothing_submitted() {
-        assert_eq!(triage_fields(&json!({})), TriageFields::default());
-    }
-
-    #[test]
-    fn triage_fields_ignores_a_field_submitted_with_the_wrong_json_type() {
-        let payload = json!({ "kind": 7, "name": 3 });
-        assert_eq!(triage_fields(&payload), TriageFields::default());
-    }
-
-    #[test]
-    fn a_missing_field_rejection_names_the_field() {
-        let (status, Json(body)) = rejected(
-            &Rejection::Core(TriageRejection::MissingField(Field::Priority)),
-            &Value::Null,
-        );
-        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
-        assert_eq!(body, json!({ "missing_field": "priority" }));
-    }
-
-    #[test]
-    fn an_invalid_field_rejection_names_the_field() {
-        let (status, Json(body)) = rejected(
-            &Rejection::Core(TriageRejection::InvalidField(Field::Deadline)),
-            &Value::Null,
-        );
-        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
-        assert_eq!(body, json!({ "invalid_field": "deadline" }));
-    }
-
-    #[test]
-    fn an_unknown_kind_rejection_echoes_the_value_it_is_given() {
-        let (status, Json(body)) = rejected(
-            &Rejection::Core(TriageRejection::UnknownKind),
-            &json!({ "not": "a string" }),
-        );
-        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
-        assert_eq!(body, json!({ "unknown_kind": { "not": "a string" } }));
-    }
-
-    #[test]
-    fn an_invalid_field_rejection_message_names_the_field() {
-        let message = rejection_message(
-            &Rejection::Core(TriageRejection::InvalidField(Field::Deadline)),
-            &Value::Null,
-        );
-        assert_eq!(message, "deadline is invalid");
-    }
-
-    #[test]
-    fn an_unknown_kind_rejection_message_echoes_the_value_it_is_given() {
-        let message = rejection_message(
-            &Rejection::Core(TriageRejection::UnknownKind),
-            &json!({ "not": "a string" }),
-        );
-        assert_eq!(message, r#"unrecognised kind: {"not":"a string"}"#);
-    }
-
-    /// A submission expressed as JSON and as a form, field for field.
-    fn json_body(fields: &TriageFields) -> Value {
-        let mut body = serde_json::Map::new();
-        let mut put = |name: &str, value: Option<Value>| {
-            if let Some(value) = value {
-                body.insert(name.to_string(), value);
-            }
-        };
-        put("kind", fields.kind.clone().map(Value::from));
-        put("deadline", fields.deadline.clone().map(Value::from));
-        put("commitment", fields.commitment.clone().map(Value::from));
-        put("priority", fields.priority.clone().map(Value::from));
-        put(
-            "estimated_minutes",
-            fields.estimated_minutes.map(Value::from),
-        );
-        put("name", fields.quota_name.clone().map(Value::from));
-        put("hours", fields.quota_hours.clone().map(Value::from));
-        Value::Object(body)
-    }
-
-    fn form_request(fields: &TriageFields) -> TriageFormRequest {
-        TriageFormRequest {
-            kind: fields.kind.clone(),
-            deadline: fields.deadline.clone(),
-            deadline_date: fields.deadline_date.clone(),
-            deadline_time: fields.deadline_time.clone(),
-            commitment: fields.commitment.clone(),
-            priority: fields.priority.clone(),
-            estimated_minutes: fields.estimated_minutes,
-            name: fields.quota_name.clone(),
-            hours: fields.quota_hours.clone(),
-            context_tag: None,
-            confirmed: None,
-        }
-    }
-
-    proptest! {
-        #![proptest_config(ProptestConfig { cases: 64, ..ProptestConfig::default() })]
-
-        /// "The page and `POST /captures/{id}/triage` are one code path, not
-        /// two" is this module's stated design, and this is the seam where it
-        /// could quietly stop being true: two hand-written, field-by-field
-        /// translations into the same core input. Adding a field to
-        /// `TriageFields` and wiring it into only one of them still compiles,
-        /// still passes every example test that does not happen to use it,
-        /// and silently makes the page and the API disagree. It fails here.
-        #[test]
-        #[ignore]
-        fn both_transports_translate_one_submission_into_the_same_core_input(
-            kind in proptest::option::of(".{0,12}"),
-            deadline in proptest::option::of(".{0,30}"),
-            commitment in proptest::option::of(".{0,10}"),
-            priority in proptest::option::of(".{0,6}"),
-            estimated_minutes in proptest::option::of(any::<i64>()),
-            quota_name in proptest::option::of(".{0,20}"),
-            quota_hours in proptest::option::of(".{0,10}"),
-        ) {
-            let submission = TriageFields {
-                kind,
-                deadline,
-                commitment,
-                priority,
-                estimated_minutes,
-                quota_name,
-                quota_hours,
-                // #110's deadline_date/deadline_time/timezone are the page
-                // form's own fields, with no JSON equivalent to round-trip
-                // against -- left at their default `None` here and covered
-                // by their own example tests instead.
-                ..TriageFields::default()
-            };
-
-            let from_json = triage_fields(&json_body(&submission));
-            let from_form: TriageFields = TriageFields::from(&form_request(&submission));
-
-            prop_assert_eq!(&from_json, &submission);
-            prop_assert_eq!(from_json, from_form);
-        }
-    }
-
-    proptest! {
-        #![proptest_config(ProptestConfig { cases: 32, ..ProptestConfig::default() })]
-
-        /// The context-tag counterpart of the property above: not part of
-        /// `TriageFields` (it decides no kind and fails no submission), but
-        /// still a field both transports must agree on
-        /// (`context-tags-taggable-at-triage-08`).
-        #[test]
-        #[ignore]
-        fn both_transports_extract_the_same_context_tag(
-            context_tag in proptest::option::of(".{0,20}"),
-        ) {
-            let mut json_payload = json_body(&TriageFields::default());
-            if let Some(tag) = &context_tag {
-                json_payload["context_tag"] = Value::from(tag.clone());
-            }
-            let (_, _, from_json) = fields_from_input(TriageInput::Json(json_payload));
-
-            let mut form = form_request(&TriageFields::default());
-            form.context_tag = context_tag.clone();
-            let (_, _, from_form) = fields_from_input(TriageInput::Form(Box::new(form)));
-
-            prop_assert_eq!(from_json.context_tag, context_tag.clone());
-            prop_assert_eq!(from_form.context_tag, context_tag);
-        }
     }
 }

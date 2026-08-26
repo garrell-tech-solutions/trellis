@@ -6,24 +6,18 @@
 # committed-triage-validation-missing-field-01: committed triage is rejected when a required field is absent
 # committed-triage-validation-empty-field-02: committed triage is rejected when a required field is left empty, the same way as when it is absent
 #
-# `commitment` (at | by) REPLACED `deadline_type` (hard | soft) in the
-# required set in #94. D-committed-is-at-or-by makes a committed item one or
-# the other, and deadline_type's only behaviour -- T-hard-refuses-soft-slips'
-# -- lives in the scheduler D-dogfood-first paused, so it changed nothing
-# while still costing a field on a form meant to be fast. When the scheduler
-# returns, an `at` is hard and a `by` is soft, derived rather than typed
-# twice. THE COLUMN STAYS IN THE SCHEMA, UNREAD, on #88's ground: dropping it
-# throws away what the owner already typed, and unlike scheduler_core::ratio
-# a hard/soft judgement is not recomputable from anything that remains.
+# `commitment` (at | by) REPLACED `deadline_type` (hard | soft) in the required
+# set in #94 (D-committed-is-at-or-by). THE COLUMN STAYS IN THE SCHEMA, UNREAD,
+# on #88's ground: unlike scheduler_core::ratio, a hard/soft judgement is not
+# recomputable from anything that remains.
 #
 # `estimated_minutes` joined the required set in #62: capacity cannot report
-# what a fortnight needs if committed tasks carry no minutes, and the two
-# alternatives were closed by precedent -- counting only quota demand makes
-# the number wrong in the direction of "you have more time than you do", and
-# defaulting the estimate is a silent wrong default of the kind
-# D-manual-triage-until-llm and T-timezone-is-a-setting each refused. Only
-# committed needs it: pool is never placed, and quota already carries
-# target_minutes_each.
+# what a fortnight needs if committed tasks carry no minutes, and both
+# alternatives were closed by precedent -- counting only quota demand makes the
+# number wrong in the direction of "you have more time than you do", and
+# defaulting the estimate is the silent wrong default D-manual-triage-until-llm
+# and T-timezone-is-a-setting each refused. Only committed needs it: pool is
+# never placed, and quota already carries target_minutes_each.
 Feature: Committed triage requires deadline, commitment, priority and an estimate
 
   Background:

@@ -19,30 +19,18 @@ example and says so.
 ## The one idea this screen turns on
 
 **A context tag becomes a trip only once three things are waiting there.**
-Fewer, and those items fall into loose ends **still showing their tag**.
+Fewer, and those items fall into loose ends **still showing their tag**. The
+threshold, the ranking and the absence of reorder controls are argued in
+`features/pool_screen.feature`'s header.
 
-Everything else follows from it:
+Two things to watch for, because both look like omissions:
 
-- **Trips are ranked by how many things they clear** — derived from the data,
-  never maintained. **Groups have no priority and must never grow one.**
-- **A trip is a unit you clear in one stop**, so the order of its items is
-  noise and should never get a control.
-- **A loose end is a thing you decide about**, so it should get one — **in
-  its own slice, not this one.**
-
-**Nothing on this screen reorders anything, and that is deliberate.** The
-canvas draws up/down arrows on trip items, on loose ends and on quota rows.
-**If you find any of them, that is a defect** — a coder reading the canvas
-would add them in good faith, which is exactly why their absence is asserted
-rather than assumed.
-
-## What the canvas draws that is deliberately not built
-
-The per-group note — *"One stop clears all 3."* — is computed in the canvas
-from a hardcoded list of which tags are places and which are sittings. That
-needs Trellis to know `@homedepot` is a shop, which is the managed taxonomy
-`D-context-tags-are-the-taxonomy` refuses. **Its absence is intended. Do not
-report it as missing.**
+- **Nothing on this screen reorders anything**, though the canvas draws
+  up/down arrows on trip items, loose ends and quota rows. **If you find any
+  of them, that is a defect.**
+- **The per-group note — *"One stop clears all 3."* — is deliberately not
+  built** (`D-context-tags-are-the-taxonomy`). **Do not report it as
+  missing.**
 
 ## By-hand walkthrough — do this once, in a real browser, on a phone
 
@@ -115,10 +103,9 @@ report it as missing.**
 
 ### Expected Observable Outcomes
 - **One** trip of three, labelled with the spelling first used.
-- **This screen is where #82's decision earns itself.** Three separate
-  one-item groups would each fall below the threshold, so all three errands
-  would land in loose ends and the trip would never appear — the owner drives
-  to Home Depot twice, or not at all.
+- **This screen is where case folding earns itself.** Three separate one-item
+  groups would each fall below the threshold, so all three errands would land
+  in loose ends and the trip would never appear.
 
 ## Procedure — only pool work appears
 
@@ -146,8 +133,7 @@ report it as missing.**
   it by hand; it should refuse or not exist.
 - **This is the assertion most likely to be undone by accident**, because the
   canvas draws the arrows and a good-faith reading of the design puts them
-  back. Reordering has its own slice; when it lands it belongs to loose ends
-  alone, and never to trips or groups.
+  back.
 
 ## Procedure — a long trip
 
@@ -176,12 +162,9 @@ report it as missing.**
 1. View the capture screen, then the pool screen.
 
 ### Expected Observable Outcomes
-- **Exactly four tabs**, Capture, Pool, Committed and Quota. **Updated by
-  #93**, which read *"exactly three... not four: Quota arrives with its own
-  slice, and a dead link is worse than no link."* That slice has arrived, so
-  the link is no longer dead and the count is four. The rule the old wording
-  was protecting is unchanged and still worth checking: **no tab may point at
-  a route the app cannot serve** — follow all four from all four screens.
+- **Exactly four tabs**, Capture, Pool, Committed and Quota (four since #93).
+  The rule behind the count is the thing to check: **no tab may point at a
+  route the app cannot serve** — follow all four from all four screens.
 - Each screen marks itself current, and only itself.
 - The marking is in the markup, not by colour alone.
 - **`one_screen`'s route list is the other half of this**, and it changed in

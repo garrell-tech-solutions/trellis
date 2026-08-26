@@ -10,50 +10,30 @@
 # committed-date-rejection-still-names-the-field-06: a rejection is still 422 and still names the field
 # committed-date-cell-disambiguates-07: beyond this week the date cell says which day, not just which weekday
 #
-# THE CANVAS DRAWS NO DATE INPUT AT ALL -- verified, not paraphrased: zero
-# occurrences of type="date", type="time" or type="datetime-local" in
-# docs/design/Trellis.dc.html. D-four-screens makes it authoritative on
-# layout, so this is a GAP of the same class as the missing done control
-# #103 met, and it is flagged rather than filled silently. The owner chose a
-# native date picker: it costs no typing, needs no JavaScript, and gives a
-# phone its own wheel.
+# THE CANVAS DRAWS NO DATE INPUT -- verified, not paraphrased: zero occurrences
+# of type="date", type="time" or type="datetime-local" in
+# docs/design/Trellis.dc.html. Under D-four-screens that is a GAP, flagged
+# rather than filled silently; the owner chose a native picker. The canvas's
+# weekday <select> is no precedent for it: that sits under "Log a session",
+# RETROSPECTIVE and bounded to the week just gone, while a deadline is
+# PROSPECTIVE AND UNBOUNDED. Its 44px touch height is the precedent, and kept.
 #
-# THE CANVAS'S DAY CONTROL WAS NOT A PRECEDENT FOR THIS, and the difference
-# is why the owner was asked. Its seven-entry weekday <select> (line 274)
-# sits under "Log a session" -- RETROSPECTIVE, bounded to the week just gone.
-# A deadline is PROSPECTIVE AND UNBOUNDED: "the tax return by the 15th" is a
-# real commitment a weekday list cannot say. Its 44px touch height IS the
-# precedent and is kept.
+# A BY TAKES A DAY AND NO TIME ON THE PAGE, but 05 pins that a by may still
+# carry a time over JSON -- the page simply stops asking, and this slice must
+# not narrow the boundary committed-screen-at-and-by-02 already asserts.
+# T-commitment-is-chosen-not-derived is unweakened: at or by is picked FIRST
+# and the form answers.
 #
-# A BY TAKES A DAY AND NO TIME ON THE PAGE. T-commitment-is-chosen-not-derived
-# is not weakened: the owner picks at or by FIRST and the form answers, which
-# is the opposite of inferring the choice from whether a time was typed. A
-# by's time of day is not the commitment and the screen never shows it.
-#
-# BUT A BY MAY STILL CARRY A TIME over JSON, and 05 pins that -- the page
-# simply stops asking. committed-screen-at-and-by-02 already asserts a by
-# with a time renders as a by rather than silently becoming an at, and this
-# slice must not quietly narrow the boundary to match the form.
-#
-# A DATE-ONLY BY IS THE END OF THAT DAY in the owner's zone. "By Thursday"
-# means before Thursday is over, and the conversion from a local date to an
-# instant is a business rule -- T-jiff-epoch-millis: it belongs in
+# A DATE-ONLY BY IS THE END OF THAT DAY in the owner's zone. That local-date to
+# instant conversion is a business rule (T-jiff-epoch-millis): it belongs in
 # scheduler-core, not a handler and not in JavaScript.
 #
-# THE DISPLAY IS PART OF THIS SLICE, which the brief frames as an input
-# problem. scheduler_core::committed_screen::date_cell renders UTC and says
-# so in its own doc comment -- "this product has no per-user timezone applied
-# to display yet". A date chosen at 23:00 local would be entered correctly
-# and then shown on the wrong day, so 03 asserts the round trip rather than
-# the input alone.
-#
-# 07 EXISTS BECAUSE THE CELL CANNOT TELL TWO THURSDAYS APART. `BY THU` is
-# unambiguous only within a week; a deadline three weeks out renders
-# identically to one three days out. Beyond this week the cell names the
-# date instead. Both forms are kept short on purpose: the canvas gives this
-# cell 66px at 10.5px uppercase, so "BY THU 27 AUG" does not fit and is not
-# what is specified. qa/phone_layout.md's browser check can see a clipped
-# cell for the first time in this project -- use it.
+# DISPLAY IS IN SCOPE though the brief frames this as an input problem:
+# date_cell renders UTC by its own admission, so a date picked at 23:00 local
+# would be entered correctly and then shown on the wrong day -- 03 asserts the
+# round trip. 07 exists because `BY THU` is unambiguous only within a week.
+# Both forms stay short: the canvas gives the cell 66px at 10.5px uppercase, so
+# "BY THU 27 AUG" does not fit and is not what is specified.
 Feature: A committed date is chosen, not typed, and lands on the day intended
 
   Background:

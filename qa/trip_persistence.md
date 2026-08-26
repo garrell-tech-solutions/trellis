@@ -16,20 +16,7 @@ Bind by role and accessible name, never by class
 `POST /pool/tasks/{id}/done`, undo with `.../undone`, clear with
 `POST /pool/trips/{tag}/clear`. **A fixture that writes `cleared_at` — or a
 run marker, if the implementation bought one — directly proves nothing**,
-because this slice is entirely about what those routes leave behind. #103 and
-#135 were both told this; it matters more here than in either.
-
-## The defect
-
-You are in Home Depot. Five things tagged `@homedepot`; you have got three
-and tapped `✕` to tidy the panel. **The panel dissolves and the last two
-scatter into loose ends among everything else, while you are still standing
-in the shop.**
-
-#122 fixed this for *checking things off*. **This is the same defect one tap
-later** — `pool.rs:121` re-derives trip-ness on every render from the
-uncleared set, and clearing is the first thing that removes an item from that
-set mid-shop.
+because this slice is entirely about what those routes leave behind.
 
 ## The rule, in the words the screen has to obey
 
@@ -38,31 +25,20 @@ set mid-shop.
 > **FORMATION:** a run of three or more things is a trip.
 > **PERSISTENCE:** it stays one for as long as the run lasts.
 
-Two consequences worth holding in mind while you look at the screen:
+Two consequences to hold in mind while you look at the screen, both argued in
+`features/trip_persistence.feature`'s header:
 
 - **A tag must re-earn its trip.** Three things cleared last month plus one
-  captured today is **not** a trip. This is the bound #129 asked for, and the
-  naive rule it rejected — *ever reached three, counting cleared ones* —
-  would make every frequently-used tag a permanent panel within a year.
-- **The panel leaves on a tap, never on a tick.** Settled by the owner
-  2026-08-25. Tick the last open thing in a trip that clearing has taken down
-  to two and **the panel holds, reading "2 of 2 done"**, with `✕` still on
-  it. It goes when you tap `✕`.
-
-**That last one is the decision, and it is worth knowing why**, because a
-panel that lingers looks like a bug if you do not:
-`trip-progress-fully-done-06` already does exactly this at three items, so
-going at two and staying at three would make the item count decide whether
-finishing a trip wipes it. **You can uncheck what you can see**, and a panel
-that vanishes on the last tick takes the undo with it. And **nothing clears
-itself** — a panel that swept its own leftovers away would be the automatic
-sweep the owner rejected, wearing a trigger instead of a timer.
+  captured today is **not** a trip.
+- **The panel leaves on a tap, never on a tick.** Tick the last open thing in
+  a trip that clearing has taken down to two and **the panel holds, reading
+  "2 of 2 done"**, with `✕` still on it. It goes when you tap `✕`. **A panel
+  that lingers looks like a bug if you do not know that was chosen.**
 
 ## Two scenarios changed, and they were green
 
-`trip-progress-clearing-can-drop-a-group-05` **asserted the defect** — 3 at a
-tag, 1 done, clear, *"the pool screen offers no trips"*. It is reversed, not
-deleted and not weakened, and it is now
+`trip-progress-clearing-can-drop-a-group-05` **asserted the defect** and is
+reversed, not deleted and not weakened; it is now
 `trip-progress-clearing-holds-the-group-05`.
 `trip-progress-clear-done-04` is the consequence: its two survivors used to
 land in loose ends and now stay in the panel.
@@ -144,9 +120,9 @@ state. It cannot see either of these.
   see run state held in process memory.
 - **If the implementation bought a column for this, it is legitimate** —
   `T-ephemeral-view-state-rides-the-request` is the test, and this state
-  fails that test the way `cleared_at` did rather than the way `shown_kind`
-  did. **What the report must say is whether the pull-request body argues
-  it**, as #129 asks, and whether a derivation was attempted first.
+  fails it the way `cleared_at` did rather than the way `shown_kind` did.
+  **The report must say whether the pull-request body argues it** and whether
+  a derivation was attempted first.
 - **If it did buy one, `T-migrations-append-only` means it is permanent.**
   Confirm the migration is additive and that no existing migration file
   changed.
@@ -174,20 +150,17 @@ lifetime this slice changed.
   neither issue mentions**; it works only because the panel stayed.
 - Step 5: **the panel is still there, reading `1 things`.** The clear swept
   the one struck item and **the item you unticked is still waiting**, so the
-  run has not ended. **An earlier draft of this document said "gone entirely"
-  here and was wrong** — it carried the ending over from the procedure above
-  without re-deriving it after the untick at step 4. QA caught it against a
-  running server and scripted the correct behaviour; this is the corrected
-  text. *(The label reads `1 things` rather than `1 thing`; that wording
-  predates this slice and is not its to fix.)*
+  run has not ended. *(The label reads `1 things` rather than `1 thing`; that
+  wording predates this slice and is not its to fix.)*
 - Step 6: **now it is gone entirely** — the last thing waiting has been
   cleared, so the run ends.
 - **Steps 5 and 6 are the rule stated twice**, and the pair is worth keeping:
   a clear that leaves something waiting is a tidy, and a clear that leaves
   nothing waiting is the end of a run.
-- **`trip_controls.feature:176` asserts a trip with nothing open offers no
-  complete-group control.** Confirm the two rules do not disagree about which
-  state the panel is in between the completion and the render.
+- **`trip-controls-nothing-left-to-complete-03` asserts a trip with nothing
+  open offers no complete-group control.** Confirm the two rules do not
+  disagree about which state the panel is in between the completion and the
+  render.
 
 ## Procedure — prove the checks can fail
 
@@ -250,15 +223,13 @@ named assertion is the one that goes red, not merely that something did.
   they are where the brief's own demo said the panel would go at step 4.
   **Report how the extra tap feels** — whether the lingering "2 of 2 done"
   panel reads as *finished and tidy-able* or as *stale*. That is a judgement
-  only a person standing in a shop can make, and it is the one thing here
-  worth changing later if it feels wrong.
+  only a person standing in a shop can make.
 - **PR #137 re-did the palette and typeface.** The panel will not look like
-  the screenshots in #122, #127 or #135 — that is expected, not a finding.
-  What *is* a finding is a control that took a hardcoded colour rather than a
-  palette token.
+  the screenshots in #122, #127 or #135 — expected, not a finding. What *is*
+  a finding is a control that took a hardcoded colour rather than a token.
 - **If any part of the answer is client-side**, `scripts/qa/trip_controls.cjs`
-  drives real Chrome under the CI `gate` job (`ci.yml:452`) and is the tier
-  that can see it. Say whether it needed extending.
+  drives real Chrome under the CI `gate` job and is the tier that can see it.
+  Say whether it needed extending.
 
 ## Procedure — nothing else changed
 
@@ -268,18 +239,16 @@ named assertion is the one that goes red, not merely that something did.
 ### Expected Observable Outcomes
 - **All 24 acceptance features pass**, of which `trip_persistence.feature` is
   new and **`trip_progress.feature` is the one edited** — scenarios 04 and 05
-  only, with the reasoning in that file's header. **If any other feature
-  needed editing, the change leaked**; say which and why rather than editing
-  it.
+  only. **If any other feature needed editing, the change leaked**; say which
+  and why rather than editing it.
 - **Every `trip_controls` scenario still holds** (#135), untouched.
 - **`trip_persistence.feature` needed no new step handler** — every step in
   it already existed in `pool_screen`, `trip_progress`, `trip_controls` and
   `mark_done`. **If a step module was added, say why**; a per-feature step
-  module is the single thing most likely to move the DRY number, and this
-  slice started with none.
-- **DRY has real headroom now** — #130 scoped the gate to product code
-  (`T-dry-measures-product-code`) and the last two slices measured 1.86% and
-  1.81% against 3%. **Report the number and the formats**, not pass or fail.
+  module is the single thing most likely to move the DRY number.
+- **DRY has real headroom now** (`T-dry-measures-product-code`; the last two
+  slices measured 1.86% and 1.81% against 3%). **Report the number and the
+  formats**, not pass or fail.
 - **#108 is open on `list_pool_tasks` and is not this slice's.** The query
   almost certainly changed to answer the run question. **Say whether what
   landed makes #108 easier or harder**, and flag it if grouping or

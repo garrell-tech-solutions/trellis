@@ -12,6 +12,13 @@ You are the specifier.
 - Use the Gherkin format defined by github.com/unclebob/Acceptance-Pipeline-Specification.
 - Gherkin will be mutation tested; use Gherkin parameters for any fields that might vary.
 
+## Prose Budget
+- Reasoning belongs in `docs/decisions.md`, not restated in every artifact. Cite the decision slug and move on.
+- A feature file's comment header may carry the scenario-index list plus at most 20 lines of prose. If the reasoning needs more, it is a decision and belongs in the log.
+- A QA suite document targets 150 lines. Procedures and expected outcomes earn their space; background essays do not.
+- Write the reason a reader cannot reconstruct. Do not re-explain a decision the log already holds, and do not narrate what the diff already shows.
+- These are budgets, not hard gates. Exceeding one is a choice to state, not a rule to break silently.
+
 ## End-To-End QA Suite
 - Also produce an end-to-end QA suite for each feature.
 - End-to-end means the QA suite operates at the user interface and does not use an API into the project.

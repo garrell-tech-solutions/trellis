@@ -12,91 +12,37 @@
 # quota-sessions-nothing-carries-into-next-week-08: Monday starts again at zero
 # quota-sessions-a-session-must-be-positive-09: a session of no minutes is not a session
 #
-# THIS FILE IS THE HALF THE OWNER NAMED AS DEFERRABLE, AND IT IS A WHOLE
-# FILE ON PURPOSE. The brief's "if it does not fit" line is: the entity, the
-# screen, the tab and `+ Define a new quota` land; the session surface does
-# not. Splitting there means stopping is DEFERRING ONE FEATURE FILE rather
-# than leaving a half-red one -- `quota_screen.feature` stands alone and
-# passes without a line of this. WHAT IS NOT ACCEPTABLE IS SHIPPING PART OF
-# THIS FILE: a `+30m` that writes nothing, a `This week` that cannot delete,
-# or a Monday reset that is a TODO. Ship the smaller true thing.
+# LOGGING IS RETROSPECTIVE, AND -03 IS WHERE THAT BECOMES A RULE. On Tuesday
+# the day picker offers Monday and Tuesday, and the list grows as the week
+# does: YOU CANNOT RECORD TIME YOU HAVE NOT DONE YET.
+# D-logging-is-retrospective-and-separate rejected a start/stop timer because
+# an unstarted one reports zero -- inaction producing a false number rather
+# than a missing one. Offering Saturday on Tuesday is that failure inverted:
+# four hours against a day that has not happened fills the bar and the week
+# reads as met. The canvas draws all seven days, but `days: DAYS` is a static
+# constant beside `const TODAY = "Tue"`, so the mock could not have drawn this
+# distinction either way -- a gap under
+# T-canvas-is-authoritative-where-it-speaks, not a statement.
 #
-# --- LOGGING IS RETROSPECTIVE, AND -03 IS WHERE THAT BECOMES A RULE -------
-# Settled by the owner 2026-08-25. ON TUESDAY THE DAY PICKER OFFERS MONDAY
-# AND TUESDAY, and the list grows as the week does. YOU CANNOT RECORD TIME
-# YOU HAVE NOT DONE YET.
+# MONDAY, AND THE HOUR THAT HAS NOWHERE TO GO. Under D-quota-no-rollover a week
+# is a closed box and -08 asserts it empties. The consequence, worth seeing
+# before it is met in use: you cannot log Sunday evening's practice on Monday
+# morning. THE OWNER WAS SHOWN THIS AND KEPT THE DECISION.
 #
-# `D-logging-is-retrospective-and-separate` rejected a start/stop timer
-# because "an unstarted timer silently reports zero -- INACTION PRODUCING A
-# FALSE NUMBER RATHER THAN A MISSING ONE". Offering Saturday on Tuesday is
-# that same failure inverted: four hours logged against a day that has not
-# happened fills the bar and the week reads as met. A number that looks true
-# and is not is the one thing this decision exists to prevent, and it does
-# not care which direction the lie runs in.
+# "MONDAY" NEEDS A TIMEZONE and this project already has one --
+# T-timezone-is-a-setting, the path committed/body.rs takes. Do not reach for
+# UTC and do not add a second notion of the owner's zone. KNOW THE TRAP YOU ARE
+# INHERITING: #118 is open because `/timezone` is POST-only and reachable from
+# no page; the live database reads America/New_York but THE SCHEMA DEFAULT IS
+# `UTC`, and this slice makes a second capability depend on a setting nobody
+# can edit.
 #
-# THE CANVAS DRAWS ALL SEVEN DAYS AND THAT IS A GAP, NOT A STATEMENT
-# (`T-canvas-is-authoritative-where-it-speaks`, checked rather than assumed).
-# `days: DAYS` is a static constant beside `const TODAY = "Tue"`; the mock
-# has no notion of the week passing, so it could not have drawn this
-# distinction whether or not the design wanted it. That is the NINTH gap the
-# canvas has left. Flagged, not filled silently.
-#
-# --- MONDAY, AND THE HOUR THAT HAS NOWHERE TO GO -------------------------
-# `D-quota-no-rollover`: counters reset Monday and shortfalls never carry
-# forward. So a week is a closed box, and -08 asserts it empties.
-#
-# A CONSEQUENCE WORTH SEEING BEFORE IT IS FOUND IN USE: you cannot log
-# Sunday evening's practice on Monday morning. Monday is a new week, last
-# week has been reckoned, and there is nowhere for that hour to go. THE
-# OWNER WAS SHOWN THIS AND KEPT THE DECISION; it is recorded here so that
-# whoever meets it in the shop knows it was chosen rather than missed.
-#
-# "MONDAY" NEEDS A TIMEZONE and this project already has one:
-# `settings::current_timezone` + `scheduler_core::timezone::resolve`, the
-# path `committed/body.rs:30-32` takes (`T-timezone-is-a-setting`). DO NOT
-# reach for UTC and do not add a second notion of the owner's zone. KNOW THE
-# TRAP YOU ARE INHERITING: #118 is open because `/timezone` is POST-only and
-# reachable from no page. The live database reads `America/New_York` so the
-# owner is fine today, BUT THE SCHEMA DEFAULT IS `UTC`
-# (`0006_guardrails.sql:39`), and this slice makes a SECOND capability
-# depend on a setting nobody can edit. That is a note for the handoff, not a
-# licence to fix #118 here.
-#
-# --- WHAT IS NOT ASSERTED HERE -------------------------------------------
-# WHICH ROW IS EXPANDED, AND WHETHER ITS `Other` PANEL IS OPEN, ARE EXACTLY
-# THE STATE THAT MUST NOT BUY A COLUMN
-# (`T-ephemeral-view-state-rides-the-request`, `740d224`). `expanded=<tags>`
-# on the pool is the worked example
-# and `scripts/qa/trip_controls.cjs` step 10 is the pattern; both live in
-# `qa/quota_sessions.md`. A LOGGED SESSION IS THE OPPOSITE -- a durable
-# consequence of a deliberate act, and it earns its table.
-#
-# AND READ `D-a-trip-survives-being-tidied` BESIDE IT (`cb02b3a`, settled in
-# #129 the same day): a column there was PERMITTED by that test and DERIVED
-# ANYWAY, because deriving cost one slice's thought and a column is
-# permanent. THE TEST SAYS WHEN STORAGE IS LEGITIMATE. IT NEVER SAYS IT IS
-# REQUIRED. A session is the clearest yes this product has had; the expand
-# state is a clear no; decide anything between them on its own merits.
-#
-# ONE STEP IN -03 AND -08 NEEDS THE CLOCK STEP TO TAKE A PLACEHOLDER, AND
-# TODAY IT DOES NOT. `the server believes it is "<now>"` is an existing step
-# (`steps/triage.rs:10`) but its handler passes the captured text straight to
-# the instant parser without looking the placeholder up in the example row --
-# every existing caller writes a literal timestamp. So these four rows fail
-# with `bad pinned instant "<now>"` rather than `unsupported step`, which is a
-# DIFFERENT RED and worth telling apart when reading the deferred file.
-#
-# THE GHERKIN IS RIGHT AND THE HANDLER IS THE THING TO CHANGE: every other
-# step module already has the four-line `resolve` helper for exactly this, and
-# WHICH INSTANT THE SERVER BELIEVES IN IS THE PARAMETER THIS FEATURE MOST
-# NEEDS TO MUTATE -- a week boundary asserted against one hardcoded Monday is
-# a week boundary asserted once. DO NOT "FIX" THIS BY WRITING THE TIMESTAMPS
-# OUT AS LITERALS; that trades the whole Examples table for a passing parse.
-#
-# ALSO NOT HERE: `Filed here` and the triage change (#138), retiring
-# `TaskKind::Quota` and deciding `period` (#138), and the reorder controls
-# (#139) -- whose absence is NOT asserted, because on a quota that absence
-# is undecided rather than settled.
+# WHICH ROW IS EXPANDED, AND WHETHER ITS `Other` PANEL IS OPEN, ARE NOT
+# ASSERTED HERE -- exactly the state that must not buy a column
+# (T-ephemeral-view-state-rides-the-request). A logged session is the opposite:
+# a durable consequence of a deliberate act, and it earns its table. Read
+# D-a-trip-survives-being-tidied beside it -- that test says when storage is
+# legitimate, never that it is required.
 
 Feature: Logging hours against a quota
 

@@ -16,33 +16,25 @@ palette is a thing you look at.
 
 ## Why the colours are not in the Gherkin
 
-Every acceptance test in this project asserts over HTTP against markup.
-**None can observe a computed style or a composited background**, and a
-contrast ratio is a fact about a rendered page, not about a document. A
-scenario claiming *"the muted text is legible"* would assert something the
-runtime cannot check — worse than no scenario, because it would read as
-covered.
-
-`T-latency-is-a-qa-assertion` is the precedent and `qa/phone_layout.md` is
-the shape. The acceptance-level guarantee for the colours is that **all 21
-existing features pass untouched**: this changes no markup and no behaviour.
+**No acceptance test here can observe a computed style or a composited
+background**, and a contrast ratio is a fact about a rendered page, not about
+a document (`T-latency-is-a-qa-assertion`; `qa/phone_layout.md` is the
+shape). The acceptance-level guarantee for the colours is that **all 21
+existing features pass untouched**.
 
 ## ⚠️ The check must fail, not skip
 
 **If Chrome or `playwright-core` is missing, this check fails loudly.** It
-must never skip, warn, or pass vacuously — `qa/phone_layout.md` says the same
-thing for the same reason, and that reason applies harder here: **the failure
-this slice fixes is one that shipped, was measured, was written down in an
-issue, and stayed shipped.** A check that goes quiet when its browser is
-absent reproduces that exactly, one layer down and invisibly.
+must never skip, warn, or pass vacuously: **the failure this slice fixes is
+one that shipped, was measured, was written down in an issue, and stayed
+shipped**, and a check that goes quiet when its browser is absent reproduces
+that exactly, one layer down and invisibly.
 
 **It must also be gated.** `.github/workflows/ci.yml`'s `gate` job already
-resolves a Chrome binary and exports it as `PHONE_LAYOUT_CHROME`; **this
-check reads the same variable so it needs no second resolution step, and gets
-its own `run:` line in that job.** The browser check that came before this
-one shipped working but ungated, and the wiring arrived later at the owner's
-direction — say in the report whether the line is there, because a check
-nothing runs and a check that cannot fail produce the same green report.
+resolves Chrome into `PHONE_LAYOUT_CHROME`; **this check reads the same
+variable and gets its own `run:` line in that job.** Say in the report
+whether the line is there — a check nothing runs and a check that cannot fail
+produce the same green report.
 
 ## What must be true when this is done
 
@@ -53,11 +45,11 @@ specification. The procedures below are how you see them.
 
 ## The baseline — what fails today, measured against real surfaces
 
-Recomputed from the stylesheet's and the design system's own OKLCH values and
-reproducing the design system's table where the two overlap. They differ
-where the **surface** differs, which is the point: **no text in this product
-sits on `--color-gray-100`.** `html` paints it and `body` covers it; on a
-phone it is never visible. Both issues measured against it anyway.
+Recomputed from the stylesheet's and the design system's own OKLCH values.
+They differ from the issues' numbers where the **surface** differs, which is
+the point: **no text in this product sits on `--color-gray-100`.** `html`
+paints it and `body` covers it; on a phone it is never visible. Both issues
+measured against it anyway.
 
 Light, against the surfaces that actually carry text:
 
@@ -80,22 +72,21 @@ trip. Everything else clears: `gray-400` 4.89 / 4.54, `gray-500` 7.63,
 1. **`gold` as text is the worst offender in the product and neither issue
    counted it** — a past date and the `PAST` badge on Committed, at 2.17,
    below the 2.36 the slice was filed for. **The owner ruled it in scope with
-   no exemptions.** Gold stays fine as a fill and as a rule, and fine as text
-   in dark; it is light-mode text that has to go.
+   no exemptions.** Gold stays fine as a fill, as a rule, and as text in dark.
 2. **`gray-500` is not a blanket problem.** It passes on the app surface and
    fails only on the secondary surface and the mint panel — three rules, not
    ten. A blanket swap would have been wrong in both directions.
 3. **Dark does not pass everywhere as authored.** The design system measured
-   its dark ramp against the page. Against the panel it has one failure. It
-   disappears when `gray-400` stops being a text colour, so it costs nothing
-   — but nothing would have caught it.
+   its dark ramp against the page; against the panel it has one failure. It
+   disappears when `gray-400` stops being a text colour — but nothing would
+   have caught it.
 
 ## Procedure — the automated check, in both schemes
 
 1. Start the server against a fresh database.
 2. **Seed so that every component actually appears.** An element that does
    not render cannot be measured, and a check that silently measures nothing
-   is the failure mode this project has now met five times. At minimum:
+   is a failure mode this project has met repeatedly. At minimum:
    several captures (rows, meta lines, the quick-add box and both its
    placeholders); one capture with a committed panel open (the chosen kind
    chip, the open commitment summary, the field panel and its labels); one
@@ -148,11 +139,10 @@ behaviour change and must not break this check.
 ### Expected Observable Outcomes
 
 - **All five assertions hold, on all four screens, in both schemes.**
-- **Quota is the fourth and it arrived after this document did** (#93). Its
-  `SCREENS` entry was added in `quota-sessions` because #144 shipped a whole
-  screen outside this gate — **which is how a four-day-old palette settlement
-  quietly stops being true.** If adding it turned this check red, **report
-  what it found**; do not adjust the screen to suit the check.
+- **Quota is the fourth and it arrived after this document did** (#93); its
+  `SCREENS` entry was added later because #144 shipped a whole screen outside
+  this gate. If adding it turned this check red, **report what it found**; do
+  not adjust the screen to suit the check.
 - **The failures listed in the baseline table are gone**, and the report says
   so token by token — including **both gold text rules**, which are the two
   nobody had counted.
@@ -183,9 +173,8 @@ thing however you break it has one assertion wearing four names.
 - **Five distinct failures with five distinct messages**, then a clean pass.
 - **Say in the report which five you used and what each said.** A check
   nobody has seen fail is a check nobody has shown to work, and this project
-  has shipped a proptest that could not fail, nine mutants surviving a
-  scenario that could not fail, and a browser check that went red for a
-  reason nobody predicted.
+  has already shipped a proptest that could not fail and nine mutants
+  surviving a scenario that could not fail.
 
 ## Procedure — the metadata, over HTTP
 
@@ -204,16 +193,11 @@ thing however you break it has one assertion wearing four names.
   the light one and stays first**, because `installable-theme-colour-05`
   matches a page's theme colour against the manifest's and must keep passing
   untouched.
-- The manifest carries `#fafdfe` for **both** members. That is
-  `--color-gray-50` in light — the app's own surface. **They are the same
-  value on purpose**: both answer *what does Trellis look like before it has
-  painted anything*, and Trellis has one surface. `background_color` already
-  was this; `theme_color` stops being a brand block above a white app.
-- **A manifest has one of each and cannot express a custom property**, which
-  is why the per-scheme half is a media-scoped meta rather than a second
-  manifest.
-- **These literals go stale silently.** Step 3 is what makes them a
-  contract instead of two numbers someone typed once — do not skip it.
+- The manifest carries `#fafdfe` for **both** members — `--color-gray-50` in
+  light, the app's own surface. **They are the same value on purpose**; the
+  reasoning is in `features/colour.feature`'s header.
+- **These literals go stale silently.** Step 3 is what makes them a contract
+  instead of two numbers someone typed once — do not skip it.
 
 ## By-hand walkthrough — on a real phone, and this is the slice
 
@@ -226,12 +210,10 @@ port within two minutes. **This slice cannot be reviewed any other way.**
 3. **The Save capture button is still gold**, and still the only warm thing
    on the screen. If it has become another blue rectangle, the most-used
    control has been folded into the background.
-4. **Go to Pool. The trip panels are cream, not cyan.** This is expected and
-   is the one visible change nobody asked for: the design system moved mint
-   into gold's hue family reasoning that it is the warning panel, and in the
-   shipped product `.trip` uses `.panel` too. **Report how it reads** — a
-   screen of trips now shares its surface with the validation-error panel, as
-   it already did in cyan.
+4. **Go to Pool. The trip panels are cream, not cyan.** Expected, and the one
+   visible change nobody asked for: the design system moved mint into gold's
+   hue family reasoning it is the warning panel, and in the shipped product
+   `.trip` uses `.panel` too. **Report how it reads.**
 5. **Go to Committed with something in the past.** The past marker still
    reads as past. It is no longer gold text — that was 2.17:1 — so **report
    whether whatever replaced it still says "this one has gone by" at a
@@ -242,8 +224,7 @@ port within two minutes. **This slice cannot be reviewed any other way.**
    panels, the inputs inside them and the chips — **each should still be
    distinguishable from the surface behind it.** The automated check proves
    nothing paints white; **only you can say whether the three surface levels
-   still tell each other apart**, and in dark they invert — a panel that
-   recedes by going darker in light recedes by going lighter in dark.
+   still tell each other apart**, and in dark they invert.
 8. **Turn it back.** Light mode looks like it did this morning. The app
    surface moved from `#fff` to `--color-gray-50`, one rung, and **if you can
    see that, say so.**
@@ -265,16 +246,14 @@ port within two minutes. **This slice cannot be reviewed any other way.**
 ### Expected Observable Outcomes
 
 - **All 21 acceptance features pass untouched**, and `colour.feature` is the
-  22nd. **This slice changes two meta tags, two manifest members and a stylesheet.
-  If a feature or a QA script needed editing, colour leaked into structure**
-  — say which and why rather than editing it.
+  22nd. **This slice changes two meta tags, two manifest members and a
+  stylesheet. If a feature or a QA script needed editing, colour leaked into
+  structure** — say which and why rather than editing it.
 - `phone_layout` still passes, in the light scheme it has always run in.
-- **DRY headroom is zero** — #127 landed at exactly 3.00%, and #130 is in
-  flight scoping the gate to product code. `dry.sh` measures `rust,bash`
-  only, so **the new `.cjs` is not measured and the new `.sh` wrapper is**:
-  keep the wrapper thin and put anything shared in `scripts/qa/lib.sh`.
-  **Report the number and the formats it was taken over**, not just pass or
-  fail.
+- **DRY headroom is zero** — #127 landed at exactly 3.00%. `dry.sh` measures
+  `rust,bash` only, so **the new `.cjs` is not measured and the new `.sh`
+  wrapper is**: keep the wrapper thin and put anything shared in
+  `scripts/qa/lib.sh`. **Report the number and the formats**, not pass/fail.
 
 ## Independent of Implementation
 

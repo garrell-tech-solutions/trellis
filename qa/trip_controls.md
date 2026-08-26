@@ -13,22 +13,12 @@ browser** driven headless at 390×844 (`playwright-core` and the Chrome
 
 ## Why the expand behaviour is here and not in the Gherkin
 
-**The tier you assert in decides what the implementation must store.** #126
-bought `captures.shown_kind` — a permanent, append-only column for a display
-preference — and traced the cause only afterwards: the acceptance suite
-speaks HTTP, so the state had to be server-rendered, so it had to be stored.
-**A scenario asserting "the trip is expanded" buys that column again.**
-
-So it is asserted here, where a browser can see a rendered page. **This slice
-adds no migration.** If the implementation you are handed has one, that is
-the finding — say so before anything else in the report.
-
-`pool-screen-truncation-06` moved for the same reason and in the same
-direction. It asserted `lists "3" items`, which is answered by reading the
-*first* `<ul class="trip-items">` — an assertion that means something only
-while the hidden items are a second list. **That second list is the defect.**
-Over HTTP the trip now holds all five; "only three are on screen" is a fact
-about a rendered page and lives here.
+**The tier you assert in decides what the implementation must store** — the
+argument is in `features/trip_controls.feature`'s header, and the operational
+consequence is this: **this slice adds no migration.** If the implementation
+you are handed has one, that is the finding — say so before anything else in
+the report. `pool-screen-truncation-06` moved here for the same reason:
+"only three are on screen" is a fact about a rendered page.
 
 ## ⚠️ The check must fail, not skip
 
@@ -70,19 +60,16 @@ another, so independence is observable.
 
 - All ten hold.
 - **Step 10 is the one this slice is most likely to get wrong, and it is not
-  in either issue.** Every checkbox in the panel swaps `#pool-body`
-  `outerHTML`, so a client-only toggle is destroyed by the act of working the
-  trip: the panel collapses under your thumb and takes the item you just
-  struck off the screen with it. **That is exactly the failure
-  `D-a-trip-survives-being-worked` was written against**, arriving through a
-  different door.
+  in either issue.** Every checkbox swaps `#pool-body` `outerHTML`, so a
+  client-only toggle is destroyed by the act of working the trip — the
+  failure `D-a-trip-survives-being-worked` was written against, arriving
+  through a different door.
 - **Step 7 is the other one.** An htmx round trip to expand a list is a real
   cost on a phone over a tailnet, and it drags the state back to the server —
-  which is the road that ends in a column. **If you observe a request, that
-  is a finding even if everything looks right.**
-- **Step 6 cannot be checked over HTTP and is half of #120.** The old control
-  had three faults and this is the third: the revealed items were a second
-  list with its own spacing, and nothing reconciled them.
+  the road that ends in a column. **If you observe a request, that is a
+  finding even if everything looks right.**
+- **Step 6 cannot be checked over HTTP and is half of #120**: the revealed
+  items were a second list with its own spacing, and nothing reconciled them.
 
 ## Procedure — the complete-group control
 
@@ -109,26 +96,19 @@ another, so independence is observable.
 ### Expected Observable Outcomes
 
 - All eight hold.
-- **Step 2 is the whole safeguard.** `D-bulk-completion-is-explicit` exists
-  to prevent *"losing six items whose only shared property is that they
-  mention `@homedepot`"* — and the specific way that happens here is
-  **looking at three things and completing eight**. The count in the label is
-  what makes that impossible to do unknowingly, and it is why this control
-  cannot be a glyph: **an icon cannot say a number.**
-- **Step 4's disappearance is `D-bulk-completion-is-explicit`'s "and nothing
-  else"**, and it is also #103's half-pass trap wearing a new label: a panel
-  offering to complete a group with nothing open in it is a control that
-  reads correctly until you tap it.
+- **Step 2 is the whole safeguard** (`D-bulk-completion-is-explicit`): the
+  specific way this control loses work is **looking at three things and
+  completing eight**, and the count in the label is what makes that
+  impossible to do unknowingly. **An icon cannot say a number.**
+- **Step 4's disappearance** is also #103's half-pass trap wearing a new
+  label: a control offering to complete a group with nothing open in it reads
+  correctly until you tap it.
 - **Step 3 is a hazard, not a nicety.** `✕ Clear done` permanently clears
   what the complete-group control just struck, and the slip is likeliest in
-  the second immediately after using it — thumb still on the header, eight
-  rows having just changed under it.
+  the second immediately after using it.
 - **What reverses this is unchecking, item by item** — the pool's undo, per
-  `D-a-trip-survives-being-worked`. **Undoing eight by unchecking eight is
-  tedious and it is not undo**, and this slice does not build one: nothing
-  was lost, the panel shows precisely what happened, and #111 is narrowed to
-  Committed for exactly this reason. **Say so in the report** rather than
-  leaving a reader to wonder whether it was considered.
+  `D-a-trip-survives-being-worked`. This slice builds no undo; #111 is
+  narrowed to Committed for exactly this reason. **Say so in the report.**
 
 ## Procedure — one statement, not a loop
 
@@ -142,12 +122,10 @@ another, so independence is observable.
 ### Expected Observable Outcomes
 
 - **Completing twenty is one round trip**, and it does not cost anything like
-  twenty times completing one. **This is a proxy and it is worth saying so**:
-  it cannot see a loop in a handler directly, but a loop of twenty statements
-  through `sqlx` on a quiet machine is visible in wall clock, and this is the
-  only view QA has of it.
-- **It goes through `mark_done`'s front door.** That capability is the only
-  one declaring `mod store;` privately
+  twenty times completing one. **A proxy, and worth saying so**: it cannot
+  see a loop in a handler directly, but twenty `sqlx` statements on a quiet
+  machine are visible in wall clock, and this is the only view QA has of it.
+- **It goes through `mark_done`'s front door**
   (`T-cross-capability-invariants-need-an-owner`); if a second write path
   appeared, this is the slice it appeared in.
 
@@ -203,13 +181,11 @@ another, so independence is observable.
 - All six hold.
 - **Step 6 is the one to report even if it passes.** Three slices have now
   added something to this header without any of them seeing the others'
-  work, which is why these two were briefed as one slice — **and this is the
-  first time anyone looks at the result.**
+  work, and **this is the first time anyone looks at the result.**
 - **`colour` is in the pipeline ahead of this** and restyles the same
-  stylesheet, including `.clear-done` and `.trip-more`. **The new controls
-  must take palette tokens, not `#fff` and not the old green**, and the trip
-  panel is cream rather than cyan by the time this lands. If you are looking
-  at a preview built before `colour` merged, say so.
+  stylesheet. **The new controls must take palette tokens, not `#fff` and not
+  the old green**, and the trip panel is cream rather than cyan by the time
+  this lands. If your preview was built before `colour` merged, say so.
 
 ## Procedure — nothing else changed
 
@@ -219,17 +195,17 @@ another, so independence is observable.
 ### Expected Observable Outcomes
 
 - **All 22 acceptance features pass**, of which `trip_controls.feature` is
-  new and **`pool_screen.feature` is the one edited** — scenario 06 only, and
-  its reasoning is in that file's header. **If any other feature needed
-  editing, the change leaked**; say which and why rather than editing it.
+  new and **`pool_screen.feature` is the one edited** — scenario 06 only.
+  **If any other feature needed editing, the change leaked**; say which and
+  why rather than editing it.
 - **Every `trip_progress` scenario still holds** (#127). Its counts already
-  scan the whole panel rather than one list, so one list changes nothing for
-  them — **confirm that rather than assuming it.**
+  scan the whole panel rather than one list — **confirm that rather than
+  assuming it.**
 - `phone_layout` still passes: the panel is taller when expanded, and the
   document must still not scroll.
 - **DRY headroom is zero** — #127 landed at exactly 3.00% and #130 is in
-  flight scoping the gate to product code. `dry.sh` measures `rust,bash`
-  only. **Report the number and the formats**, not just pass or fail.
+  flight scoping the gate to product code. **Report the number and the
+  formats**, not just pass or fail.
 - **#129 is open on this same panel** and changes when a group stops being a
   trip. **This slice lands first**; #129 inherits both controls.
 

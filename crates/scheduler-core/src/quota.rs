@@ -4,6 +4,31 @@
 //! touch and which stays exactly as it is until #138 closes the two into
 //! one.
 
+/// A quota's weekly target: **always a positive whole number of minutes**,
+/// and this is the type that says so rather than a comment naming whoever
+/// happened to check.
+///
+/// The rule has three statements of it -- the `CHECK` on
+/// `quotas.weekly_target_minutes`, [`QuotaDefinition::from_fields`]'s own
+/// refusal, and this -- and only this one is reachable by the code that
+/// *uses* a target. [`progress`] divides by it; a zero reaching that
+/// division does not panic, it returns `i64::MAX` percent, which renders as
+/// a number and is wrong. An unrepresentable state cannot do that.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct WeeklyTarget(i64);
+
+impl WeeklyTarget {
+    /// `None` for a target of zero or less -- the one thing a target may
+    /// not be (`quota-screen-target-must-be-positive-04`).
+    pub fn from_minutes(minutes: i64) -> Option<Self> {
+        (minutes > 0).then_some(WeeklyTarget(minutes))
+    }
+
+    pub fn minutes(self) -> i64 {
+        self.0
+    }
+}
+
 /// A validated definition, ready to write: name trimmed and non-empty,
 /// target a positive whole number of minutes
 /// (`quota-screen-both-fields-required-03`,
@@ -11,7 +36,7 @@
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct QuotaDefinition {
     pub name: String,
-    pub weekly_target_minutes: i64,
+    pub weekly_target: WeeklyTarget,
 }
 
 /// Which required field a submission left out or gave an invalid value for
@@ -22,15 +47,6 @@ pub enum Field {
     Hours,
 }
 
-impl Field {
-    pub fn name(self) -> &'static str {
-        match self {
-            Field::Name => "name",
-            Field::Hours => "hours",
-        }
-    }
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DefinitionRejection {
     MissingField(Field),
@@ -39,39 +55,59 @@ pub enum DefinitionRejection {
 
 impl QuotaDefinition {
     /// `name` trimmed and non-empty; `hours` a positive number, converted to
-    /// whole minutes. The canvas's own `step="0.5"` on the hours input means
-    /// every value it can submit already lands on a whole minute; rounding
-    /// here is a safety net against float drift, not a domain rule.
+    /// whole minutes ([`to_minutes`]).
     pub fn from_fields(
         name: Option<&str>,
         hours: Option<&str>,
     ) -> Result<Self, DefinitionRejection> {
         Ok(QuotaDefinition {
             name: parse_name(name)?,
-            weekly_target_minutes: parse_weekly_target_minutes(hours)?,
+            weekly_target: parse_weekly_target(hours)?,
         })
     }
 }
 
-fn parse_name(name: Option<&str>) -> Result<String, DefinitionRejection> {
-    name.map(str::trim)
-        .filter(|n| !n.is_empty())
-        .map(str::to_string)
-        .ok_or(DefinitionRejection::MissingField(Field::Name))
+/// `value` trimmed and non-empty, or the field's own missing-field
+/// rejection -- the same "required" check [`parse_name`] and
+/// [`parse_weekly_target`] both start with, differing only in which
+/// field is doing the asking.
+fn require_nonblank(value: Option<&str>, field: Field) -> Result<&str, DefinitionRejection> {
+    value
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .ok_or(DefinitionRejection::MissingField(field))
 }
 
-fn parse_weekly_target_minutes(hours: Option<&str>) -> Result<i64, DefinitionRejection> {
-    let hours_str = hours
-        .map(str::trim)
-        .filter(|h| !h.is_empty())
-        .ok_or(DefinitionRejection::MissingField(Field::Hours))?;
+fn parse_name(name: Option<&str>) -> Result<String, DefinitionRejection> {
+    require_nonblank(name, Field::Name).map(str::to_string)
+}
+
+fn parse_weekly_target(hours: Option<&str>) -> Result<WeeklyTarget, DefinitionRejection> {
+    let hours_str = require_nonblank(hours, Field::Hours)?;
+    let hours = parse_positive_hours(hours_str)?;
+    // `parse_positive_hours` already refused anything at or below zero, so
+    // the only way `to_minutes` yields a non-positive number is a positive
+    // target under half a minute rounding to zero -- which is out of the
+    // domain for the same reason zero itself is.
+    WeeklyTarget::from_minutes(to_minutes(hours))
+        .ok_or(DefinitionRejection::InvalidField(Field::Hours))
+}
+
+fn parse_positive_hours(hours_str: &str) -> Result<f64, DefinitionRejection> {
     let hours: f64 = hours_str
         .parse()
         .map_err(|_| DefinitionRejection::InvalidField(Field::Hours))?;
     if hours.is_nan() || hours <= 0.0 {
         return Err(DefinitionRejection::InvalidField(Field::Hours));
     }
-    Ok((hours * 60.0).round() as i64)
+    Ok(hours)
+}
+
+/// The canvas's own `step="0.5"` on the hours input means every value it can
+/// submit already lands on a whole minute; rounding here is a safety net
+/// against float drift, not a domain rule.
+fn to_minutes(hours: f64) -> i64 {
+    (hours * 60.0).round() as i64
 }
 
 /// Whether `candidate` collides with an existing quota — the two-tier guard
@@ -143,24 +179,30 @@ fn levenshtein(a: &str, b: &str) -> usize {
 }
 
 /// A quota's standing against its weekly target: how much is left, and how
-/// far into it the week already is. `target_minutes` is always positive
-/// (`QuotaDefinition::from_fields` refuses anything else at the door), so
-/// division here never needs a guard.
+/// far into it the week already is.
 pub struct Progress {
     pub remaining_minutes: i64,
     pub percent: i64,
 }
 
-pub fn progress(target_minutes: i64, logged_minutes: i64) -> Progress {
+/// Division needs no guard because [`WeeklyTarget`] cannot hold a zero --
+/// the guarantee is in the argument's type rather than in a note about who
+/// built it.
+pub fn progress(target: WeeklyTarget, logged_minutes: i64) -> Progress {
     Progress {
-        remaining_minutes: (target_minutes - logged_minutes).max(0),
-        percent: ((logged_minutes as f64 / target_minutes as f64) * 100.0).round() as i64,
+        remaining_minutes: (target.minutes() - logged_minutes).max(0),
+        percent: ((logged_minutes as f64 / target.minutes() as f64) * 100.0).round() as i64,
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A target these tests already know is valid.
+    fn target(minutes: i64) -> WeeklyTarget {
+        WeeklyTarget::from_minutes(minutes).expect("a positive target")
+    }
 
     #[test]
     fn from_fields_rejects_a_missing_name() {
@@ -216,7 +258,7 @@ mod tests {
             QuotaDefinition::from_fields(Some("Piano"), Some("4")),
             Ok(QuotaDefinition {
                 name: "Piano".to_string(),
-                weekly_target_minutes: 240,
+                weekly_target: target(240),
             })
         );
     }
@@ -227,7 +269,7 @@ mod tests {
             QuotaDefinition::from_fields(Some("Piano"), Some("0.5")),
             Ok(QuotaDefinition {
                 name: "Piano".to_string(),
-                weekly_target_minutes: 30,
+                weekly_target: target(30),
             })
         );
     }
@@ -301,24 +343,119 @@ mod tests {
         );
     }
 
+    /// The containing side can be either name -- `"Piano theory"` warns
+    /// against `"Piano"` (candidate contains existing) and this is the other
+    /// direction: an existing `"Piano reading"` warns against a candidate of
+    /// just `"Reading"` (existing contains candidate), too far apart in edit
+    /// distance for that tier to catch it alone.
+    #[test]
+    fn check_name_warns_when_an_existing_name_contains_the_candidate() {
+        let existing = vec![("Piano reading".to_string(), 240)];
+        assert_eq!(
+            check_name("Reading", &existing),
+            Some(NameMatch::Similar("Piano reading", 240))
+        );
+    }
+
+    /// A candidate that is nothing but punctuation normalizes to the empty
+    /// string, and an empty string is a substring of everything -- without
+    /// its own guard, `is_similar` would warn a punctuation-only candidate
+    /// against every existing quota rather than staying silent.
+    #[test]
+    fn check_name_is_silent_on_a_candidate_that_normalizes_to_nothing() {
+        let existing = vec![("Piano".to_string(), 240)];
+        assert_eq!(check_name("---", &existing), None);
+    }
+
+    /// The invariant the type exists for: the one value that would make
+    /// [`progress`] divide by zero cannot be built at all.
+    #[test]
+    fn a_weekly_target_cannot_be_zero_or_negative() {
+        assert_eq!(WeeklyTarget::from_minutes(0), None);
+        assert_eq!(WeeklyTarget::from_minutes(-30), None);
+        assert_eq!(
+            WeeklyTarget::from_minutes(1).map(WeeklyTarget::minutes),
+            Some(1)
+        );
+    }
+
+    /// A positive number of hours too small to round to a whole minute is
+    /// out of the domain for the same reason zero is, and reports as the
+    /// same rejection rather than reaching the target type.
+    #[test]
+    fn from_fields_rejects_a_target_too_small_to_be_a_whole_minute() {
+        assert_eq!(
+            QuotaDefinition::from_fields(Some("Piano"), Some("0.001")),
+            Err(DefinitionRejection::InvalidField(Field::Hours))
+        );
+    }
+
     #[test]
     fn progress_with_nothing_logged_is_the_full_target_at_zero_percent() {
-        let p = progress(240, 0);
+        let p = progress(target(240), 0);
         assert_eq!(p.remaining_minutes, 240);
         assert_eq!(p.percent, 0);
     }
 
     #[test]
     fn progress_rounds_the_percent_to_the_nearest_whole_number() {
-        let p = progress(240, 30);
+        let p = progress(target(240), 30);
         assert_eq!(p.remaining_minutes, 210);
         assert_eq!(p.percent, 13);
     }
 
     #[test]
     fn progress_never_reports_negative_remaining_once_the_target_is_exceeded() {
-        let p = progress(240, 300);
+        let p = progress(target(240), 300);
         assert_eq!(p.remaining_minutes, 0);
         assert_eq!(p.percent, 125);
+    }
+
+    // --- parse_positive_hours and levenshtein: exercised directly ---------
+    //
+    // `parse_weekly_target` re-checks the result through
+    // `WeeklyTarget::from_minutes`, which refuses anything non-positive on
+    // its own -- so every input that reaches `from_fields` gets the same
+    // `InvalidField(Hours)` whether `parse_positive_hours` catches it or the
+    // downstream guard does. That redundancy is exactly why a defect in
+    // `parse_positive_hours` alone needs a direct test to be visible at all.
+    // `levenshtein`'s only external signal is `is_similar`'s `<= 2`
+    // threshold, which likewise hides most wrong distances that still land
+    // on the same side of 2; a direct test on known distances is what
+    // actually pins the arithmetic down.
+
+    #[test]
+    fn parse_positive_hours_rejects_a_value_that_parses_as_not_a_number() {
+        assert_eq!(
+            parse_positive_hours("NaN"),
+            Err(DefinitionRejection::InvalidField(Field::Hours))
+        );
+    }
+
+    #[test]
+    fn levenshtein_of_identical_strings_is_zero() {
+        assert_eq!(levenshtein("piano", "piano"), 0);
+    }
+
+    #[test]
+    fn levenshtein_against_an_empty_string_is_the_others_length() {
+        assert_eq!(levenshtein("abc", ""), 3);
+        assert_eq!(levenshtein("", "abc"), 3);
+    }
+
+    #[test]
+    fn levenshtein_of_the_classic_kitten_sitting_pair_is_three() {
+        assert_eq!(levenshtein("kitten", "sitting"), 3);
+    }
+
+    #[test]
+    fn levenshtein_of_a_single_insertion_is_one() {
+        assert_eq!(levenshtein("ab", "abc"), 1);
+        assert_eq!(levenshtein("abc", "ab"), 1);
+    }
+
+    #[test]
+    fn levenshtein_does_not_credit_a_transposition() {
+        assert_eq!(levenshtein("ab", "ba"), 2);
     }
 }

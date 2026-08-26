@@ -495,19 +495,19 @@ $page" >&2
     FAILURES=1
   fi
 
-  # qa/trip_persistence.md's own by-hand walkthrough claims this final
-  # clear leaves @homedepot "gone entirely" -- verified by hand against a
-  # running server and found inconsistent with the rule stated three lines
-  # above it in the same document ("a run ends when the LAST thing waiting
-  # there is cleared away"): only the struck item (errand 5) is cleared by
-  # this route, and the unticked one (errand 4) is still open -- still
-  # waiting -- when the clear runs. Flagged to the specifier rather than
-  # scripted as written, per this project's own precedent
-  # (trip_progress.sh's "clearing-and-what-it-can-take-with-it" comment).
-  # The run has not ended, so the panel must persist at one open item.
+  # qa/trip_persistence.md's own by-hand walkthrough originally claimed
+  # this clear left @homedepot "gone entirely" -- verified by hand against
+  # a running server and found inconsistent with the rule stated three
+  # lines above it in the same document ("a run ends when the LAST thing
+  # waiting there is cleared away"): only the struck item (errand 5) is
+  # cleared by this route, and the unticked one (errand 4) is still open
+  # -- still waiting -- when the clear runs. Flagged to the specifier
+  # rather than scripted as written; the specifier corrected the doc
+  # (step 5 now reads "1 things", step 6 added) and confirmed this
+  # scripted behaviour.
   qa_clear_done "$trip"
   if [[ "$STATUS" != "200" ]]; then
-    echo "FAIL: [$name] the final clear returned status $STATUS" >&2
+    echo "FAIL: [$name] step 5's clear returned status $STATUS" >&2
     FAILURES=1
   fi
   page="$(qa_get_pool)"
@@ -520,6 +520,28 @@ $page" >&2
   count_label="$(qa_between "$trip" '<div class="trip-count">' '</div>')"
   if [[ "$count_label" != "1 things" ]]; then
     echo "FAIL: [$name] expected \"1 things\" -- the one item that was never struck is still waiting, got: $count_label" >&2
+    FAILURES=1
+  fi
+
+  # Step 6: tick the last item, then tap Clear done again -- this time the
+  # clear leaves nothing waiting, so the run ends and the tag leaves
+  # entirely.
+  qa_mark_pool_done "$(qa_task_id_for_text "homedepot errand 4")"
+  if [[ "$STATUS" != "200" ]]; then
+    echo "FAIL: [$name] step 6's mark-done returned status $STATUS" >&2
+    FAILURES=1
+  fi
+  page="$(qa_get_pool)"
+  trip="$(qa_trip_section "$page" "@homedepot")"
+  qa_clear_done "$trip"
+  if [[ "$STATUS" != "200" ]]; then
+    echo "FAIL: [$name] step 6's clear returned status $STATUS" >&2
+    FAILURES=1
+  fi
+  page="$(qa_get_pool)"
+  if [[ "$page" == *"@homedepot"* ]]; then
+    echo "FAIL: [$name] expected @homedepot gone entirely once the last waiting item was cleared, got:
+$page" >&2
     FAILURES=1
   fi
 else

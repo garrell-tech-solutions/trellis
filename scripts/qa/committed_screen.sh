@@ -341,9 +341,14 @@ qa_stop_server
 
 # --- Procedure: the tab bar ---
 # committed-screen-tabs-06 replaced pool_screen.feature's own narrower
-# two-tab scenario under #94: it now asserts all three screens over all
-# three tabs in one place, so this is the one QA script that owns the
-# tab-bar check (scripts/qa/pool_screen.sh no longer does).
+# two-tab scenario under #94: it now asserts all screens over all tabs in
+# one place, so this is the one QA script that owns the tab-bar check
+# (scripts/qa/pool_screen.sh no longer does). #93 (quota-screen) added a
+# fourth tab -- qa/committed_screen.md:68 still says "three tabs"; stale,
+# flagged to the specifier rather than fixed here, per this project's own
+# precedent (trip_persistence.sh's own comment on a corrected QA doc).
+# This script asserts the current, verified-correct four-tab behaviour,
+# matching committed_screen.feature's own updated -06 examples.
 name="the-tab-bar"
 if qa_start_pinned "$TMP_DIR/$name.sqlite" "$TMP_DIR/$name.log"; then
   qa_assert_tab_bar() {
@@ -352,8 +357,8 @@ if qa_start_pinned "$TMP_DIR/$name.sqlite" "$TMP_DIR/$name.log"; then
 import re, sys
 print(",".join(re.findall(r"<a href=\"[^\"]*\"[^>]*>([^<]*)</a>", sys.argv[1])))
 ' "$header")"
-    if [[ "$labels" != "Capture,Pool,Committed" ]]; then
-      echo "FAIL: [$name] expected exactly the tabs Capture,Pool,Committed in that order on the $label screen, got: $labels" >&2
+    if [[ "$labels" != "Capture,Pool,Committed,Quota" ]]; then
+      echo "FAIL: [$name] expected exactly the tabs Capture,Pool,Committed,Quota in that order on the $label screen, got: $labels" >&2
       FAILURES=1
     fi
     current_needle="aria-current=\"page\">$current</a>"
@@ -371,6 +376,7 @@ print(",".join(re.findall(r"<a href=\"[^\"]*\"[^>]*>([^<]*)</a>", sys.argv[1])))
   qa_assert_tab_bar capture "$(qa_header_section "$(curl -s "http://$ADDR/")")" Capture
   qa_assert_tab_bar pool "$(qa_header_section "$(curl -s "http://$ADDR/pool")")" Pool
   qa_assert_tab_bar committed "$(qa_header_section "$(qa_get_committed)")" Committed
+  qa_assert_tab_bar quota "$(qa_header_section "$(curl -s "http://$ADDR/quota")")" Quota
 else
   FAILURES=1
 fi

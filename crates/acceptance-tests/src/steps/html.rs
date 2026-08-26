@@ -96,6 +96,33 @@ pub fn trip_section<'a>(body: &'a str, tag: &str) -> Result<&'a str, String> {
     Err(format!("no trip panel found for tag {tag:?} in:\n{body}"))
 }
 
+/// The markup of the one quota row named `name` -- [`trip_section`]'s same
+/// shape, for the same reason: `quota_body.html`'s row nests its own
+/// `<ul class="quota-sessions"><li class="quota-session">...</li></ul>`, so
+/// scanning for a matching `</div>` or `</li>` would stop at the first
+/// session's own closing tag rather than the row's. Scanning to the *next*
+/// `<div class="quota-row"` instead sidesteps nesting depth entirely,
+/// whatever is inside one row.
+pub fn quota_row<'a>(body: &'a str, name: &str) -> Result<&'a str, String> {
+    let marker = r#"<div class="quota-row""#;
+    let needle = format!(r#"<div class="quota-name">{name}</div>"#);
+    let mut offset = 0;
+    while let Some(rel_start) = body[offset..].find(marker) {
+        let start = offset + rel_start;
+        let after = start + marker.len();
+        let end = body[after..]
+            .find(marker)
+            .map(|rel| after + rel)
+            .unwrap_or(body.len());
+        let candidate = &body[start..end];
+        if candidate.contains(&needle) {
+            return Ok(candidate);
+        }
+        offset = after;
+    }
+    Err(format!("no quota row found for {name:?} in:\n{body}"))
+}
+
 /// The `<button ...>...</button>` whose opening tag contains `class_marker`
 /// (e.g. `r#"class="trip-more-toggle""#`) -- its full opening tag (so a
 /// caller can check for an `hx-get`/`hx-post`/`hx-trigger` attribute, #120's
@@ -268,5 +295,33 @@ mod tests {
         let section = trip_section(body, "@homedepot").unwrap();
         assert!(section.contains("expanded"));
         assert!(!section.contains("@supermarket"));
+    }
+
+    /// The failure mode `quota_row` exists to avoid: a naive scan for the
+    /// row's own closing tag would stop at the first nested session's
+    /// `</li>` instead, silently dropping the second session and the
+    /// summary that follows it.
+    #[test]
+    fn quota_row_survives_a_nested_session_list() {
+        let body = concat!(
+            r#"<div class="quota-row"><div class="quota-name">Piano</div>"#,
+            r#"<ul class="quota-sessions">"#,
+            r#"<li class="quota-session">Mon 25m</li>"#,
+            r#"<li class="quota-session">Tue 35m</li>"#,
+            r#"</ul>"#,
+            r#"<div class="quota-sessions-summary">2 sessions</div></div>"#,
+            r#"<div class="quota-row"><div class="quota-name">Running</div></div>"#,
+        );
+        let row = quota_row(body, "Piano").unwrap();
+        assert!(row.contains("Mon 25m"), "got:\n{row}");
+        assert!(row.contains("Tue 35m"), "got:\n{row}");
+        assert!(row.contains("2 sessions"), "got:\n{row}");
+        assert!(!row.contains("Running"), "got:\n{row}");
+    }
+
+    #[test]
+    fn quota_row_errors_when_no_row_matches() {
+        let body = r#"<div class="quota-row"><div class="quota-name">Piano</div></div>"#;
+        assert!(quota_row(body, "Running").is_err());
     }
 }

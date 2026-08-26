@@ -67,23 +67,19 @@ impl QuotaDefinition {
     }
 }
 
-/// `value` trimmed and non-empty, or the field's own missing-field
-/// rejection -- the same "required" check [`parse_name`] and
-/// [`parse_weekly_target`] both start with, differing only in which
-/// field is doing the asking.
-fn require_nonblank(value: Option<&str>, field: Field) -> Result<&str, DefinitionRejection> {
-    value
-        .map(str::trim)
-        .filter(|v| !v.is_empty())
-        .ok_or(DefinitionRejection::MissingField(field))
+/// `value` trimmed and non-empty, or `err` -- the same "required" check
+/// [`parse_name`], [`parse_weekly_target`] and [`validate_session`] all
+/// start with, differing only in which rejection they hand back.
+fn require_nonblank<E>(value: Option<&str>, err: E) -> Result<&str, E> {
+    value.map(str::trim).filter(|v| !v.is_empty()).ok_or(err)
 }
 
 fn parse_name(name: Option<&str>) -> Result<String, DefinitionRejection> {
-    require_nonblank(name, Field::Name).map(str::to_string)
+    require_nonblank(name, DefinitionRejection::MissingField(Field::Name)).map(str::to_string)
 }
 
 fn parse_weekly_target(hours: Option<&str>) -> Result<WeeklyTarget, DefinitionRejection> {
-    let hours_str = require_nonblank(hours, Field::Hours)?;
+    let hours_str = require_nonblank(hours, DefinitionRejection::MissingField(Field::Hours))?;
     let hours = parse_positive_hours(hours_str)?;
     // `parse_positive_hours` already refused anything at or below zero, so
     // the only way `to_minutes` yields a non-positive number is a positive
@@ -192,6 +188,262 @@ pub fn progress(target: WeeklyTarget, logged_minutes: i64) -> Progress {
     Progress {
         remaining_minutes: (target.minutes() - logged_minutes).max(0),
         percent: ((logged_minutes as f64 / target.minutes() as f64) * 100.0).round() as i64,
+    }
+}
+
+/// A day a session can be logged against -- always Monday-first, never the
+/// host locale's own week start, since `Week` below always counts from
+/// Monday regardless of where the server runs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Weekday {
+    Mon = 0,
+    Tue = 1,
+    Wed = 2,
+    Thu = 3,
+    Fri = 4,
+    Sat = 5,
+    Sun = 6,
+}
+
+/// Monday-first order, the canonical sequence [`Weekday::index`],
+/// [`Weekday::from_index`], [`Weekday::label`] and [`Weekday::parse`] all
+/// derive from a single array lookup rather than a seven-or-eight-arm match
+/// apiece -- past `T-complexity-8`'s cap once a wildcard arm joins the
+/// other seven, and there is no logic in any of the four to extract, only
+/// the same table read four ways.
+/// Every weekday, Monday first -- the one ordered list, used for iterating
+/// a week and for [`Weekday::from_index`]. There is no parallel table of
+/// labels beside it: [`Weekday::label`] is a match the compiler checks
+/// covers every variant, and [`Weekday::parse`] reads that.
+const ORDERED: [Weekday; 7] = [
+    Weekday::Mon,
+    Weekday::Tue,
+    Weekday::Wed,
+    Weekday::Thu,
+    Weekday::Fri,
+    Weekday::Sat,
+    Weekday::Sun,
+];
+
+impl Weekday {
+    /// `0` for Monday through `6` for Sunday -- the ordinal [`Week`]
+    /// compares against `today` to decide whether a day has happened yet
+    /// (`quota-sessions-only-days-that-have-happened-03`). The enum states
+    /// those discriminants itself, so the cast *is* the mapping: there is
+    /// no second list of days that could disagree with the first.
+    pub fn index(self) -> u8 {
+        self as u8
+    }
+
+    /// `None` past Sunday. Total on purpose -- the caller
+    /// ([`Week::days_so_far`]) only ever counts up to `today`, but a
+    /// function that panics on `7` is one refactor away from being called
+    /// with `7`.
+    ///
+    /// A lookup rather than a match, unlike [`Weekday::label`]: `u8` is an
+    /// open domain, so a match here needs a wildcard arm and the compiler
+    /// checks nothing that [`ORDERED`]'s own length does not.
+    fn from_index(index: u8) -> Option<Self> {
+        ORDERED.get(usize::from(index)).copied()
+    }
+
+    /// Written as a match rather than routed through
+    /// [`jiff::civil::Weekday::to_monday_zero_offset`] and an array: the
+    /// compiler checks a match covers every variant of *both* enums, and
+    /// cannot check that a seven-element table does.
+    fn from_jiff(weekday: jiff::civil::Weekday) -> Self {
+        match weekday {
+            jiff::civil::Weekday::Monday => Weekday::Mon,
+            jiff::civil::Weekday::Tuesday => Weekday::Tue,
+            jiff::civil::Weekday::Wednesday => Weekday::Wed,
+            jiff::civil::Weekday::Thursday => Weekday::Thu,
+            jiff::civil::Weekday::Friday => Weekday::Fri,
+            jiff::civil::Weekday::Saturday => Weekday::Sat,
+            jiff::civil::Weekday::Sunday => Weekday::Sun,
+        }
+    }
+
+    /// `"Mon"` .. `"Sun"` -- the spelling every acceptance scenario and the
+    /// rendered day picker share.
+    pub fn label(self) -> &'static str {
+        match self {
+            Weekday::Mon => "Mon",
+            Weekday::Tue => "Tue",
+            Weekday::Wed => "Wed",
+            Weekday::Thu => "Thu",
+            Weekday::Fri => "Fri",
+            Weekday::Sat => "Sat",
+            Weekday::Sun => "Sun",
+        }
+    }
+
+    /// The inverse of [`Weekday::label`], for a submitted day name. `None`
+    /// for anything else -- a full name, a lowercase spelling, or hostile
+    /// text all fail the same way a missing field does.
+    ///
+    /// Literally the inverse: it searches for the day whose own
+    /// [`Weekday::label`] matches, so there is no second spelling of the
+    /// seven names that could drift from the first.
+    pub fn parse(label: &str) -> Option<Self> {
+        ORDERED.iter().find(|day| day.label() == label).copied()
+    }
+}
+
+/// Which weekday `instant_ms` falls on, in `zone` -- the inverse of
+/// [`Week::day_ms`], for rendering a stored session's `day_ms` back as the
+/// label it was logged under.
+pub fn weekday_of(instant_ms: i64, zone: &jiff::tz::TimeZone) -> Weekday {
+    let date = jiff::Timestamp::from_millisecond(instant_ms)
+        .expect("instant_ms is a valid instant; the store never writes anything else")
+        .to_zoned(zone.clone())
+        .date();
+    Weekday::from_jiff(date.weekday())
+}
+
+/// The current week, Monday-anchored, as seen from `now_ms` in the owner's
+/// timezone (`T-timezone-is-a-setting`) -- what decides which days a session
+/// can be logged against and which sessions belong to "this week".
+///
+/// Logging is retrospective (`D-logging-is-retrospective-and-separate`):
+/// offering a day that has not happened yet would let a session fill the bar
+/// for time that was never spent, the same false-number failure a start/stop
+/// timer would produce from the other direction.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Week {
+    monday: jiff::civil::Date,
+    today: Weekday,
+}
+
+impl Week {
+    pub fn of(now_ms: i64, zone: &jiff::tz::TimeZone) -> Self {
+        let today_date = jiff::Timestamp::from_millisecond(now_ms)
+            .expect("now_ms is a valid instant")
+            .to_zoned(zone.clone())
+            .date();
+        let today = Weekday::from_jiff(today_date.weekday());
+        let monday = today_date
+            .checked_sub(jiff::Span::new().days(i64::from(today.index())))
+            .expect("subtracting at most six days from a real date stays in range");
+        Week { monday, today }
+    }
+
+    pub fn today(&self) -> Weekday {
+        self.today
+    }
+
+    /// Monday through today, inclusive, in order -- exactly what a day
+    /// picker may offer (`quota-sessions-only-days-that-have-happened-03`).
+    pub fn days_so_far(&self) -> Vec<Weekday> {
+        (0..=self.today.index())
+            .filter_map(Weekday::from_index)
+            .collect()
+    }
+
+    /// Whether `day` has already happened this week -- the server-side half
+    /// of `-03`'s guard, checked again here because a guard that only lives
+    /// in the day picker's own options is not a guard: nothing stops a
+    /// direct submission that skips it.
+    pub fn allows(&self, day: Weekday) -> bool {
+        day.index() <= self.today.index()
+    }
+
+    /// The instant `day`'s local midnight falls at, in `zone` -- what a
+    /// session's `day_ms` column stores, so a stored row survives a week
+    /// boundary rather than meaning only "Monday" with no year attached.
+    pub fn day_ms(&self, day: Weekday, zone: &jiff::tz::TimeZone) -> i64 {
+        let date = self
+            .monday
+            .checked_add(jiff::Span::new().days(i64::from(day.index())))
+            .expect("adding at most six days to a real date stays in range");
+        Self::midnight_ms(date, zone)
+    }
+
+    /// This week's own bounds as `[start_ms, end_ms)` -- the store's own
+    /// `WHERE` for "this week's sessions" and "this week's total"
+    /// (`T-set-operations-execute-in-the-store`), computed from `monday`'s
+    /// civil date rather than by adding `7 * 86_400_000` to a millisecond
+    /// count, which a daylight-saving transition would get wrong.
+    pub fn bounds_ms(&self, zone: &jiff::tz::TimeZone) -> (i64, i64) {
+        let next_monday = self
+            .monday
+            .checked_add(jiff::Span::new().weeks(1))
+            .expect("adding one week to a real date stays in range");
+        (
+            Self::midnight_ms(self.monday, zone),
+            Self::midnight_ms(next_monday, zone),
+        )
+    }
+
+    fn midnight_ms(date: jiff::civil::Date, zone: &jiff::tz::TimeZone) -> i64 {
+        date.at(0, 0, 0, 0)
+            .to_zoned(zone.clone())
+            .expect("a civil midnight always resolves to a zoned instant")
+            .timestamp()
+            .as_millisecond()
+    }
+}
+
+/// A session's own two fields, for a rejection to name --
+/// `quota-sessions-a-session-must-be-positive-09`'s own shape, one field
+/// away from [`Field`]: a session has no name to guard, only a day and a
+/// duration.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SessionField {
+    Day,
+    Minutes,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SessionRejection {
+    MissingField(SessionField),
+    InvalidField(SessionField),
+}
+
+/// A validated session, ready to write: a real day within `week`, and a
+/// positive whole number of minutes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LoggedSession {
+    pub day: Weekday,
+    pub minutes: i64,
+}
+
+/// `day` a name [`Weekday::parse`] recognizes and that `week` allows
+/// (`quota-sessions-only-days-that-have-happened-03`'s server-side half: a
+/// guard that only lives in the day picker's own options is not a guard),
+/// `minutes` a positive whole number
+/// (`quota-sessions-a-session-must-be-positive-09`).
+pub fn validate_session(
+    day: Option<&str>,
+    minutes: Option<&str>,
+    week: &Week,
+) -> Result<LoggedSession, SessionRejection> {
+    let day = parse_day(day, week)?;
+    let minutes = parse_positive_minutes(minutes)?;
+    Ok(LoggedSession { day, minutes })
+}
+
+fn parse_day(day: Option<&str>, week: &Week) -> Result<Weekday, SessionRejection> {
+    let day_str = require_nonblank(day, SessionRejection::MissingField(SessionField::Day))?;
+    let day = Weekday::parse(day_str).ok_or(SessionRejection::InvalidField(SessionField::Day))?;
+    if week.allows(day) {
+        Ok(day)
+    } else {
+        Err(SessionRejection::InvalidField(SessionField::Day))
+    }
+}
+
+fn parse_positive_minutes(minutes: Option<&str>) -> Result<i64, SessionRejection> {
+    let minutes_str = require_nonblank(
+        minutes,
+        SessionRejection::MissingField(SessionField::Minutes),
+    )?;
+    let minutes: i64 = minutes_str
+        .parse()
+        .map_err(|_| SessionRejection::InvalidField(SessionField::Minutes))?;
+    if minutes > 0 {
+        Ok(minutes)
+    } else {
+        Err(SessionRejection::InvalidField(SessionField::Minutes))
     }
 }
 
@@ -457,5 +709,255 @@ mod tests {
     #[test]
     fn levenshtein_does_not_credit_a_transposition() {
         assert_eq!(levenshtein("ab", "ba"), 2);
+    }
+
+    // --- Weekday / Week (#93, quota-sessions) ----------------------------
+
+    fn ny() -> jiff::tz::TimeZone {
+        crate::timezone::resolve("America/New_York").expect("a real IANA zone")
+    }
+
+    fn ms(rfc3339: &str) -> i64 {
+        rfc3339.parse::<jiff::Timestamp>().unwrap().as_millisecond()
+    }
+
+    #[test]
+    fn weekday_label_and_parse_round_trip() {
+        for day in [
+            Weekday::Mon,
+            Weekday::Tue,
+            Weekday::Wed,
+            Weekday::Thu,
+            Weekday::Fri,
+            Weekday::Sat,
+            Weekday::Sun,
+        ] {
+            assert_eq!(Weekday::parse(day.label()), Some(day));
+        }
+    }
+
+    /// `index` and `ORDERED` are two statements of the same order -- the
+    /// cast and the list -- and this is what holds them together.
+    #[test]
+    fn every_weekday_round_trips_through_its_own_index() {
+        for (position, day) in ORDERED.iter().enumerate() {
+            assert_eq!(
+                day.index(),
+                position as u8,
+                "{} is out of order",
+                day.label()
+            );
+            assert_eq!(Weekday::from_index(day.index()), Some(*day));
+        }
+    }
+
+    /// The week ends at Sunday. `from_index` is reached with a counted-up
+    /// ordinal, so wrapping past the end would silently offer an eighth day
+    /// rather than stopping.
+    #[test]
+    fn from_index_ends_at_sunday() {
+        assert_eq!(Weekday::from_index(7), None);
+        assert_eq!(Weekday::from_index(u8::MAX), None);
+    }
+
+    #[test]
+    fn weekday_parse_rejects_anything_else() {
+        assert_eq!(Weekday::parse("Monday"), None);
+        assert_eq!(Weekday::parse("mon"), None);
+        assert_eq!(Weekday::parse(""), None);
+    }
+
+    // 2026-08-25T14:00:00Z is 10:00 America/New_York on a Tuesday --
+    // quota_sessions.feature's own Background instant.
+    fn tuesday_ms() -> i64 {
+        ms("2026-08-25T14:00:00Z")
+    }
+
+    #[test]
+    fn week_of_a_tuesday_reports_tuesday_as_today() {
+        let week = Week::of(tuesday_ms(), &ny());
+        assert_eq!(week.today(), Weekday::Tue);
+    }
+
+    #[test]
+    fn days_so_far_on_monday_offers_only_monday() {
+        let week = Week::of(ms("2026-08-24T14:00:00Z"), &ny());
+        assert_eq!(week.days_so_far(), vec![Weekday::Mon]);
+    }
+
+    #[test]
+    fn days_so_far_on_tuesday_offers_monday_and_tuesday() {
+        let week = Week::of(ms("2026-08-25T14:00:00Z"), &ny());
+        assert_eq!(week.days_so_far(), vec![Weekday::Mon, Weekday::Tue]);
+    }
+
+    #[test]
+    fn days_so_far_on_friday_offers_the_first_five_days() {
+        let week = Week::of(ms("2026-08-28T14:00:00Z"), &ny());
+        assert_eq!(
+            week.days_so_far(),
+            vec![
+                Weekday::Mon,
+                Weekday::Tue,
+                Weekday::Wed,
+                Weekday::Thu,
+                Weekday::Fri
+            ]
+        );
+    }
+
+    #[test]
+    fn days_so_far_on_sunday_offers_all_seven() {
+        let week = Week::of(ms("2026-08-30T14:00:00Z"), &ny());
+        assert_eq!(
+            week.days_so_far(),
+            vec![
+                Weekday::Mon,
+                Weekday::Tue,
+                Weekday::Wed,
+                Weekday::Thu,
+                Weekday::Fri,
+                Weekday::Sat,
+                Weekday::Sun,
+            ]
+        );
+    }
+
+    #[test]
+    fn allows_refuses_a_day_that_has_not_happened_yet() {
+        let week = Week::of(tuesday_ms(), &ny());
+        assert!(week.allows(Weekday::Mon));
+        assert!(week.allows(Weekday::Tue));
+        assert!(!week.allows(Weekday::Wed));
+        assert!(!week.allows(Weekday::Sun));
+    }
+
+    #[test]
+    fn day_ms_of_today_is_todays_own_local_midnight() {
+        let week = Week::of(tuesday_ms(), &ny());
+        let zone = ny();
+        let expected = ms("2026-08-25T04:00:00Z"); // 2026-08-25T00:00 America/New_York
+        assert_eq!(week.day_ms(Weekday::Tue, &zone), expected);
+    }
+
+    #[test]
+    fn day_ms_of_an_earlier_day_is_that_days_own_local_midnight() {
+        let week = Week::of(tuesday_ms(), &ny());
+        let zone = ny();
+        let expected = ms("2026-08-24T04:00:00Z"); // 2026-08-24T00:00 America/New_York
+        assert_eq!(week.day_ms(Weekday::Mon, &zone), expected);
+    }
+
+    #[test]
+    fn bounds_ms_spans_exactly_this_monday_through_next_monday() {
+        let week = Week::of(tuesday_ms(), &ny());
+        let zone = ny();
+        let (start, end) = week.bounds_ms(&zone);
+        assert_eq!(start, ms("2026-08-24T04:00:00Z")); // Monday 00:00 NY
+        assert_eq!(end, ms("2026-08-31T04:00:00Z")); // next Monday 00:00 NY
+    }
+
+    #[test]
+    fn a_different_week_has_disjoint_bounds() {
+        let this_week = Week::of(tuesday_ms(), &ny());
+        let next_week = Week::of(ms("2026-08-31T14:00:00Z"), &ny());
+        let zone = ny();
+        let (_, this_end) = this_week.bounds_ms(&zone);
+        let (next_start, _) = next_week.bounds_ms(&zone);
+        assert_eq!(this_end, next_start);
+    }
+
+    #[test]
+    fn weekday_of_is_the_inverse_of_week_day_ms() {
+        let week = tuesday_week();
+        let zone = ny();
+        for day in week.days_so_far() {
+            assert_eq!(weekday_of(week.day_ms(day, &zone), &zone), day);
+        }
+    }
+
+    // --- validate_session (#93, quota-sessions) --------------------------
+
+    fn tuesday_week() -> Week {
+        Week::of(tuesday_ms(), &ny())
+    }
+
+    #[test]
+    fn validate_session_rejects_a_missing_day() {
+        assert_eq!(
+            validate_session(None, Some("20"), &tuesday_week()),
+            Err(SessionRejection::MissingField(SessionField::Day))
+        );
+    }
+
+    #[test]
+    fn validate_session_rejects_a_day_name_it_does_not_recognize() {
+        assert_eq!(
+            validate_session(Some("Someday"), Some("20"), &tuesday_week()),
+            Err(SessionRejection::InvalidField(SessionField::Day))
+        );
+    }
+
+    #[test]
+    fn validate_session_rejects_a_day_that_has_not_happened_yet() {
+        assert_eq!(
+            validate_session(Some("Wed"), Some("20"), &tuesday_week()),
+            Err(SessionRejection::InvalidField(SessionField::Day)),
+            "Wednesday has not happened yet against a Tuesday week -- not by the picker, and not by posting one directly"
+        );
+    }
+
+    #[test]
+    fn validate_session_accepts_today() {
+        assert_eq!(
+            validate_session(Some("Tue"), Some("20"), &tuesday_week()),
+            Ok(LoggedSession {
+                day: Weekday::Tue,
+                minutes: 20
+            })
+        );
+    }
+
+    #[test]
+    fn validate_session_accepts_an_earlier_day_this_week() {
+        assert_eq!(
+            validate_session(Some("Mon"), Some("20"), &tuesday_week()),
+            Ok(LoggedSession {
+                day: Weekday::Mon,
+                minutes: 20
+            })
+        );
+    }
+
+    #[test]
+    fn validate_session_rejects_a_missing_minutes() {
+        assert_eq!(
+            validate_session(Some("Mon"), None, &tuesday_week()),
+            Err(SessionRejection::MissingField(SessionField::Minutes))
+        );
+    }
+
+    #[test]
+    fn validate_session_rejects_zero_minutes() {
+        assert_eq!(
+            validate_session(Some("Mon"), Some("0"), &tuesday_week()),
+            Err(SessionRejection::InvalidField(SessionField::Minutes))
+        );
+    }
+
+    #[test]
+    fn validate_session_rejects_negative_minutes() {
+        assert_eq!(
+            validate_session(Some("Mon"), Some("-30"), &tuesday_week()),
+            Err(SessionRejection::InvalidField(SessionField::Minutes))
+        );
+    }
+
+    #[test]
+    fn validate_session_rejects_unparseable_minutes() {
+        assert_eq!(
+            validate_session(Some("Mon"), Some("many"), &tuesday_week()),
+            Err(SessionRejection::InvalidField(SessionField::Minutes))
+        );
     }
 }

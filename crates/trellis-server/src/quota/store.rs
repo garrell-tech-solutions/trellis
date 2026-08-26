@@ -92,6 +92,92 @@ pub async fn create(
     Ok(())
 }
 
+/// A row of [`week_sessions`]: one logged session, wherever it belongs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, sqlx::FromRow)]
+pub struct SessionRow {
+    pub id: i64,
+    pub quota_id: i64,
+    pub day_ms: i64,
+    pub minutes: i64,
+}
+
+/// Every session logged for *any* quota whose day falls within
+/// `[week_start_ms, week_end_ms)` -- the week boundary is the query's own
+/// `WHERE`, not a filter a caller applies afterwards
+/// (`T-set-operations-execute-in-the-store`), and one query for every quota
+/// is what keeps a screen with several quotas at one round trip rather than
+/// one per row. Oldest day first, and within a day, logged-first
+/// (`quota-sessions-this-week-lists-what-was-logged-04`'s "ordered Monday
+/// first"), which grouping the flat result by `quota_id` afterwards
+/// preserves without a second sort.
+pub async fn week_sessions(
+    pool: &SqlitePool,
+    week_start_ms: i64,
+    week_end_ms: i64,
+) -> Result<Vec<SessionRow>, sqlx::Error> {
+    sqlx::query_as(
+        "SELECT id, quota_id, day_ms, minutes FROM quota_sessions \
+         WHERE day_ms >= ? AND day_ms < ? ORDER BY day_ms ASC, id ASC",
+    )
+    .bind(week_start_ms)
+    .bind(week_end_ms)
+    .fetch_all(pool)
+    .await
+}
+
+/// Logs one session against `quota_id` -- the one write path
+/// [`crate::quota::http`]'s quick-log buttons and its `Other…` form both
+/// reach (`T-one-front-door-per-capability`).
+pub async fn log_session(
+    pool: &SqlitePool,
+    quota_id: i64,
+    day_ms: i64,
+    minutes: i64,
+    created_at_ms: i64,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "INSERT INTO quota_sessions (quota_id, day_ms, minutes, created_at_ms) \
+         VALUES (?, ?, ?, ?)",
+    )
+    .bind(quota_id)
+    .bind(day_ms)
+    .bind(minutes)
+    .bind(created_at_ms)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+/// Corrects a logged session's day and minutes in place -- its `id` never
+/// changes, so "This week" keeps listing the same row rather than a
+/// delete-and-recreate a reader could mistake for two events.
+pub async fn update_session(
+    pool: &SqlitePool,
+    session_id: i64,
+    day_ms: i64,
+    minutes: i64,
+) -> Result<(), sqlx::Error> {
+    sqlx::query("UPDATE quota_sessions SET day_ms = ?, minutes = ? WHERE id = ?")
+        .bind(day_ms)
+        .bind(minutes)
+        .bind(session_id)
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
+/// Deletes a logged session outright -- `D-kill-means-archive` governs a
+/// *task*'s own lifecycle, not a session, which has nothing to browse once
+/// gone (`quota-sessions-deleting-a-session-07`: deleting one takes its
+/// minutes with it, not merely hides them).
+pub async fn delete_session(pool: &SqlitePool, session_id: i64) -> Result<(), sqlx::Error> {
+    sqlx::query("DELETE FROM quota_sessions WHERE id = ?")
+        .bind(session_id)
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -210,5 +296,139 @@ mod tests {
             result.is_err(),
             "expected the UNIQUE COLLATE NOCASE backstop to refuse a case-only duplicate"
         );
+    }
+
+    // --- sessions (#93, quota-sessions) ----------------------------------
+
+    async fn given_a_quota(pool: &SqlitePool, name: &str, weekly_target_minutes: i64) -> i64 {
+        create(pool, &definition(name, weekly_target_minutes), 0)
+            .await
+            .unwrap();
+        sqlx::query_scalar("SELECT id FROM quotas WHERE name = ?")
+            .bind(name)
+            .fetch_one(pool)
+            .await
+            .unwrap()
+    }
+
+    const MONDAY_MS: i64 = 1_000_000_000_000;
+    const WEEK_END_MS: i64 = MONDAY_MS + 7 * 86_400_000;
+
+    #[tokio::test]
+    async fn week_sessions_is_empty_against_a_fresh_database() {
+        let (_dir, pool) = test_pool().await;
+
+        let sessions = week_sessions(&pool, MONDAY_MS, WEEK_END_MS).await.unwrap();
+
+        assert!(sessions.is_empty());
+    }
+
+    #[tokio::test]
+    async fn log_session_then_week_sessions_reports_it() {
+        let (_dir, pool) = test_pool().await;
+        let quota_id = given_a_quota(&pool, "Piano", 240).await;
+
+        log_session(&pool, quota_id, MONDAY_MS, 20, 0)
+            .await
+            .unwrap();
+
+        let sessions = week_sessions(&pool, MONDAY_MS, WEEK_END_MS).await.unwrap();
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(sessions[0].quota_id, quota_id);
+        assert_eq!(sessions[0].day_ms, MONDAY_MS);
+        assert_eq!(sessions[0].minutes, 20);
+    }
+
+    #[tokio::test]
+    async fn week_sessions_excludes_a_session_outside_the_bounds() {
+        let (_dir, pool) = test_pool().await;
+        let quota_id = given_a_quota(&pool, "Piano", 240).await;
+        log_session(&pool, quota_id, WEEK_END_MS, 20, 0)
+            .await
+            .unwrap();
+
+        let sessions = week_sessions(&pool, MONDAY_MS, WEEK_END_MS).await.unwrap();
+
+        assert!(sessions.is_empty());
+    }
+
+    #[tokio::test]
+    async fn week_sessions_orders_by_day_then_by_when_it_was_logged() {
+        let (_dir, pool) = test_pool().await;
+        let quota_id = given_a_quota(&pool, "Piano", 240).await;
+        let tuesday_ms = MONDAY_MS + 86_400_000;
+        log_session(&pool, quota_id, tuesday_ms, 60, 1)
+            .await
+            .unwrap();
+        log_session(&pool, quota_id, MONDAY_MS, 20, 2)
+            .await
+            .unwrap();
+        log_session(&pool, quota_id, tuesday_ms, 30, 3)
+            .await
+            .unwrap();
+
+        let sessions = week_sessions(&pool, MONDAY_MS, WEEK_END_MS).await.unwrap();
+
+        let minutes: Vec<i64> = sessions.iter().map(|s| s.minutes).collect();
+        assert_eq!(
+            minutes,
+            vec![20, 60, 30],
+            "Monday first, then Tuesday in logged order"
+        );
+    }
+
+    #[tokio::test]
+    async fn week_sessions_reports_every_quotas_own_sessions_in_one_query() {
+        let (_dir, pool) = test_pool().await;
+        let piano = given_a_quota(&pool, "Piano", 240).await;
+        let running = given_a_quota(&pool, "Running", 180).await;
+        log_session(&pool, piano, MONDAY_MS, 20, 0).await.unwrap();
+        log_session(&pool, running, MONDAY_MS, 30, 0).await.unwrap();
+
+        let sessions = week_sessions(&pool, MONDAY_MS, WEEK_END_MS).await.unwrap();
+
+        let quota_ids: Vec<i64> = sessions.iter().map(|s| s.quota_id).collect();
+        assert_eq!(quota_ids, vec![piano, running]);
+    }
+
+    #[tokio::test]
+    async fn update_session_changes_its_day_and_minutes() {
+        let (_dir, pool) = test_pool().await;
+        let quota_id = given_a_quota(&pool, "Piano", 240).await;
+        log_session(&pool, quota_id, MONDAY_MS, 25, 0)
+            .await
+            .unwrap();
+        let session_id = week_sessions(&pool, MONDAY_MS, WEEK_END_MS).await.unwrap()[0].id;
+        let tuesday_ms = MONDAY_MS + 86_400_000;
+
+        update_session(&pool, session_id, tuesday_ms, 45)
+            .await
+            .unwrap();
+
+        let sessions = week_sessions(&pool, MONDAY_MS, WEEK_END_MS).await.unwrap();
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(sessions[0].day_ms, tuesday_ms);
+        assert_eq!(sessions[0].minutes, 45);
+    }
+
+    #[tokio::test]
+    async fn delete_session_removes_it_and_leaves_others_alone() {
+        let (_dir, pool) = test_pool().await;
+        let quota_id = given_a_quota(&pool, "Piano", 240).await;
+        let tuesday_ms = MONDAY_MS + 86_400_000;
+        log_session(&pool, quota_id, MONDAY_MS, 25, 0)
+            .await
+            .unwrap();
+        log_session(&pool, quota_id, tuesday_ms, 35, 1)
+            .await
+            .unwrap();
+        let sessions = week_sessions(&pool, MONDAY_MS, WEEK_END_MS).await.unwrap();
+        let monday_session_id = sessions.iter().find(|s| s.day_ms == MONDAY_MS).unwrap().id;
+
+        delete_session(&pool, monday_session_id).await.unwrap();
+
+        let remaining = week_sessions(&pool, MONDAY_MS, WEEK_END_MS).await.unwrap();
+        assert_eq!(remaining.len(), 1);
+        assert_eq!(remaining[0].day_ms, tuesday_ms);
     }
 }

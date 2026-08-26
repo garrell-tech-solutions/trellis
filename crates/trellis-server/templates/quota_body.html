@@ -10,15 +10,72 @@
 </div>
 {% endif %}
 
-<ul class="quota-rows">
+<div class="quota-rows">
 {% for quota in quotas %}
-<li class="quota-row" id="quota-row-{{ quota.id }}">
+<div class="quota-row" id="quota-row-{{ quota.id }}">
 <div class="quota-name">{{ quota.name }}</div>
 <div class="quota-readout">{{ quota.readout }}</div>
 <div class="quota-note">{{ quota.note }}</div>
+
+<div class="quota-quick-log">
+<form hx-post="/quota/{{ quota.id }}/sessions" hx-target="#quota-body" hx-swap="outerHTML">
+<input type="hidden" name="day" value="{{ today }}">
+<input type="hidden" name="minutes" value="30">
+<button type="submit" class="quota-quick-log-30m">+30m</button>
+</form>
+<form hx-post="/quota/{{ quota.id }}/sessions" hx-target="#quota-body" hx-swap="outerHTML">
+<input type="hidden" name="day" value="{{ today }}">
+<input type="hidden" name="minutes" value="60">
+<button type="submit" class="quota-quick-log-1h">+1h</button>
+</form>
+<details class="quota-other">
+<summary>Other…</summary>
+<form hx-post="/quota/{{ quota.id }}/sessions" hx-target="#quota-body" hx-swap="outerHTML">
+<label>Day
+<select name="day">
+{% for day in day_options %}
+<option value="{{ day }}"{% if day.as_str() == today.as_str() %} selected{% endif %}>{{ day }}</option>
+{% endfor %}
+</select>
+</label>
+<label>Minutes <input type="number" name="minutes" min="5" step="5"></label>
+<button type="submit">Add</button>
+</form>
+</details>
+</div>
+
+<details class="quota-expand"{% if quota.expanded %} open{% endif %}>
+<summary>Expand</summary>
+<div class="quota-this-week">
+<h2>This week</h2>
+<ul class="quota-sessions">
+{% for session in quota.sessions %}
+<li class="quota-session" id="quota-session-{{ session.id }}">
+<span class="quota-session-label">{{ session.label }}</span>
+<form class="quota-session-edit" hx-post="/quota/sessions/{{ session.id }}" hx-target="#quota-body" hx-swap="outerHTML">
+<select name="day">
+{% for day in day_options %}
+<option value="{{ day }}"{% if day.as_str() == session.day.as_str() %} selected{% endif %}>{{ day }}</option>
+{% endfor %}
+</select>
+<input type="number" name="minutes" min="5" step="5" value="{{ session.minutes }}">
+<button type="submit">Save</button>
+</form>
+<form class="quota-session-delete" hx-post="/quota/sessions/{{ session.id }}/delete" hx-target="#quota-body" hx-swap="outerHTML">
+<button type="submit">Delete</button>
+</form>
 </li>
 {% endfor %}
 </ul>
+{% if let Some(message) = quota.sessions_message %}
+<p class="quota-sessions-empty">{{ message }}</p>
+{% endif %}
+<div class="quota-sessions-summary">{{ quota.summary }}</div>
+</div>
+</details>
+</div>
+{% endfor %}
+</div>
 
 <form class="quota-define-form" hx-post="/quota" hx-target="#quota-body" hx-swap="outerHTML">
 <label>Name <input type="text" name="name" value="{{ pending_name }}"></label>

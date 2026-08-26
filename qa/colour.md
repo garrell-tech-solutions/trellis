@@ -105,7 +105,8 @@ trip. Everything else clears: `gray-400` 4.89 / 4.54, `gray-500` 7.63,
    committed task with a past date** (the past date cell and the `PAST`
    badge). **Report the seed inventory** — say which components you got on
    screen, not just that the check passed.
-3. For each screen — Capture `/`, Pool `/pool`, Committed `/committed` — and
+3. For each screen — Capture `/`, Pool `/pool`, Committed `/committed`,
+   Quota `/quota` — and
    for each scheme — `light`, `dark` — at 390×844, assert:
 
    **A. Every text-bearing element clears 4.5:1.** For each element with a
@@ -146,7 +147,12 @@ behaviour change and must not break this check.
 
 ### Expected Observable Outcomes
 
-- **All five assertions hold, on all three screens, in both schemes.**
+- **All five assertions hold, on all four screens, in both schemes.**
+- **Quota is the fourth and it arrived after this document did** (#93). Its
+  `SCREENS` entry was added in `quota-sessions` because #144 shipped a whole
+  screen outside this gate — **which is how a four-day-old palette settlement
+  quietly stops being true.** If adding it turned this check red, **report
+  what it found**; do not adjust the screen to suit the check.
 - **The failures listed in the baseline table are gone**, and the report says
   so token by token — including **both gold text rules**, which are the two
   nobody had counted.
@@ -192,7 +198,7 @@ thing however you break it has one assertion wearing four names.
 
 ### Expected Observable Outcomes
 
-- `color-scheme` names **both** schemes on all three screens.
+- `color-scheme` names **both** schemes on all four screens.
 - Two theme colours: one unmediated (`#fafdfe`) and one under
   `media="(prefers-color-scheme: dark)"` (`#091014`). **The unmediated one is
   the light one and stays first**, because `installable-theme-colour-05`

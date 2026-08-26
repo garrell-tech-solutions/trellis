@@ -159,15 +159,17 @@ fn dispatch_meta(
     )
 }
 
-fn quota_rows_section(body: &str) -> Option<&str> {
-    html::between(body, r#"<ul class="quota-rows">"#, "</ul>").ok()
-}
-
+/// Absence of the row marker itself, not a delimited "quota-rows" section:
+/// a row nests its own `<ul>`/`<li>` session list
+/// (`html::quota_row`'s own reasoning), so scanning for *a* closing tag to
+/// bound an empty check the same way risks stopping inside the first row
+/// found rather than answering "is there one at all".
 fn then_offers_no_quotas(world: &mut World) -> Result<(), String> {
     let body = html_body(world)?;
-    match quota_rows_section(body).filter(|section| !section.trim().is_empty()) {
-        Some(section) => Err(format!("expected no quotas, got:\n{section}")),
-        None => Ok(()),
+    if body.contains(r#"<div class="quota-row""#) {
+        Err(format!("expected no quotas, got:\n{body}"))
+    } else {
+        Ok(())
     }
 }
 
@@ -259,12 +261,6 @@ async fn dispatch_defined_again(
     .await
 }
 
-fn quota_row<'a>(body: &'a str, name: &str) -> Result<&'a str, String> {
-    let section =
-        quota_rows_section(body).ok_or_else(|| format!("expected some quotas, got:\n{body}"))?;
-    html::row_containing(section, name)
-}
-
 /// `caps[1]` and `caps[2]` resolved together -- the "which quota, what do we
 /// expect of it" pair [`dispatch_quota_reads`] and [`dispatch_quota_notes`]
 /// both start with, one `?` in the caller rather than two.
@@ -282,7 +278,7 @@ fn dispatch_quota_reads(
 ) -> Result<(), String> {
     let (name, expected) = resolve_pair(example, caps)?;
     let body = html_body(world)?;
-    let row = quota_row(body, &name)?;
+    let row = html::quota_row(body, &name)?;
     let readout = html::between(row, r#"<div class="quota-readout">"#, "</div>")?;
     expect_eq(
         readout,
@@ -298,7 +294,7 @@ fn dispatch_quota_notes(
 ) -> Result<(), String> {
     let (name, expected) = resolve_pair(example, caps)?;
     let body = html_body(world)?;
-    let row = quota_row(body, &name)?;
+    let row = html::quota_row(body, &name)?;
     let note = html::between(row, r#"<div class="quota-note">"#, "</div>")?;
     expect_eq(
         note,
@@ -374,7 +370,7 @@ mod tests {
 
     #[test]
     fn quota_names_in_order_reads_every_quota_label() {
-        let body = r#"<li class="quota-row"><div class="quota-name">Piano</div></li><li class="quota-row"><div class="quota-name">Running</div></li>"#;
+        let body = r#"<div class="quota-row"><div class="quota-name">Piano</div></div><div class="quota-row"><div class="quota-name">Running</div></div>"#;
         assert_eq!(
             quota_names_in_order(body),
             vec!["Piano".to_string(), "Running".to_string()]
@@ -392,7 +388,7 @@ mod tests {
     fn then_offers_no_quotas_errors_when_a_row_exists() {
         let mut world = World::new();
         world.last_html_body = Some(
-            r#"<ul class="quota-rows"><li class="quota-row"><div class="quota-name">Piano</div></li></ul>"#
+            r#"<div class="quota-rows"><div class="quota-row"><div class="quota-name">Piano</div></div></div>"#
                 .to_string(),
         );
         assert!(then_offers_no_quotas(&mut world).is_err());
@@ -400,8 +396,8 @@ mod tests {
 
     #[test]
     fn quota_row_finds_the_named_row_and_not_another_one() {
-        let body = r#"<ul class="quota-rows"><li class="quota-row"><div class="quota-name">Piano</div><div class="quota-readout">0m / 4h</div></li><li class="quota-row"><div class="quota-name">Running</div><div class="quota-readout">0m / 3h</div></li></ul>"#;
-        let row = quota_row(body, "Piano").unwrap();
+        let body = r#"<div class="quota-rows"><div class="quota-row"><div class="quota-name">Piano</div><div class="quota-readout">0m / 4h</div></div><div class="quota-row"><div class="quota-name">Running</div><div class="quota-readout">0m / 3h</div></div></div>"#;
+        let row = html::quota_row(body, "Piano").unwrap();
         assert!(row.contains("0m / 4h"));
         assert!(!row.contains("0m / 3h"));
     }

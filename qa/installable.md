@@ -4,7 +4,7 @@ Covers: `features/installable.feature`
 
 ## Interface used
 
-The three screens over HTTP, the manifest and icons at whatever URLs the
+The four screens over HTTP, the manifest and icons at whatever URLs the
 pages link, read-only `sqlite3` (not needed here — this slice stores
 nothing), and **a real phone, for the half that cannot be automated at all.**
 
@@ -57,11 +57,16 @@ seen, not to imply the new browser check covers more than it does.
 
 ## Procedure — the manifest is linked and served
 
-1. Fetch each of the three screens.
+1. Fetch each of the four screens.
 2. Extract the manifest link from each; fetch what it points at.
 
 ### Expected Observable Outcomes
-- **All three link a manifest**, and all three link **the same one**.
+- **All four link a manifest**, and all four link **the same one**.
+- **Quota is the fourth and arrived after this document did** (#93). This said
+  three while the screen already existed — **stale text rather than a hole**:
+  QA confirmed during `quota-sessions` that `/quota` already links the same
+  `manifest.webmanifest` as the other three. Corrected so the next screen is
+  not checked against a count that has stopped being true.
 - It parses as JSON and carries `name`, `short_name`, `start_url` and
   `display: standalone`.
 - **Read the URL out of the page rather than assuming it**

@@ -37,6 +37,15 @@
       (str/replace #"^-+|-+$" "")
       (str ".json")))
 
+(defn write-if-changed
+  "Write `contents` to `path` only when that would change the file, and say
+  whether it did. The point is the mtime: an unchanged file that is rewritten
+  anyway is what makes Cargo rebuild a test binary whose source did not move."
+  [path contents]
+  (if (and (fs/exists? path) (= contents (slurp (str path))))
+    false
+    (do (spit (str path) contents) true)))
+
 (defn generated-test-source [slug feature-path rel-ir fn-name]
   (str
     "// GENERATED FILE. Do not edit.\n"
@@ -76,23 +85,43 @@
           contents (generated-test-source slug feature-path rel-ir fn-name)]
       (fs/create-dirs out-dir-abs)
       (fs/create-dirs metadata-dir)
-      (spit (str test-file) contents)
-      ;; Reformat with rustfmt so the generated file satisfies `cargo fmt --all
-      ;; -- --check` the same as hand-written source, then hash the file as it
-      ;; actually sits on disk rather than the pre-format string.
-      (let [{:keys [exit err]} (process/sh "rustfmt" "--edition" "2021" (str test-file))]
-        (when-not (zero? exit)
-          (binding [*out* *err*] (println "rustfmt failed on" (str test-file) ":" err))
-          (System/exit 1)))
-      (let [formatted (slurp (str test-file))
-            rel-generated (str (fs/relativize out-dir-abs test-file))
-            metadata {:schema_version 1
-                       :feature_path feature-path
-                       :ir_path (str ir-path)
-                       :implementation_hash (str "sha256:" (sha256-hex formatted))
-                       :hash_scope "generated_files"
-                       :generated_files [rel-generated]}]
-        (spit (str metadata-file) (json/generate-string metadata {:pretty true})))
-      (println "generated:" (str test-file)))))
+      ;; Format and compare in a scratch file, never in place.
+      ;;
+      ;; Every one of these outputs is an input to `cargo test`: the entry
+      ;; point is compiled, and it `include_str!`s the IR beside it. Cargo
+      ;; decides what to rebuild from mtimes, so writing a byte-identical file
+      ;; is not free -- it is a full rebuild of all of them. Regeneration is
+      ;; deterministic and the tree usually has one changed feature in it or
+      ;; none, so the normal case is that nothing here has moved and the
+      ;; cheapest correct thing to do is leave the files alone.
+      ;;
+      ;; Formatting has to happen before the comparison rather than after,
+      ;; because the bytes that land on disk are rustfmt's, not this
+      ;; generator's, and comparing the two would report every file as changed
+      ;; forever. The project has no rustfmt.toml, and --edition is passed
+      ;; explicitly, so formatting a scratch file outside the tree gives the
+      ;; same output as formatting one inside it.
+      (let [scratch (fs/create-temp-file {:prefix "aps-acceptance-entrypoint"
+                                          :suffix ".rs"})]
+        (try
+          (spit (str scratch) contents)
+          (let [{:keys [exit err]} (process/sh "rustfmt" "--edition" "2021" (str scratch))]
+            (when-not (zero? exit)
+              (binding [*out* *err*] (println "rustfmt failed on" (str test-file) ":" err))
+              (System/exit 1)))
+          (let [formatted (slurp (str scratch))
+                rel-generated (str (fs/relativize out-dir-abs test-file))
+                metadata {:schema_version 1
+                           :feature_path feature-path
+                           :ir_path (str ir-path)
+                           :implementation_hash (str "sha256:" (sha256-hex formatted))
+                           :hash_scope "generated_files"
+                           :generated_files [rel-generated]}
+                metadata-json (json/generate-string metadata {:pretty true})
+                test-changed (write-if-changed test-file formatted)
+                metadata-changed (write-if-changed metadata-file metadata-json)]
+            (println (if (or test-changed metadata-changed) "generated:" "unchanged:")
+                     (str test-file)))
+          (finally (fs/delete-if-exists scratch)))))))
 
 (apply -main *command-line-args*)

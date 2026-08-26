@@ -14,27 +14,38 @@ TARGET="${1:-.}"
 
 if pkg="$(pkg_for_path "$TARGET" 2>/dev/null)"; then
   SCOPE=(-p "$pkg")
+  REPORT_SCOPE=(-p "$pkg")
 else
   SCOPE=(--workspace)
+  # `cargo llvm-cov report` has no --workspace: with no package filter it
+  # renders everything in the profile, which is what --workspace collected.
+  REPORT_SCOPE=()
 fi
 
 COBERTURA_FILE="$(mktemp)"
 trap 'rm -f "$COBERTURA_FILE"' EXIT
-# --include-ignored and --ignore-run-fail: see coverage.sh. The second one is
-# what stops an instrumented run's 50ms timing assertion from failing a CRAP
-# measurement that has nothing to do with it.
-cargo llvm-cov "${SCOPE[@]}" --cobertura --output-path "$COBERTURA_FILE" \
-  --ignore-run-fail >/dev/null 2>&1 -- --include-ignored
+
+# The instrumented run itself, shared with coverage.sh -- see lib.sh, which
+# also carries the reasoning for --include-ignored and --ignore-run-fail. This
+# analyzer used to take a second run of the identical suite purely to export
+# the same profile in a different format. It is taken here if nothing has taken
+# it yet, so crap.sh still works standalone with nothing else having run first.
+llvm_cov_profile_ensure "${SCOPE[*]}" "${SCOPE[@]}"
+
+# Rendering only. `report` runs no tests; it exports the profile above. No
+# --summary-only here: the per-method line rates are the whole input to CRAP.
+cargo llvm-cov report "${REPORT_SCOPE[@]}" --cobertura \
+  --output-path "$COBERTURA_FILE" >/dev/null 2>&1
 
 python3 - "$TARGET" "$THRESHOLD" "$SCRIPT_DIR" "$COBERTURA_FILE" <<'PYEOF'
-import json, os, subprocess, sys
+import json, os, sys
 import xml.etree.ElementTree as ET
 
 target, threshold, script_dir, cobertura_path = (
     sys.argv[1], float(sys.argv[2]), sys.argv[3], sys.argv[4]
 )
 sys.path.insert(0, script_dir)
-from _common import rust_files_under, production_functions
+from _common import rust_files_under, production_function_index
 
 
 def strip_trailing_turbofish(name):
@@ -118,30 +129,21 @@ if not files:
 violations = []
 total_functions = 0
 
-for f in files:
-    raw = subprocess.run(
-        ["rust-code-analysis-cli", "-p", f, "-m", "-O", "json"],
-        capture_output=True, text=True, check=True,
-    ).stdout
-    with open(f) as fh:
-        source = fh.read()
-    for line in raw.splitlines():
-        if not line.strip():
-            continue
-        unit = json.loads(line)
-        for name, start, end, cyclomatic in production_functions(unit, source):
-            total_functions += 1
-            coverage = coverage_for(f, name, start, end)
-            crap = cyclomatic ** 2 * (1 - coverage) ** 3 + cyclomatic
-            if crap >= threshold:
-                violations.append({
-                    "file": f,
-                    "function": name,
-                    "line": start,
-                    "cyclomatic_complexity": cyclomatic,
-                    "coverage": round(coverage, 4),
-                    "crap_score": round(crap, 2),
-                })
+# One rust-code-analysis-cli walk, shared with complexity.sh -- see _common.py.
+for f, functions in production_function_index(files).items():
+    for name, start, end, cyclomatic in functions:
+        total_functions += 1
+        coverage = coverage_for(f, name, start, end)
+        crap = cyclomatic ** 2 * (1 - coverage) ** 3 + cyclomatic
+        if crap >= threshold:
+            violations.append({
+                "file": f,
+                "function": name,
+                "line": start,
+                "cyclomatic_complexity": cyclomatic,
+                "coverage": round(coverage, 4),
+                "crap_score": round(crap, 2),
+            })
 
 result = {
     "tool": "crap.sh (cargo-llvm-cov + rust-code-analysis-cli)",

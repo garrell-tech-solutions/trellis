@@ -176,9 +176,12 @@ report it as missing.**
 1. View the capture screen, then the pool screen.
 
 ### Expected Observable Outcomes
-- **Exactly three tabs**, Capture, Pool and Committed — the third arrived
-  with #94. **Not four**: Quota arrives with its own slice, and a dead link
-  is worse than no link.
+- **Exactly four tabs**, Capture, Pool, Committed and Quota. **Updated by
+  #93**, which read *"exactly three... not four: Quota arrives with its own
+  slice, and a dead link is worse than no link."* That slice has arrived, so
+  the link is no longer dead and the count is four. The rule the old wording
+  was protecting is unchanged and still worth checking: **no tab may point at
+  a route the app cannot serve** — follow all four from all four screens.
 - Each screen marks itself current, and only itself.
 - The marking is in the markup, not by colour alone.
 - **`one_screen`'s route list is the other half of this**, and it changed in

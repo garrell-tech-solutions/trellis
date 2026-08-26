@@ -214,7 +214,7 @@ if qa_start_pinned "$TMP_DIR/$name.sqlite" "$TMP_DIR/$name.log"; then
     FAILURES=1
   fi
   quota_id="$(qa_submit_capture "practise piano")"
-  qa_triage "$quota_id" '{"kind":"quota","target_count":3,"target_minutes_each":20,"period":"week","context_tag":"@desk"}'
+  qa_triage "$quota_id" '{"kind":"quota","name":"practise piano","hours":"1","context_tag":"@desk"}'
   if [[ "$STATUS" != "201" ]]; then
     echo "FAIL: [$name] setup quota triage returned status $STATUS" >&2
     FAILURES=1

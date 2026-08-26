@@ -195,7 +195,7 @@ qa_stop_server
 name="quota-work-is-untouched"
 if qa_start_server "$BIN" "$TMP_DIR/$name.sqlite" "$TMP_DIR/$name.log"; then
   quota_id="$(qa_submit_capture "practise piano")"
-  qa_triage "$quota_id" '{"kind":"quota","target_count":3,"target_minutes_each":20,"period":"week"}'
+  qa_triage "$quota_id" '{"kind":"quota","name":"practise piano","hours":"1"}'
   if [[ "$STATUS" != "201" ]]; then
     echo "FAIL: [$name] setup quota triage returned status $STATUS" >&2
     FAILURES=1

@@ -175,7 +175,7 @@ if qa_start_server "$BIN" "$TMP_DIR/$name.sqlite" "$TMP_DIR/$name.log"; then
     FAILURES=1
   fi
   quota_id="$(qa_submit_capture "pick up trim")"
-  qa_triage "$quota_id" '{"kind":"quota","target_count":3,"target_minutes_each":45,"period":"week","context_tag":"@homedepot"}'
+  qa_triage "$quota_id" '{"kind":"quota","name":"pick up trim","hours":"2","context_tag":"@homedepot"}'
   if [[ "$STATUS" != "201" ]]; then
     echo "FAIL: [$name] setup quota triage returned status $STATUS" >&2
     FAILURES=1

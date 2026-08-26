@@ -1,6 +1,6 @@
-# mutation-stamp: sha256=82bb96a579d99fa7dae1c2caefc5c5fd335952a4453188e433f36df9bb659dd5
+# mutation-stamp: sha256=3f38c8880734f22e185bee1e121e7c407830e31b5e54fdd9ba5e2e0f42039a06
 # acceptance-mutation-manifest-begin
-# {"version":1,"tested_at":"2026-08-21T21:20:24.853921346Z","feature_name":"Triage happens on the page, using the same validation as the API","feature_path":"features/triage_from_page.feature","background_hash":"304f93e93e2b217b49069c091950b87589f0c7e789e2d0dc3aaa8d845450cb64","implementation_hash":"sha256:b6d2b9276eb4e11dbc0f53d54b6b417868310eea7acb7947131810fe9df8b364","scenarios":[{"index":7,"name":"The pool form asks for fewer inputs than committed or quota","scenario_hash":"575a2c45bf988f226723ea869edfe1dc2702d74c6c2d60e8d4a32284dd3d40cc","mutation_count":2,"result":{"Total":2,"Killed":2,"Survived":0,"Errors":0},"tested_at":"2026-08-17T17:57:47.600328486Z"}]}
+# {"version":1,"tested_at":"2026-08-26T17:14:41.247040966Z","feature_name":"Triage happens on the page, using the same validation as the API","feature_path":"features/triage_from_page.feature","background_hash":"304f93e93e2b217b49069c091950b87589f0c7e789e2d0dc3aaa8d845450cb64","implementation_hash":"sha256:b6d2b9276eb4e11dbc0f53d54b6b417868310eea7acb7947131810fe9df8b364","scenarios":[{"index":7,"name":"The pool form asks for fewer inputs than committed or quota","scenario_hash":"575a2c45bf988f226723ea869edfe1dc2702d74c6c2d60e8d4a32284dd3d40cc","mutation_count":2,"result":{"Total":2,"Killed":2,"Survived":0,"Errors":0},"tested_at":"2026-08-17T17:57:47.600328486Z"}]}
 # acceptance-mutation-manifest-end
 
 # triage-from-page-offers-all-kinds-01: each untriaged capture offers all three triage kinds from the page
@@ -54,9 +54,9 @@ Feature: Triage happens on the page, using the same validation as the API
   # triage-from-page-quota-rejected-05: triaging as quota through the page with a required field omitted is rejected the same way as the API
   Scenario: Triaging as quota through the page without a required field is rejected the same way as the API
     Given a capture with raw text "go to the gym" is waiting in the untriaged queue
-    When the capture is triaged as a quota task through the page with "target_count" omitted
+    When the capture is triaged as a quota task through the page with "hours" omitted
     Then the triage is rejected
-    And the rejection names "target_count"
+    And the rejection names "hours"
     And the task list is still empty
     And the capture is still waiting in the untriaged queue
 

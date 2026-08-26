@@ -1,12 +1,12 @@
 //! Step handlers for `features/quota_screen.feature`: the fourth screen,
-//! and defining a quota (#93).
+//! showing what was triaged as a quota (#138).
 //!
 //! "the "quota" screen is viewed" and "the tab bar marks ... as the current
 //! tab" are already matched generically by [`super::pool_screen::dispatch`],
 //! tried before this module — nothing here duplicates them.
 
 use super::html;
-use super::inbox_view::{html_response, urlencode};
+use super::inbox_view::html_response;
 use super::*;
 use axum::body::Body;
 use axum::http::Request;
@@ -18,39 +18,21 @@ static THEN_OFFERS_NO_QUOTAS: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^the quota screen offers no quotas$").unwrap());
 static THEN_SCREEN_NOTES: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r#"^the quota screen notes "([^"]+)"$"#).unwrap());
-static THEN_DEFINE_CONTROL: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r#"^the quota screen offers a define control named "([^"]+)"$"#).unwrap()
-});
-static WHEN_DEFINED_OMITTING: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r#"^a quota is defined with "([^"]+)" omitted$"#).unwrap());
-static THEN_REJECTED: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"^the definition is rejected$").unwrap());
-/// The `Given`/`And` fixture form -- "a quota named X exists", with no
-/// trailing "is defined" -- distinct from [`WHEN_DEFINED`]'s action form,
-/// which the feature file spells with "is defined" precisely because it is
-/// the step under test.
+static THEN_WAY_BACK: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^the quota screen offers a way back to Capture$").unwrap());
+static THEN_NO_DEFINE_CONTROL: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^the quota screen offers no way to define a quota$").unwrap());
+/// The fixture form -- "a quota named X with a target of Y hours a week" --
+/// creates the quota directly through the store rather than through the
+/// page: #138 retired the one route (`POST /quota`) that could have done
+/// this by request, since triage is now the only door.
 static GIVEN_QUOTA: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r#"^a quota named "([^"]+)" with a target of "([^"]+)" hours a week$"#).unwrap()
-});
-static WHEN_DEFINED: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r#"^a quota named "([^"]+)" with a target of "([^"]+)" hours a week is defined$"#)
-        .unwrap()
-});
-static WHEN_DEFINED_AGAIN: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(
-        r#"^a quota named "([^"]+)" with a target of "([^"]+)" hours a week is defined again$"#,
-    )
-    .unwrap()
 });
 static THEN_QUOTA_READS: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r#"^the quota "([^"]+)" reads "([^"]+)"$"#).unwrap());
 static THEN_QUOTA_NOTES: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r#"^the quota "([^"]+)" notes "([^"]+)"$"#).unwrap());
-static THEN_FORM_WARNS: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r#"^the new-quota form warns "([^"]+)"$"#).unwrap());
-static THEN_FORM_CREATE_CONTROL: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r#"^the new-quota form offers a create control named "([^"]+)"$"#).unwrap()
-});
 static THEN_OFFERS_QUOTAS: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r#"^the quota screen offers the quotas "([^"]+)"$"#).unwrap());
 static THEN_DOES_NOT_MENTION: LazyLock<Regex> =
@@ -62,55 +44,38 @@ pub async fn dispatch(
     example: &BTreeMap<String, String>,
 ) -> Option<Result<(), String>> {
     if let Some(caps) = THEN_META.captures(text) {
-        return Some(dispatch_meta(world, example, &caps));
+        return Some(dispatch_meta(world, example, &caps).await);
     }
     if THEN_OFFERS_NO_QUOTAS.is_match(text) {
-        return Some(then_offers_no_quotas(world));
+        return Some(then_offers_no_quotas(world).await);
     }
     if let Some(caps) = THEN_SCREEN_NOTES.captures(text) {
-        return Some(dispatch_screen_notes(world, example, &caps));
+        return Some(dispatch_screen_notes(world, example, &caps).await);
     }
-    if let Some(caps) = THEN_DEFINE_CONTROL.captures(text) {
-        return Some(dispatch_define_control(world, example, &caps));
+    if THEN_WAY_BACK.is_match(text) {
+        return Some(then_way_back(world).await);
     }
-    if let Some(caps) = WHEN_DEFINED_OMITTING.captures(text) {
-        return Some(dispatch_defined_omitting(world, example, &caps).await);
-    }
-    if THEN_REJECTED.is_match(text) {
-        return Some(super::then_status_is(
-            world,
-            422,
-            "no quota definition response recorded",
-        ));
-    }
-    if let Some(caps) = WHEN_DEFINED_AGAIN.captures(text) {
-        return Some(dispatch_defined_again(world, example, &caps).await);
-    }
-    if let Some(caps) = WHEN_DEFINED.captures(text) {
-        return Some(dispatch_defined(world, example, &caps).await);
+    if THEN_NO_DEFINE_CONTROL.is_match(text) {
+        return Some(then_no_define_control(world).await);
     }
     if let Some(caps) = GIVEN_QUOTA.captures(text) {
-        return Some(dispatch_defined(world, example, &caps).await);
+        return Some(dispatch_given_quota(world, example, &caps).await);
     }
     if let Some(caps) = THEN_QUOTA_READS.captures(text) {
-        return Some(dispatch_quota_reads(world, example, &caps));
+        return Some(dispatch_quota_reads(world, example, &caps).await);
     }
     if let Some(caps) = THEN_QUOTA_NOTES.captures(text) {
-        return Some(dispatch_quota_notes(world, example, &caps));
-    }
-    if let Some(caps) = THEN_FORM_WARNS.captures(text) {
-        return Some(dispatch_form_warns(world, example, &caps));
-    }
-    if let Some(caps) = THEN_FORM_CREATE_CONTROL.captures(text) {
-        return Some(dispatch_form_create_control(world, example, &caps));
+        return Some(dispatch_quota_notes(world, example, &caps).await);
     }
     if let Some(caps) = THEN_OFFERS_QUOTAS.captures(text) {
-        return Some(dispatch_offers_quotas(world, example, &caps));
+        return Some(dispatch_offers_quotas(world, example, &caps).await);
     }
     if let Some(caps) = THEN_DOES_NOT_MENTION.captures(text) {
-        return Some(
-            html_body(world).and_then(|body| super::then_does_not_mention(body, &caps[1])),
-        );
+        let expected = caps[1].to_string();
+        return Some(match html_body(world).await {
+            Ok(body) => super::then_does_not_mention(body, &expected),
+            Err(e) => Err(e),
+        });
     }
     None
 }
@@ -125,17 +90,26 @@ fn resolve(example: &BTreeMap<String, String>, raw: &str) -> Result<String, Stri
     }
 }
 
-fn html_body(world: &World) -> Result<&str, String> {
+/// The last recorded quota screen response, fetching `GET /quota` first if
+/// nothing has viewed it yet this scenario. Several scenarios assert this
+/// screen's state as a *consequence* of a triage or migration they just ran
+/// through a different endpoint entirely, without an explicit "the "quota"
+/// screen is viewed" step of their own -- fetching on demand is what lets
+/// the same `Then` wording work whether or not one preceded it.
+async fn html_body(world: &mut World) -> Result<&str, String> {
+    if world.last_html_body.is_none() {
+        let request = Request::builder()
+            .uri("/quota")
+            .body(Body::empty())
+            .map_err(|e| format!("build request: {e}"))?;
+        html_response(world, request).await?;
+    }
     super::html_body(world, "no quota screen response recorded")
 }
 
 /// The shared "does the extracted text match" verdict every comparison
 /// dispatcher in this module ends on -- same condition, differing only in
 /// `mismatch`, each call site's own description of what it was comparing.
-/// Built eagerly rather than lazily (a plain `String`, not a closure): a
-/// closure defined inline counts as a nested space whose own complexity
-/// rolls back into the caller that defines it, so it would not have moved
-/// the branch out of the dispatcher at all.
 fn expect_eq(actual: &str, expected: &str, mismatch: String) -> Result<(), String> {
     if actual == expected {
         Ok(())
@@ -144,13 +118,13 @@ fn expect_eq(actual: &str, expected: &str, mismatch: String) -> Result<(), Strin
     }
 }
 
-fn dispatch_meta(
+async fn dispatch_meta(
     world: &mut World,
     example: &BTreeMap<String, String>,
     caps: &regex::Captures<'_>,
 ) -> Result<(), String> {
     let expected = resolve(example, &caps[1])?;
-    let body = html_body(world)?;
+    let body = html_body(world).await?;
     let meta = html::between(body, r#"<div class="quota-meta">"#, "</div>")?.trim();
     expect_eq(
         meta,
@@ -164,8 +138,8 @@ fn dispatch_meta(
 /// (`html::quota_row`'s own reasoning), so scanning for *a* closing tag to
 /// bound an empty check the same way risks stopping inside the first row
 /// found rather than answering "is there one at all".
-fn then_offers_no_quotas(world: &mut World) -> Result<(), String> {
-    let body = html_body(world)?;
+async fn then_offers_no_quotas(world: &mut World) -> Result<(), String> {
+    let body = html_body(world).await?;
     if body.contains(r#"<div class="quota-row""#) {
         Err(format!("expected no quotas, got:\n{body}"))
     } else {
@@ -173,13 +147,13 @@ fn then_offers_no_quotas(world: &mut World) -> Result<(), String> {
     }
 }
 
-fn dispatch_screen_notes(
+async fn dispatch_screen_notes(
     world: &mut World,
     example: &BTreeMap<String, String>,
     caps: &regex::Captures<'_>,
 ) -> Result<(), String> {
     let expected = resolve(example, &caps[1])?;
-    let body = html_body(world)?;
+    let body = html_body(world).await?;
     let note = html::between(body, r#"<div class="quota-empty">"#, "</div>")?;
     let note = html::between(note, "<p>", "</p>")?.trim();
     expect_eq(
@@ -189,76 +163,54 @@ fn dispatch_screen_notes(
     )
 }
 
-fn dispatch_define_control(
-    world: &mut World,
-    example: &BTreeMap<String, String>,
-    caps: &regex::Captures<'_>,
-) -> Result<(), String> {
-    let expected = resolve(example, &caps[1])?;
-    let body = html_body(world)?;
-    let (_, label) = html::button(body, r#"class="quota-define-submit""#)?;
-    expect_eq(
-        label,
-        &expected,
-        format!("expected the define control named {expected:?}, got {label:?}"),
-    )
+/// `pool-screen-empty-07`'s own shape: an empty quota screen is a dead end
+/// with no define control here, so it points at Capture the same way.
+async fn then_way_back(world: &mut World) -> Result<(), String> {
+    let body = html_body(world).await?;
+    if body.contains(r#"<a href="/" class="quota-go-capture">Go to Capture &rarr;</a>"#) {
+        Ok(())
+    } else {
+        Err(format!("expected a way back to Capture, got:\n{body}"))
+    }
 }
 
-/// Posts a `application/x-www-form-urlencoded` body to `path` -- the same
-/// transport `triage_from_page.rs`'s page forms use, since the quota define
-/// form is a plain HTML form rather than JSON.
-async fn post_form(world: &mut World, path: &str, fields: &[(&str, &str)]) -> Result<(), String> {
-    let body = fields
-        .iter()
-        .map(|(name, value)| format!("{name}={}", urlencode(value)))
-        .collect::<Vec<_>>()
-        .join("&");
-    let request = Request::builder()
-        .method("POST")
-        .uri(path)
-        .header("content-type", "application/x-www-form-urlencoded")
-        .body(Body::from(body))
-        .map_err(|e| format!("build request: {e}"))?;
-    html_response(world, request).await
+/// #138: the quota screen defines nothing -- the absence is asserted
+/// because the owner settled it, unlike the reorder arrows' absence
+/// elsewhere on this screen, which remains undecided.
+async fn then_no_define_control(world: &mut World) -> Result<(), String> {
+    let body = html_body(world).await?;
+    if body.contains("quota-define-form") {
+        Err(format!("expected no way to define a quota, got:\n{body}"))
+    } else {
+        Ok(())
+    }
 }
 
-async fn dispatch_defined_omitting(
-    world: &mut World,
-    example: &BTreeMap<String, String>,
-    caps: &regex::Captures<'_>,
-) -> Result<(), String> {
-    let missing = resolve(example, &caps[1])?;
-    let mut fields: Vec<(&str, &str)> = vec![("name", "Piano"), ("hours", "4")];
-    fields.retain(|(name, _)| *name != missing);
-    post_form(world, "/quota", &fields).await
-}
-
-async fn dispatch_defined(
+/// Creates a quota directly through `quotas`, the fixture's own door since
+/// `POST /quota` no longer exists (#138: triage is the one door). Hours to
+/// minutes by the same rounding `scheduler_core::quota::to_minutes` uses --
+/// this crate has no dependency on `scheduler-core` to call it directly, and
+/// every fixture hours value in this feature is already a whole or
+/// half-hour, so the rounding never has anything to do.
+async fn dispatch_given_quota(
     world: &mut World,
     example: &BTreeMap<String, String>,
     caps: &regex::Captures<'_>,
 ) -> Result<(), String> {
     let name = resolve(example, &caps[1])?;
     let hours = resolve(example, &caps[2])?;
-    post_form(world, "/quota", &[("name", &name), ("hours", &hours)]).await
-}
-
-/// The "Create anyway" resubmission: the same name and hours, plus the
-/// `confirmed` field the button's own hidden input carries
-/// (`quota-screen-similar-name-warns-07`).
-async fn dispatch_defined_again(
-    world: &mut World,
-    example: &BTreeMap<String, String>,
-    caps: &regex::Captures<'_>,
-) -> Result<(), String> {
-    let name = resolve(example, &caps[1])?;
-    let hours = resolve(example, &caps[2])?;
-    post_form(
-        world,
-        "/quota",
-        &[("name", &name), ("hours", &hours), ("confirmed", &name)],
-    )
-    .await
+    let hours: f64 = hours
+        .parse()
+        .map_err(|e| format!("bad fixture hours {hours:?}: {e}"))?;
+    let minutes = (hours * 60.0).round() as i64;
+    let pool = world.pool()?;
+    sqlx::query("INSERT INTO quotas (name, weekly_target_minutes, created_at_ms) VALUES (?, ?, 0)")
+        .bind(&name)
+        .bind(minutes)
+        .execute(pool)
+        .await
+        .map_err(|e| format!("create fixture quota {name:?}: {e}"))?;
+    Ok(())
 }
 
 /// `caps[1]` and `caps[2]` resolved together -- the "which quota, what do we
@@ -271,13 +223,13 @@ fn resolve_pair(
     Ok((resolve(example, &caps[1])?, resolve(example, &caps[2])?))
 }
 
-fn dispatch_quota_reads(
+async fn dispatch_quota_reads(
     world: &mut World,
     example: &BTreeMap<String, String>,
     caps: &regex::Captures<'_>,
 ) -> Result<(), String> {
     let (name, expected) = resolve_pair(example, caps)?;
-    let body = html_body(world)?;
+    let body = html_body(world).await?;
     let row = html::quota_row(body, &name)?;
     let readout = html::between(row, r#"<div class="quota-readout">"#, "</div>")?;
     expect_eq(
@@ -287,49 +239,19 @@ fn dispatch_quota_reads(
     )
 }
 
-fn dispatch_quota_notes(
+async fn dispatch_quota_notes(
     world: &mut World,
     example: &BTreeMap<String, String>,
     caps: &regex::Captures<'_>,
 ) -> Result<(), String> {
     let (name, expected) = resolve_pair(example, caps)?;
-    let body = html_body(world)?;
+    let body = html_body(world).await?;
     let row = html::quota_row(body, &name)?;
     let note = html::between(row, r#"<div class="quota-note">"#, "</div>")?;
     expect_eq(
         note,
         &expected,
         format!("expected the quota {name:?} to note {expected:?}, got {note:?}"),
-    )
-}
-
-fn dispatch_form_warns(
-    world: &mut World,
-    example: &BTreeMap<String, String>,
-    caps: &regex::Captures<'_>,
-) -> Result<(), String> {
-    let expected = resolve(example, &caps[1])?;
-    let body = html_body(world)?;
-    let warning = html::between(body, r#"<p class="quota-warning">"#, "</p>")?;
-    expect_eq(
-        warning,
-        &expected,
-        format!("expected the new-quota form to warn {expected:?}, got {warning:?}"),
-    )
-}
-
-fn dispatch_form_create_control(
-    world: &mut World,
-    example: &BTreeMap<String, String>,
-    caps: &regex::Captures<'_>,
-) -> Result<(), String> {
-    let expected = resolve(example, &caps[1])?;
-    let body = html_body(world)?;
-    let (_, label) = html::button(body, r#"class="quota-define-submit""#)?;
-    expect_eq(
-        label,
-        &expected,
-        format!("expected a create control named {expected:?}, got {label:?}"),
     )
 }
 
@@ -342,13 +264,13 @@ fn quota_names_in_order(body: &str) -> Vec<String> {
         .collect()
 }
 
-fn dispatch_offers_quotas(
+async fn dispatch_offers_quotas(
     world: &mut World,
     example: &BTreeMap<String, String>,
     caps: &regex::Captures<'_>,
 ) -> Result<(), String> {
     let expected = resolve(example, &caps[1])?;
-    let body = html_body(world)?;
+    let body = html_body(world).await?;
     html::listed_in_order(&expected, quota_names_in_order(body), "quotas")
 }
 
@@ -377,21 +299,21 @@ mod tests {
         );
     }
 
-    #[test]
-    fn then_offers_no_quotas_passes_when_the_list_is_absent_entirely() {
+    #[tokio::test]
+    async fn then_offers_no_quotas_passes_when_the_list_is_absent_entirely() {
         let mut world = World::new();
         world.last_html_body = Some(r#"<div class="quota-empty"></div>"#.to_string());
-        then_offers_no_quotas(&mut world).unwrap();
+        then_offers_no_quotas(&mut world).await.unwrap();
     }
 
-    #[test]
-    fn then_offers_no_quotas_errors_when_a_row_exists() {
+    #[tokio::test]
+    async fn then_offers_no_quotas_errors_when_a_row_exists() {
         let mut world = World::new();
         world.last_html_body = Some(
             r#"<div class="quota-rows"><div class="quota-row"><div class="quota-name">Piano</div></div></div>"#
                 .to_string(),
         );
-        assert!(then_offers_no_quotas(&mut world).is_err());
+        assert!(then_offers_no_quotas(&mut world).await.is_err());
     }
 
     #[test]
@@ -400,5 +322,34 @@ mod tests {
         let row = html::quota_row(body, "Piano").unwrap();
         assert!(row.contains("0m / 4h"));
         assert!(!row.contains("0m / 3h"));
+    }
+
+    #[tokio::test]
+    async fn then_way_back_passes_when_the_capture_link_and_its_words_are_present() {
+        let mut world = World::new();
+        world.last_html_body =
+            Some(r#"<a href="/" class="quota-go-capture">Go to Capture &rarr;</a>"#.to_string());
+        assert_eq!(then_way_back(&mut world).await, Ok(()));
+    }
+
+    #[tokio::test]
+    async fn then_way_back_errors_when_absent() {
+        let mut world = World::new();
+        world.last_html_body = Some("<main></main>".to_string());
+        assert!(then_way_back(&mut world).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn then_no_define_control_passes_when_absent() {
+        let mut world = World::new();
+        world.last_html_body = Some("<main></main>".to_string());
+        assert_eq!(then_no_define_control(&mut world).await, Ok(()));
+    }
+
+    #[tokio::test]
+    async fn then_no_define_control_errors_when_present() {
+        let mut world = World::new();
+        world.last_html_body = Some(r#"<form class="quota-define-form">"#.to_string());
+        assert!(then_no_define_control(&mut world).await.is_err());
     }
 }

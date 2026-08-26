@@ -119,6 +119,22 @@ jobs:
       - name: Every cited decision slug exists in docs/decisions.md
         run: ./scripts/ci/decision_slugs.sh
 
+  # T-one-front-door-per-capability, made mechanical: no capability's
+  # production code names another capability's `store`. Here for the same
+  # reasons as the two jobs above -- no Rust toolchain, seconds not minutes,
+  # and it asserts a property of the tree rather than of a diff, so it is
+  # meaningful on a trunk push too.
+  front-doors:
+    name: capabilities go through front doors
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: No capability reaches into another capability's store
+        run: ./scripts/ci/capability_front_doors.sh
+
   gate:
     name: fmt, clippy, test, T4 purity, musl release
     runs-on: ubuntu-latest

@@ -1,5 +1,5 @@
 # acceptance-mutation-manifest-begin
-# {"version":1,"tested_at":"2026-08-24T02:10:34.554025604Z","feature_name":"A capture row offers three kinds, and shows one set of fields","feature_path":"features/disclosures.feature","background_hash":"304f93e93e2b217b49069c091950b87589f0c7e789e2d0dc3aaa8d845450cb64","implementation_hash":"sha256:8cf9f4aa9e526e15ece45784ab1a23e9c99cde70f9918d1f04183dadb939c1ef","scenarios":[{"index":0,"name":"An untriaged row offers three kind buttons, and no fields until one is chosen","scenario_hash":"b600f70c85c13f5b382778d46ce69ffce0892edd9e3162a9fc5fdc7c5126a381","mutation_count":1,"result":{"Total":1,"Killed":1,"Survived":0,"Errors":0},"tested_at":"2026-08-24T02:10:34.554025604Z"},{"index":5,"name":"Every kind still submits exactly what it submitted before","scenario_hash":"7cf20d3bd9fe7de716261e3778a309d7b07859d9a416992b48eb7e96c9688f52","mutation_count":4,"result":{"Total":4,"Killed":4,"Survived":0,"Errors":0},"tested_at":"2026-08-24T02:07:04.129100418Z"}]}
+# {"version":1,"tested_at":"2026-08-26T17:14:41.208307033Z","feature_name":"A capture row offers three kinds, and shows one set of fields","feature_path":"features/disclosures.feature","background_hash":"304f93e93e2b217b49069c091950b87589f0c7e789e2d0dc3aaa8d845450cb64","implementation_hash":"sha256:8cf9f4aa9e526e15ece45784ab1a23e9c99cde70f9918d1f04183dadb939c1ef","scenarios":[{"index":0,"name":"An untriaged row offers three kind buttons, and no fields until one is chosen","scenario_hash":"b600f70c85c13f5b382778d46ce69ffce0892edd9e3162a9fc5fdc7c5126a381","mutation_count":1,"result":{"Total":1,"Killed":1,"Survived":0,"Errors":0},"tested_at":"2026-08-24T02:10:34.554025604Z"},{"index":5,"name":"Every kind still submits exactly what it submitted before","scenario_hash":"7cf20d3bd9fe7de716261e3778a309d7b07859d9a416992b48eb7e96c9688f52","mutation_count":4,"result":{"Total":4,"Killed":4,"Survived":0,"Errors":0},"tested_at":"2026-08-24T02:07:04.129100418Z"}]}
 # acceptance-mutation-manifest-end
 
 # disclosures-three-buttons-01: an untriaged row offers three kind buttons, and no fields until one is chosen
@@ -8,6 +8,7 @@
 # disclosures-switching-replaces-04: choosing a second kind replaces the first kind's fields
 # disclosures-rows-are-independent-05: choosing on one capture leaves every other capture alone
 # disclosures-submissions-unchanged-06: every kind still submits exactly what it submitted before
+# disclosures-quota-offers-the-captures-words-07: the quota panel starts with the capture's own words as the name
 #
 # THE CANVAS SPEAKS HERE AND THE IMPLEMENTATION DID NOT MATCH IT. Checked
 # rather than assumed, per T-canvas-is-authoritative-where-it-speaks: the
@@ -50,6 +51,27 @@
 # them while tidying, a cosmetic defect becomes a data defect. Pool also
 # stays the cheapest path (D-pool-is-default) -- one tap, no fields, and it
 # must not gain a panel to make the layout symmetrical.
+#
+# THE QUOTA PANEL CHANGED ITS FIELDS AND KEPT ITS SHAPE (#138). It used to
+# ask target_count, target_minutes_each and period; it now asks A NAME AND
+# HOURS A WEEK, because triaging as a quota is what CREATES the quota
+# (`quota_triage_validation.feature` carries the owner's words and the
+# reversal they imply). 01, 03, 04 and 05 do not move a character: what they
+# assert is WHICH PANEL IS OPEN, never what is inside it, which is why a
+# change of this size costs them nothing.
+#
+# 07 IS THE ONE NEW THING AND IT IS THE ESCAPE HATCH, not a convenience. The
+# name box arrives holding the capture's own words, so the common case is
+# "type the hours and go" -- but it is EDITABLE, and that is the half that
+# matters: RENAMING A QUOTA IS #148 AND IS NOT BUILT, so the name triage
+# writes is the name forever. Without an editable box, "finish chapter 3"
+# becomes a permanent quota called that, and a name colliding with an
+# existing quota has no way out but capturing the thing again.
+#
+# THE TWO ROWS ARE NOT DECORATION. "learning with lev" is one of the owner's
+# two real quota rows and carries spaces; a prefill that survives one word
+# and drops the rest would pass on a single-word fixture, which is
+# T-a-check-must-be-seen-to-fail in the shape #90 named.
 Feature: A capture row offers three kinds, and shows one set of fields
 
   Background:
@@ -126,3 +148,16 @@ Feature: A capture row offers three kinds, and shows one set of fields
       | commitment        |
       | priority          |
       | estimated_minutes |
+
+  # disclosures-quota-offers-the-captures-words-07: the quota panel starts with the capture's own words as the name
+  Scenario: The quota panel starts with the capture's own words as the name, and lets them be changed
+    Given a capture with raw text "<text>" is waiting in the untriaged queue
+    When the kind "Quota" is chosen for "<text>"
+    Then the row for "<text>" offers "<text>" as the quota name
+    And the row for "<text>" offers the quota name as something that can be changed
+    And the row for "<text>" asks for hours a week
+
+    Examples:
+      | text              |
+      | practise piano    |
+      | learning with lev |

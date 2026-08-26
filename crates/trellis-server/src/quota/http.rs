@@ -393,21 +393,29 @@ mod tests {
         assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
     }
 
-    #[tokio::test]
-    async fn correcting_a_session_changes_its_day_and_minutes() {
-        let (_dir, pool) = test_pool().await;
-        let quota_id = given_a_quota(&pool, "Piano", "4").await;
+    /// A quota with one Monday, 25-minute session already logged, and that
+    /// session's id -- the shared starting point for every test that
+    /// corrects or deletes a session (`correct_session`, `delete_session`).
+    async fn given_a_logged_session(pool: &SqlitePool) -> (i64, i64) {
+        let quota_id = given_a_quota(pool, "Piano", "4").await;
         post_path(
-            &pool,
+            pool,
             tuesday_clock(),
             &format!("/quota/{quota_id}/sessions"),
             &[("day", "Mon"), ("minutes", "25")],
         )
         .await;
         let session_id: i64 = sqlx::query_scalar("SELECT id FROM quota_sessions")
-            .fetch_one(&pool)
+            .fetch_one(pool)
             .await
             .unwrap();
+        (quota_id, session_id)
+    }
+
+    #[tokio::test]
+    async fn correcting_a_session_changes_its_day_and_minutes() {
+        let (_dir, pool) = test_pool().await;
+        let (_, session_id) = given_a_logged_session(&pool).await;
 
         let (status, body) = post_path(
             &pool,
@@ -426,18 +434,7 @@ mod tests {
     #[tokio::test]
     async fn deleting_a_session_removes_it_and_leaves_the_quota() {
         let (_dir, pool) = test_pool().await;
-        let quota_id = given_a_quota(&pool, "Piano", "4").await;
-        post_path(
-            &pool,
-            tuesday_clock(),
-            &format!("/quota/{quota_id}/sessions"),
-            &[("day", "Mon"), ("minutes", "25")],
-        )
-        .await;
-        let session_id: i64 = sqlx::query_scalar("SELECT id FROM quota_sessions")
-            .fetch_one(&pool)
-            .await
-            .unwrap();
+        let (_, session_id) = given_a_logged_session(&pool).await;
 
         let (status, body) = post_path(
             &pool,
@@ -501,18 +498,7 @@ mod tests {
     #[tokio::test]
     async fn correcting_a_session_preserves_the_expanded_query() {
         let (_dir, pool) = test_pool().await;
-        let quota_id = given_a_quota(&pool, "Piano", "4").await;
-        post_path(
-            &pool,
-            tuesday_clock(),
-            &format!("/quota/{quota_id}/sessions"),
-            &[("day", "Mon"), ("minutes", "25")],
-        )
-        .await;
-        let session_id: i64 = sqlx::query_scalar("SELECT id FROM quota_sessions")
-            .fetch_one(&pool)
-            .await
-            .unwrap();
+        let (quota_id, session_id) = given_a_logged_session(&pool).await;
 
         let (status, body) = post_path(
             &pool,
@@ -529,18 +515,7 @@ mod tests {
     #[tokio::test]
     async fn deleting_a_session_preserves_the_expanded_query() {
         let (_dir, pool) = test_pool().await;
-        let quota_id = given_a_quota(&pool, "Piano", "4").await;
-        post_path(
-            &pool,
-            tuesday_clock(),
-            &format!("/quota/{quota_id}/sessions"),
-            &[("day", "Mon"), ("minutes", "25")],
-        )
-        .await;
-        let session_id: i64 = sqlx::query_scalar("SELECT id FROM quota_sessions")
-            .fetch_one(&pool)
-            .await
-            .unwrap();
+        let (quota_id, session_id) = given_a_logged_session(&pool).await;
 
         let (status, body) = post_path(
             &pool,

@@ -175,6 +175,28 @@ enum Rejection {
     },
 }
 
+/// The JSON body for a `Rejection::Core` -- the well-formedness half, shared
+/// between [`rejected`] and [`rejection_message`], split out so neither has
+/// to match both the outer `Rejection` and the inner `TriageRejection` at
+/// once.
+fn core_rejection_body(core: &TriageRejection, kind_submitted: &Value) -> Value {
+    match core {
+        TriageRejection::MissingField(field) => json!({ "missing_field": field.name() }),
+        TriageRejection::InvalidField(field) => json!({ "invalid_field": field.name() }),
+        TriageRejection::UnknownKind => json!({ "unknown_kind": kind_submitted }),
+    }
+}
+
+/// The prose half of a `Rejection::Core`, for the same reason as
+/// [`core_rejection_body`].
+fn core_rejection_message(core: &TriageRejection, kind_submitted: &Value) -> String {
+    match core {
+        TriageRejection::MissingField(field) => format!("{} is required", field.name()),
+        TriageRejection::InvalidField(field) => format!("{} is invalid", field.name()),
+        TriageRejection::UnknownKind => format!("unrecognised kind: {kind_submitted}"),
+    }
+}
+
 /// The rejection contract: a client error whose body names what was wrong.
 /// A rejection that does not say what was wrong is a failure even with the
 /// right status code.
@@ -186,13 +208,7 @@ enum Rejection {
 /// of `null` (T-unknown-kind-rejected: report what was submitted).
 fn rejected(rejection: &Rejection, kind_submitted: &Value) -> (StatusCode, Json<Value>) {
     let body = match rejection {
-        Rejection::Core(TriageRejection::MissingField(field)) => {
-            json!({ "missing_field": field.name() })
-        }
-        Rejection::Core(TriageRejection::InvalidField(field)) => {
-            json!({ "invalid_field": field.name() })
-        }
-        Rejection::Core(TriageRejection::UnknownKind) => json!({ "unknown_kind": kind_submitted }),
+        Rejection::Core(core) => core_rejection_body(core, kind_submitted),
         Rejection::CaptureNotOpen => {
             json!({ "capture_not_open": CAPTURE_NOT_OPEN_MESSAGE })
         }
@@ -213,15 +229,7 @@ fn rejected(rejection: &Rejection, kind_submitted: &Value) -> (StatusCode, Json<
 /// prose for a human reading the form they just submitted.
 fn rejection_message(rejection: &Rejection, kind_submitted: &Value) -> String {
     match rejection {
-        Rejection::Core(TriageRejection::MissingField(field)) => {
-            format!("{} is required", field.name())
-        }
-        Rejection::Core(TriageRejection::InvalidField(field)) => {
-            format!("{} is invalid", field.name())
-        }
-        Rejection::Core(TriageRejection::UnknownKind) => {
-            format!("unrecognised kind: {kind_submitted}")
-        }
+        Rejection::Core(core) => core_rejection_message(core, kind_submitted),
         Rejection::CaptureNotOpen => CAPTURE_NOT_OPEN_MESSAGE.to_string(),
         Rejection::QuotaNameExists {
             existing_name,
@@ -330,11 +338,42 @@ async fn check_quota_name(
     Ok(rejection)
 }
 
-/// Only once the core calls a submission well-formed does the database enter
-/// it: whether the capture named by the URL is still open
+/// [`check_quota_name`] for a `kind` that may or may not be a quota --
+/// `None` for the other two kinds, no database touched.
+async fn quota_name_rejection(
+    pool: &SqlitePool,
+    kind: &TaskKind,
+    confirmed: Option<&str>,
+) -> Result<Option<Rejection>, StatusCode> {
+    let TaskKind::Quota { name, .. } = kind else {
+        return Ok(None);
+    };
+    check_quota_name(pool, name, confirmed)
+        .await
+        .map_err(write_failed)
+}
+
+/// The two rejections that need a database, once the core has already
+/// called `kind` well-formed: the capture named by the URL no longer open
 /// (`dismiss-capture-no-second-triage-07`, `-no-triage-after-dismissal-05`),
-/// and, for a quota, whether its name collides with one that already exists
-/// (#138).
+/// or, for a quota, its name colliding with one that already exists (#138).
+async fn database_rejection(
+    pool: &SqlitePool,
+    capture_id: i64,
+    kind: &TaskKind,
+    confirmed: Option<&str>,
+) -> Result<Option<Rejection>, StatusCode> {
+    if !inbox::capture_is_open(pool, capture_id)
+        .await
+        .map_err(write_failed)?
+    {
+        return Ok(Some(Rejection::CaptureNotOpen));
+    }
+    quota_name_rejection(pool, kind, confirmed).await
+}
+
+/// Well-formedness first (no database), then whatever the database has to
+/// say about it.
 async fn decide_triage(
     pool: &SqlitePool,
     capture_id: i64,
@@ -345,19 +384,8 @@ async fn decide_triage(
         Ok(kind) => kind,
         Err(rejection) => return Ok(TriageOutcome::Rejected(Rejection::Core(rejection))),
     };
-    if !inbox::capture_is_open(pool, capture_id)
-        .await
-        .map_err(write_failed)?
-    {
-        return Ok(TriageOutcome::Rejected(Rejection::CaptureNotOpen));
-    }
-    if let TaskKind::Quota { name, .. } = &kind {
-        if let Some(rejection) = check_quota_name(pool, name, confirmed)
-            .await
-            .map_err(write_failed)?
-        {
-            return Ok(TriageOutcome::Rejected(rejection));
-        }
+    if let Some(rejection) = database_rejection(pool, capture_id, &kind, confirmed).await? {
+        return Ok(TriageOutcome::Rejected(rejection));
     }
     Ok(TriageOutcome::Accepted { kind })
 }

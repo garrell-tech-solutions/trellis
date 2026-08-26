@@ -167,14 +167,18 @@ fn end_of_day_instant(date: jiff::civil::Date, zone: &str) -> Result<jiff::Zoned
     Ok(start_of_next - 1.millisecond())
 }
 
+/// Parses `date` as a local civil date -- the shared first step of
+/// [`local_deadline_ms`]'s *at* and *by* branches.
+fn parse_local_date(date: &str) -> Result<jiff::civil::Date, String> {
+    date.parse().map_err(|e| format!("bad date {date:?}: {e}"))
+}
+
 /// Converts a local civil date -- and, for an *at*, a local time -- in
 /// `zone` to the instant it names (#110, T-jiff-epoch-millis: a
 /// local-date-plus-zone conversion is a business rule, not a handler's or a
 /// browser's). `time` absent means a *by* with no time on the page.
 pub(super) fn local_deadline_ms(date: &str, time: Option<&str>, zone: &str) -> Result<i64, String> {
-    let date: jiff::civil::Date = date
-        .parse()
-        .map_err(|e| format!("bad date {date:?}: {e}"))?;
+    let date = parse_local_date(date)?;
     let zoned = match time {
         Some(time) => at_instant(date, time, zone)?,
         None => end_of_day_instant(date, zone)?,

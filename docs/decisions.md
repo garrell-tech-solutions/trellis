@@ -217,6 +217,8 @@ O4 → #40 · O5 → #41 · O6 → #36. Issue #1 is titled `OQ2`; same question.
 | T-one-front-door-per-capability | **Example translated 2026-08-23:** `life_areas::active_options` no longer exists. The live front doors are `capture::resolve_tag`, `capture::distinct_tags`, `inbox::render_lists` and `mark_done::mark_task_done` — each one function in a `mod.rs`, each hiding a query composed with a mapping. **The rule is unchanged and is now enforced**, per `platform/boundary.rs` and `T-inbox-owns-membership`. **A capability that other capabilities read exposes one function for it, in its `mod.rs`.** Three callers needed the pickable life areas; they call `life_areas::active_options`, never `store::list_active` composed with `LifeAreaOption::from`. Reaching across for a *type* stays fine; reaching across for the *recipe* does not. | The management page, the inbox fragment whose triage forms carry the picker, and a quick-added capture rendering that same row had each composed the query with the mapping for itself. A caller that must know which query *and* which mapping to combine is holding a copy of another capability's internals, and three copies drift. Same move as `http::view`, `steps/payloads.rs`, `steps/app_client.rs` and `http::lists` — when a second caller appears, the shared thing gets its own home — applied one level up, to a capability's public surface rather than to a helper. **This is the complement to `T-capability-owns-its-queries`**, and the two are only safe together: that decision says a capability owns the SQL it issues, and without this one "own your own queries" degenerates into every capability hand-assembling every other capability's internals, which is the sideways dependency it was written to prevent. |
 | T-core-owns-validation-order | **RESTS ON A REMOVED EXAMPLE, 2026-08-23.** `WellFormedTriage` and `unknown_life_area` are both gone — a triage submission no longer names a life area at all (`T-life-area-required-at-triage`, superseded). **The rule stands and is why it is worth keeping:** an ordering rule living in each adapter is one the second adapter gets wrong, and this product still runs more than one transport over one triage path. `T-required-fields-are-specified-per-transport` is the live neighbour to read alongside it. **When validation has a required order, the core composes it and returns one result; the adapter keeps only the part that genuinely needs something the core cannot have.** `WellFormedTriage::from_fields` decides kind first and then that *some* life area was named; `unknown_life_area` stays the adapter's rejection, because resolving a name against the table needs a database. | Triage validation arrived as two core functions an adapter had to call in a fixed order — kind first, so a submission naming neither reports `unknown_kind` rather than a life-area complaint — with `require_life_area` public so each adapter could get the sequence right on its own. **A rule every delivery mechanism has to remember for itself is one the second delivery mechanism gets wrong.** This product already runs two transports over one triage path (JSON and the page), and `T-capture-surfaces` adds a third at M7. The invariant #33 spent a property test pinning — *the page and the endpoint are one code path, not two* — is precisely what an ordering rule living in each adapter quietly breaks, and it breaks it in the way that still compiles and still passes every example test that does not exercise both failures at once. `T-module-boundary`'s inward-pointing rule at the granularity of a call sequence: the order is a rule, so it lives where the rules live. |
 | T-ephemeral-view-state-rides-the-request | **A view choice the owner made with a thumb rides along with the request that needs it and is then forgotten; only a durable consequence of a deliberate act earns a column.** Which trips are expanded is read live off the DOM by an `htmx:configRequest` hook, appended to every request `#pool-body` issues as `expanded=<tags>`, and echoed straight back into the rendered fragment. Nothing is stored, and a fresh page load starts collapsed. **The general rule underneath it:** *the tier you assert in decides what the implementation must store*, so **choose the tier from the nature of the state, not the state from the tier you happen to be asserting in.* Ephemeral view state is asserted in the browser tier; a durable one may be asserted over HTTP. | Settled inside `trip-controls` (#120, #125, PR #135), and it is the **corrected** answer to the question `disclosures` (#119, PR #126) got wrong eight days earlier. That slice reasoned: *the acceptance suite speaks only HTTP; to make the assertion true over HTTP the state had to be server-rendered; to be server-rendered across a request it had to be stored* — and bought `captures.shown_kind`, **a permanent, append-only column for a display preference**, migration `0012`. The reasoning is valid and the conclusion is still wrong, because **the premise was a choice**: two tiers that could have held the assertion already existed and neither was used — `scripts/qa/phone_layout.cjs` drives real Chrome under a CI gate, and `base.html` has loaded htmx and an inline script on every page since #58. **`cleared_at` (#122, migration `0013`) is the contrast that makes the line real** — clearing a trip is a deliberate act with a consequence that must survive a reload, so it earned its column on the same test this one fails. The cost of getting it wrong is asymmetric and permanent: `T-migrations-append-only` means a column bought for a display preference can never be taken back, only added to. | 
+| T-a-logged-day-is-an-instant | **A day that something is logged against is stored as the instant of local midnight for that day, never as a weekday name**, and *"this week"* is a `BETWEEN` against bounds derived at read time from the current instant and the owner's zone -- **never stored.** `quota_sessions.day_ms` (migration `0015`) holds the instant; `Week::of(now_ms, zone)` derives today, which days the week has reached, and the two bounds the store's `WHERE` uses. | Settled inside `quota-sessions` (#93, PR #147). **`"Mon"` alone cannot survive a week boundary**: a session stored as a weekday is a session with no week, so last week's hours reappear in the new week and the bar re-fills itself -- **`D-quota-no-rollover` defeated by its own storage format**, silently, on a Monday nobody is watching. Storing the instant makes the reset a consequence of the query rather than a job that has to run, which is the instinct `T-plan-is-stored-and-explicitly-regenerated` applies one layer up: **nothing has to happen on Monday for Monday to be true.** It also makes the boundary testable at all -- `T-jiff-epoch-millis` and `T-timezone-is-a-setting` give the week an anchor a test can move, and five properties pin the pair across zones chosen for their transitions, three of which (Sao Paulo, Santiago, Beirut) have sprung the clock forward *at* midnight, so `Date::at(0,0,0,0)` is a civil time that never happened. **The corollary is a cost, and it is now paid twice:** the Monday boundary depends on a setting **#118** makes unreachable from any page, on a schema default (`UTC`) that disagrees with the live database (`America/New_York`). A fresh install gets a Monday that is not the owner's Monday, on **two** screens rather than one. **And the check that would notice this rule breaking is not a scenario** -- no acceptance mutation can reach it, because no scenario crosses a week boundary (**#149**). |
+| T-a-screen-joins-the-gates-that-measure-it | **A screen joins `scripts/qa/colour.cjs` and `scripts/qa/phone_layout.cjs`'s screen lists in the slice that finishes the screen** -- not in a later slice that happens to touch those gates. The same applies to any QA document that states a screen *count*: **a count written into prose is a gate that stops covering without going red.** | Settled inside `quota-sessions` (#93, PR #147). Both gates enumerated a **hardcoded three-screen list**, so `/quota` had never been measured for palette conformance, dark mode, contrast, tap targets at 390px, or the no-horizontal-scroll rule -- through **two whole slices** of being built. PR #144 assigned that to the palette and layout slices instead, **which was defensible then and stopped being so the moment the screen was about to be finished and merged**: a whole screen escaping its gate is exactly how `#137`'s four-day-old palette settlement quietly stops being true, and the gate reports green the entire time. **The prose half was worse, because it fails silently in both directions.** Four QA documents had hardcoded the old count (`colour`, `phone_layout`, `installable`, and earlier `pool_screen` / `one_screen` / `committed_screen`). `installable.md` was **stale text rather than an unchecked hole** -- QA confirmed `/quota` already links the same `manifest.webmanifest` as the other three -- but **a document that checks *"all three link a manifest"* cannot catch a fifth screen that does not.** `T-qa-binds-tolerantly-to-markup` is the same family: the enumeration is the brittle part, not the assertion. |
 
 **Renumbered on merge, then superseded.** This branch allocated numeric IDs that `trunk` had already given to other decisions, and its source comments were left citing the stale numbers. Both problems are gone: decisions are keyed by slug now, and the citations were migrated with a CI gate behind them. Kept as the record of why.
 
@@ -2512,3 +2514,108 @@ anything and never decided not to. A browser-owned database means **a service
 worker exists anyway**, which is exactly the piece Web Push was missing — so the
 notification question and this direction answer each other, and neither should be
 settled without looking at the other.
+
+### 2026-08-26 — quota-sessions (#93, PR #147): trunk goes green, and three checks nobody watched fail
+
+**The red is cleared and so is what it was costing.** `bf8c7f9` merged
+`quota_sessions.feature` with nine deliberately-deferred failing scenarios, and
+the bill went past the one check anybody was watching: **no release was
+published** for that commit (`T-releases-are-identified-by-build`), so
+`ops/update.sh` could not move the live instance to the version containing the
+fourth screen; **the language-mutation run was gone `trunk`-wide**, because
+`cargo-mutants` aborts on a failed baseline rather than degrading; and **#146**
+meant the preview poller never showed the owner the fourth tab at all. **Three
+trunk commits ran red.** All nine scenarios now pass against a real
+implementation — **the feature file is byte-identical apart from its generated
+manifest header**, which is the one thing that could have made this green
+dishonestly and did not. `f2a89a7` is green and published `v2026.08.26.195`.
+
+**One of the four charges was false, and the way it was false is the useful
+part.** The brief's item 4 said *"`migrations are append-only` never ran… so
+migration `0014` merged without that gate reporting."* **It ran, on PR #144, and
+passed** (`runs/32914546696`, 6s). The job is `if: github.event_name ==
+'pull_request'` (`ci.yml:73`) because it diffs against the **base branch**, a
+comparison that only exists on a pull request — **so it skips on every push to
+`trunk`, by design.** The claim was repeated in PR #147's body and again in the
+PM's own reconciliation comment before anyone read the `if:`. **A skipped check
+and a blocked check are indistinguishable in the checks list**, and three
+genuine casualties on the same run made the fourth easy to believe. **Read the
+condition before reporting a skip as damage.**
+
+**The lesson about the deferral is not "do not defer".** It was declared, the
+stopping line was in the brief, and the pipeline stopped honestly on it. **It is
+that a deferred red is not one red check** — it is every job downstream of it in
+the same workflow, and none of those were named when the deferral was agreed.
+**A slice that plans to stop short should name what stops with it**, and that
+list is longer than it looks.
+
+**The browser tier found the bug, for the third slice running.** Logging,
+correcting or deleting a session inside an expanded quota row **collapsed that
+row, taking the session just logged off the screen with it** —
+`D-a-trip-survives-being-worked`'s failure arriving on a **third** screen through
+a **third** door. `qa/quota_sessions.md` named it as the slice's most likely
+failure mode *before a line of it was built*, and QA found it by following the
+document rather than by luck. **The root cause is the interesting half:**
+`base.html`'s `htmx:configRequest` hook was scoped to `#pool-body`, so
+`T-ephemeral-view-state-rides-the-request` was implemented **for one screen and
+described as a rule**. **A rule that lives in one `if` is a rule the next screen
+does not get.** It was fixed with pool's own shape rather than a new invention,
+and deliberately scoped to the three session-mutating routes — the confirmed,
+tested failure — rather than threaded through a chain no scenario exercises.
+
+**Two rules settled and recorded above:** `T-a-logged-day-is-an-instant` and
+`T-a-screen-joins-the-gates-that-measure-it`.
+
+**Where the evidence is strong, said before where it is thin.** Soft Gherkin
+acceptance mutation killed **38 of 41** on this feature against a working
+implementation, with both survivors named and reasoned rather than waved at — so
+**the nine scenarios have been seen to fail**, which is what
+`T-a-check-must-be-seen-to-fail` asks for and what red-to-green never provides on
+its own. Language mutation 100% over every touched file. Five new properties for
+the week arithmetic, **each watched failing against a breakage aimed at its own
+assertion**, and one of those probes *"silently no-opped on a stale anchor and
+reported a meaningless pass until it was re-aimed"* — the architect finding, in
+passing, the exact failure this project keeps rediscovering.
+
+**And the thin part, filed as #149.** `qa/quota_sessions.md`'s seven-breakage
+section is not reported as run by any commit on the branch. **Three of the seven
+are the ones that matter** — the document says so itself — precisely because
+*"all three leave the entire acceptance suite green"*: a session stored as a bare
+weekday, a future day accepted server-side while still hidden in the picker, and
+a reset implemented by deleting last week's rows. **Each of those three
+assertions lives in the QA procedure and nowhere else**, so the 38/41 result is
+excellent evidence for the nine scenarios and **no evidence whatever** for these
+three. **This is #136's shape on a different screen**, and the fix is the same:
+revert-and-watch, nothing to write.
+
+**An acceptance criterion fell between two slices, filed as #148.** #86 said
+*"**the target is editable** — that is the intended response to a persistent
+shortfall, not a carried debt"*, and it is the load-bearing half of
+`D-quota-no-rollover`: refusing to carry a shortfall forward is only humane if
+the target can be changed. **Neither #144 nor #147 was wrong to omit it** — no
+brief asked for it and neither scope named it. It is worse than it first reads:
+there is no route to rename a quota, retarget one, or remove one. **Every session
+is correctable and deletable; the quota holding them is none of those.** The
+canvas draws no such control either, so this is
+`T-canvas-is-authoritative-where-it-speaks` territory — a gap in the mock rather
+than a statement by it, and the third time that distinction has had to be drawn
+on this screen.
+
+**Then the owner found the fourth, by using it.** Within an hour of the preview:
+*"it brings up the page but it doesn't show any of the things that I've triaged
+as a quota."* **The transitional state #93's cut accepted knowingly, met in
+person.** Triage writes `tasks.kind='quota'`; the screen reads `quotas` and
+nothing else. **Worse than "the wrong screen": a triaged quota's target is
+rendered nowhere in the product** — its only window is the `Tasks` list on `/`,
+and `task_row.html` prints kind, text and tag alone. **And #140 deletes that
+list**, which makes the sequencing a dependency rather than a preference: #138
+goes first, or #140 must absorb the quota triage path. **Two rows in the live
+database, both `period='week'`, no `month` anywhere** — which is evidence for
+retiring `month` but must not be the argument for it, because a schema is not
+justified by today's contents.
+
+**Two tracker rows reconciled while reading:** #130 (`dry.sh` scope, PR #131) and
+#133 (durable releases, PR #134) had both read Done on the board and been left
+open as issues since 2026-08-24 and 2026-08-25. **Board state and issue state
+disagreeing is not cosmetic** — the board is this project's roadmap, and an issue
+list that over-reports open work is the one that gets ignored.

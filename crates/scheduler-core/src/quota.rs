@@ -196,13 +196,13 @@ pub fn progress(target: WeeklyTarget, logged_minutes: i64) -> Progress {
 /// Monday regardless of where the server runs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Weekday {
-    Mon,
-    Tue,
-    Wed,
-    Thu,
-    Fri,
-    Sat,
-    Sun,
+    Mon = 0,
+    Tue = 1,
+    Wed = 2,
+    Thu = 3,
+    Fri = 4,
+    Sat = 5,
+    Sun = 6,
 }
 
 /// Monday-first order, the canonical sequence [`Weekday::index`],
@@ -211,6 +211,10 @@ pub enum Weekday {
 /// apiece -- past `T-complexity-8`'s cap once a wildcard arm joins the
 /// other seven, and there is no logic in any of the four to extract, only
 /// the same table read four ways.
+/// Every weekday, Monday first -- the one ordered list, used for iterating
+/// a week and for [`Weekday::from_index`]. There is no parallel table of
+/// labels beside it: [`Weekday::label`] is a match the compiler checks
+/// covers every variant, and [`Weekday::parse`] reads that.
 const ORDERED: [Weekday; 7] = [
     Weekday::Mon,
     Weekday::Tue,
@@ -220,50 +224,68 @@ const ORDERED: [Weekday; 7] = [
     Weekday::Sat,
     Weekday::Sun,
 ];
-const LABELS: [&str; 7] = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
 impl Weekday {
-    /// `0` for Monday through `6` for Sunday -- the ordinal `Week` compares
-    /// against `today` to decide whether a day has happened yet
-    /// (`quota-sessions-only-days-that-have-happened-03`).
+    /// `0` for Monday through `6` for Sunday -- the ordinal [`Week`]
+    /// compares against `today` to decide whether a day has happened yet
+    /// (`quota-sessions-only-days-that-have-happened-03`). The enum states
+    /// those discriminants itself, so the cast *is* the mapping: there is
+    /// no second list of days that could disagree with the first.
     pub fn index(self) -> u8 {
-        ORDERED
-            .iter()
-            .position(|&day| day == self)
-            .expect("ORDERED lists every Weekday variant") as u8
+        self as u8
     }
 
-    fn from_index(index: u8) -> Self {
-        ORDERED[usize::from(index)]
+    /// `None` past Sunday. Total on purpose -- the caller
+    /// ([`Week::days_so_far`]) only ever counts up to `today`, but a
+    /// function that panics on `7` is one refactor away from being called
+    /// with `7`.
+    ///
+    /// A lookup rather than a match, unlike [`Weekday::label`]: `u8` is an
+    /// open domain, so a match here needs a wildcard arm and the compiler
+    /// checks nothing that [`ORDERED`]'s own length does not.
+    fn from_index(index: u8) -> Option<Self> {
+        ORDERED.get(usize::from(index)).copied()
     }
 
+    /// Written as a match rather than routed through
+    /// [`jiff::civil::Weekday::to_monday_zero_offset`] and an array: the
+    /// compiler checks a match covers every variant of *both* enums, and
+    /// cannot check that a seven-element table does.
     fn from_jiff(weekday: jiff::civil::Weekday) -> Self {
-        use jiff::civil::Weekday::*;
         match weekday {
-            Monday => Weekday::Mon,
-            Tuesday => Weekday::Tue,
-            Wednesday => Weekday::Wed,
-            Thursday => Weekday::Thu,
-            Friday => Weekday::Fri,
-            Saturday => Weekday::Sat,
-            Sunday => Weekday::Sun,
+            jiff::civil::Weekday::Monday => Weekday::Mon,
+            jiff::civil::Weekday::Tuesday => Weekday::Tue,
+            jiff::civil::Weekday::Wednesday => Weekday::Wed,
+            jiff::civil::Weekday::Thursday => Weekday::Thu,
+            jiff::civil::Weekday::Friday => Weekday::Fri,
+            jiff::civil::Weekday::Saturday => Weekday::Sat,
+            jiff::civil::Weekday::Sunday => Weekday::Sun,
         }
     }
 
     /// `"Mon"` .. `"Sun"` -- the spelling every acceptance scenario and the
     /// rendered day picker share.
     pub fn label(self) -> &'static str {
-        LABELS[usize::from(self.index())]
+        match self {
+            Weekday::Mon => "Mon",
+            Weekday::Tue => "Tue",
+            Weekday::Wed => "Wed",
+            Weekday::Thu => "Thu",
+            Weekday::Fri => "Fri",
+            Weekday::Sat => "Sat",
+            Weekday::Sun => "Sun",
+        }
     }
 
     /// The inverse of [`Weekday::label`], for a submitted day name. `None`
     /// for anything else -- a full name, a lowercase spelling, or hostile
     /// text all fail the same way a missing field does.
+    ///
+    /// Literally the inverse: it searches for the day whose own
+    /// [`Weekday::label`] matches, so there is no second spelling of the
+    /// seven names that could drift from the first.
     pub fn parse(label: &str) -> Option<Self> {
-        LABELS
-            .iter()
-            .position(|&candidate| candidate == label)
-            .map(|index| ORDERED[index])
+        ORDERED.iter().find(|day| day.label() == label).copied()
     }
 }
 
@@ -286,6 +308,7 @@ pub fn weekday_of(instant_ms: i64, zone: &jiff::tz::TimeZone) -> Weekday {
 /// offering a day that has not happened yet would let a session fill the bar
 /// for time that was never spent, the same false-number failure a start/stop
 /// timer would produce from the other direction.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Week {
     monday: jiff::civil::Date,
     today: Weekday,
@@ -311,7 +334,9 @@ impl Week {
     /// Monday through today, inclusive, in order -- exactly what a day
     /// picker may offer (`quota-sessions-only-days-that-have-happened-03`).
     pub fn days_so_far(&self) -> Vec<Weekday> {
-        (0..=self.today.index()).map(Weekday::from_index).collect()
+        (0..=self.today.index())
+            .filter_map(Weekday::from_index)
+            .collect()
     }
 
     /// Whether `day` has already happened this week -- the server-side half
@@ -709,6 +734,30 @@ mod tests {
         ] {
             assert_eq!(Weekday::parse(day.label()), Some(day));
         }
+    }
+
+    /// `index` and `ORDERED` are two statements of the same order -- the
+    /// cast and the list -- and this is what holds them together.
+    #[test]
+    fn every_weekday_round_trips_through_its_own_index() {
+        for (position, day) in ORDERED.iter().enumerate() {
+            assert_eq!(
+                day.index(),
+                position as u8,
+                "{} is out of order",
+                day.label()
+            );
+            assert_eq!(Weekday::from_index(day.index()), Some(*day));
+        }
+    }
+
+    /// The week ends at Sunday. `from_index` is reached with a counted-up
+    /// ordinal, so wrapping past the end would silently offer an eighth day
+    /// rather than stopping.
+    #[test]
+    fn from_index_ends_at_sunday() {
+        assert_eq!(Weekday::from_index(7), None);
+        assert_eq!(Weekday::from_index(u8::MAX), None);
     }
 
     #[test]

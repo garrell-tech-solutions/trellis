@@ -836,6 +836,49 @@ than a placeholder because nothing yet writes a session.
 > collation). **That is a decision, not a refactor**, so it is recorded below
 > and owned by the specifier rather than taken here.
 
+### Sessions — the deferred half, now built (`#93`, `D-logging-is-retrospective-and-separate`)
+
+**A session earns its table.** `quota_sessions` stores `day_ms` — the
+*instant* of local midnight for the day it counts against — rather than a
+weekday name, because `"Mon"` alone cannot survive a week boundary. "This
+week" is the query's own `BETWEEN` against bounds computed at read time from
+the current instant and the owner's zone, never stored.
+
+> **`day_ms` has a writer and a reader, and nothing tied them.**
+> `Week::day_ms` puts a day into the column and `weekday_of` reads it back
+> out; a day that survives one and not the other is a session that silently
+> moves. The examples pin a Tuesday in New York. **Three of the zones this
+> project could be set to have sprung the clock forward at midnight** — São
+> Paulo, Santiago and Beirut — so `Date::at(0,0,0,0)` there is a civil time
+> that never happened, and `Week::midnight_ms` asserts it always resolves.
+> **It does**: `jiff` maps a nonexistent local time forward to 01:00 rather
+> than failing, and the round trip still holds because 01:00 is the same
+> date. That was checked, not assumed, and it is now a property over a
+> generator of awkward zones rather than a sentence in a doc comment.
+
+> **The complexity gate was shaping the code, and the decision it cited says
+> the opposite.** `Weekday` mapped to its ordinal by searching an array and
+> `expect`ing the search to succeed, with a doc explaining the array avoided
+> "a sixth, wildcard-free match to keep under `T-complexity-8`". But
+> `T-complexity-8`'s own rule, quoted in the complexity baseline, is *"a
+> function over 8 is carrying logic that is not the match; extract that, do
+> not flatten the match"* — a pure mapping match is the sanctioned shape.
+> **Measured**: a seven-arm match over a closed enum scores 8 and passes; add
+> a wildcard arm and it scores 9 and fails. So the split is not a compromise
+> but the actual rule — **exhaustiveness checking only buys something when
+> the input is the closed enum.** `label` and `from_jiff` take one and are
+> matches the compiler checks; `from_index(u8)` and `parse(&str)` take open
+> domains, where a wildcard means the compiler checks nothing, and are total
+> lookups instead. The ordinal is now `self as u8` against discriminants the
+> enum states, the parallel label table is gone, and `parse` reads `label`
+> so the seven names have one spelling.
+
+**Grouping this week's sessions by quota in memory is not #108's violation.**
+The fetch is bounded by the week's own `WHERE`, and every row it returns is
+one the screen displays individually — the per-quota total is a reduction
+over rows already in hand, not a fetch avoided. #108 is about an *unbounded*
+fetch; this is not one.
+
 ## Context tags — built (`D-context-tags-are-the-taxonomy`, #82)
 
 **The product's only taxonomy**, and the only one left after #88. Free text,
@@ -1530,6 +1573,6 @@ schemas are still there. A revival inherits the gap along with the tables.
 | `scheduler_core::pool` filters and counts in memory; `pool/store.rs`'s task query still has no `ORDER BY` | the company set-operations standard | **#108** — surface grew at `#122`, which added done-filtering and a done-count to `pool::group` after the 2026-08-23 audit. **#129 made it easier, not worse**: `run_member_counts` does its `GROUP BY` in SQL and hands back `RunSizes`, a domain value the core consumes without knowing how it was reached — the shape the specification object #108 needs, now with a working precedent in this module |
 | ~~The committed screen's date cell is always UTC~~ | ~~wrong once the zone is set~~ | **closed** — `#110` reads the owner's zone; `settings::current_timezone` is a front door again |
 | `quota::check_name` runs over every quota fetched into memory; `store::existing_names` has no `WHERE` | the company set-operations standard | **new at #93** — the similar tier (Levenshtein, containment) cannot execute in SQLite at all; the exact tier could, but only against a stored normalized name, which needs a ruling on quota identity. **Specifier's** — same shape as `T-collation-enforces-name-identity` settled for tags |
-| The acceptance pipeline cannot defer a specified-but-unbuilt feature | **mutation coverage, entirely** | **new at #93** — `run.sh` globs `features/*.feature`, so `quota_sessions.feature`, deliberately deferred to slice 2, generates an entrypoint and runs red. `cargo-mutants` aborts on a failed baseline rather than degrading, so a deferred spec costs the *whole* mutation run. The file's own header says deferring means deferring the file; nothing enforces that. **Owner ruled 2026-08-25 to hand off red rather than park it** |
+| ~~The acceptance pipeline cannot defer a specified-but-unbuilt feature~~ | ~~a whole-workspace mutation run~~ | **moot** — `quota_sessions.feature` is built and green as of #93's second slice, and the suite is whole again. The gap was real for one cycle and is recorded because **the mechanism has not changed**: `run.sh` still globs `features/*.feature`, so the next deferred spec will do the same. The cost was narrower than first reported — the hardener scoped `cargo-mutants` to the changed files and got full coverage, so a red acceptance binary costs the *whole-workspace* run, not mutation itself |
 | U3 — backward-pass input | M3 | #7 · ~~U2~~ `T-hard-refuses-soft-slips` · ~~U4~~ `T-blocks-do-not-cross-guardrail-seams` |
 | ~~Crate layout ratification~~ | ~~nothing; cost grows~~ | **closed** — `T-package-by-business-domain`, #44 |

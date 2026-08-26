@@ -8,6 +8,7 @@ use askama::Template;
 use axum::http::StatusCode;
 use axum::response::Response;
 use sqlx::SqlitePool;
+use std::collections::HashSet;
 
 /// `"+ Define a new quota"` — the define form's own submit button, unless a
 /// warning changes it (`quota-screen-similar-name-warns-07`'s own "Create
@@ -84,12 +85,13 @@ pub(super) async fn build(
     pool: &SqlitePool,
     clock: Clock,
     form: DefineFormView,
+    expanded_ids: &HashSet<i64>,
 ) -> Result<QuotaBodyTemplate, sqlx::Error> {
     let rows = super::store::list_quotas(pool).await?;
     let (week, zone) = current_week(pool, clock).await?;
     let (week_start_ms, week_end_ms) = week.bounds_ms(&zone);
     let sessions = super::store::week_sessions(pool, week_start_ms, week_end_ms).await?;
-    let built = view::build(rows, sessions, &week, &zone);
+    let built = view::build(rows, sessions, &week, &zone, expanded_ids);
     Ok(QuotaBodyTemplate {
         meta: built.meta,
         empty: built.empty,
@@ -113,7 +115,10 @@ pub(super) async fn respond(
     clock: Clock,
     status: StatusCode,
     form: DefineFormView,
+    expanded_ids: &HashSet<i64>,
 ) -> Result<Response, StatusCode> {
-    let body = build(pool, clock, form).await.map_err(write_failed)?;
+    let body = build(pool, clock, form, expanded_ids)
+        .await
+        .map_err(write_failed)?;
     Ok(render_template(status, &body))
 }

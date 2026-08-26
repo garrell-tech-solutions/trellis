@@ -7,6 +7,15 @@
 //! request into `TriageFields`, core rejection into a status code and a body
 //! (`T-module-boundary`). Accepting a triage writes the task and stamps the
 //! capture as consumed; both writes live in [`store`].
+//!
+//! That translation is two halves, and they are separated because only one
+//! of them is about a transport: [`input`] is the half that knows `axum`'s
+//! extractors and `serde`, and [`rejection`] is the refusal contract
+//! (`T-422-is-product-wide`) -- a product-wide promise, decidable with
+//! neither a database nor a request. [`http`] is what is left: the route,
+//! the decision, and the writes.
 
 pub mod http;
+mod input;
+mod rejection;
 pub mod store;

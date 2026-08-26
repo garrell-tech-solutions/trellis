@@ -53,17 +53,35 @@ assert_status_created() {
   fi
 }
 
+# #138: target_count/target_minutes_each/period are retired and nothing
+# writes them any more, so the columns being empty would pass against any
+# implementation whatsoever (#90). The Quota screen offering no quotas is
+# the live check.
+qa_get_quota() {
+  curl -s "http://$ADDR/quota"
+}
+
+qa_quota_meta() {
+  qa_between "$1" '<div class="quota-meta">' '</div>'
+}
+
+assert_no_quotas() {
+  local name="$1" meta
+  meta="$(qa_quota_meta "$(qa_get_quota)")"
+  if [[ "$meta" != "none yet" ]]; then
+    echo "FAIL: [$name] expected the Quota screen to offer no quotas (meta \"none yet\"), got: $meta" >&2
+    FAILURES=1
+  fi
+}
+
 # --- Scenario: pool ---
 if setup_scenario "pool"; then
   assert_status_created "pool" '{"kind":"pool","life_area":"Work"}'
   if assert_one_task "pool"; then
-    IFS='|' read -r kind deadline _dt _prio target_count target_minutes_each period < <(task_row)
+    IFS='|' read -r kind deadline _dt _prio _tc _tme _period < <(task_row)
     [[ "$kind" == "pool" ]] || { echo "FAIL: [pool] expected kind pool, got \"$kind\"" >&2; FAILURES=1; }
     [[ -z "$deadline" ]] || { echo "FAIL: [pool] expected no deadline, got \"$deadline\"" >&2; FAILURES=1; }
-    [[ -z "$target_count$target_minutes_each$period" ]] || {
-      echo "FAIL: [pool] expected no quota target, got target_count=\"$target_count\" target_minutes_each=\"$target_minutes_each\" period=\"$period\"" >&2
-      FAILURES=1
-    }
+    assert_no_quotas "pool"
   fi
 fi
 qa_stop_server
@@ -81,16 +99,13 @@ run_committed_example() {
     "$deadline" "$commitment" "$priority")"
   assert_status_created "$name" "$body"
   if assert_one_task "$name"; then
-    IFS='|' read -r kind row_deadline row_commitment row_priority target_count target_minutes_each period < <(task_row)
+    IFS='|' read -r kind row_deadline row_commitment row_priority _tc _tme _period < <(task_row)
     [[ "$kind" == "committed" ]] || { echo "FAIL: [$name] expected kind committed, got \"$kind\"" >&2; FAILURES=1; }
     if [[ "$row_deadline" != "$expected_deadline_ms" || "$row_commitment" != "$commitment" || "$row_priority" != "$priority" ]]; then
       echo "FAIL: [$name] expected deadline=$expected_deadline_ms commitment=$commitment priority=$priority, got deadline=$row_deadline commitment=$row_commitment priority=$row_priority" >&2
       FAILURES=1
     fi
-    [[ -z "$target_count$target_minutes_each$period" ]] || {
-      echo "FAIL: [$name] expected no quota target, got target_count=\"$target_count\" target_minutes_each=\"$target_minutes_each\" period=\"$period\"" >&2
-      FAILURES=1
-    }
+    assert_no_quotas "$name"
   fi
   qa_stop_server
 }
@@ -98,27 +113,60 @@ run_committed_example "2026-08-20T17:00:00Z" "at" "P1" "1787245200000"
 run_committed_example "2026-08-31T09:00:00Z" "by" "P3" "1788166800000"
 
 # --- Scenario: quota ---
+# #138: what a quota triage carries changed completely. target_count,
+# target_minutes_each and period are retired; a quota now carries a name
+# and a weekly hour target, and triaging is what creates the quota.
+# "Assert through the screen, not through columns" (qa/task_kinds.md) --
+# where a quota is stored is the architect's to settle.
+qa_quota_readout() {
+  local page="$1" quota_name="$2"
+  python3 -c '
+import re, sys
+page, name = sys.argv[1], sys.argv[2]
+for m in re.finditer(r"<div class=\"quota-row\"[^>]*>(?:(?!<div class=\"quota-row\").)*", page, re.S):
+    block = m.group(0)
+    nm = re.search(r"<div class=\"quota-name\">([^<]*)</div>", block)
+    if nm and nm.group(1) == name:
+        ro = re.search(r"<div class=\"quota-readout\">([^<]*)</div>", block)
+        print(ro.group(1) if ro else "")
+        sys.exit()
+' "$page" "$quota_name"
+}
+
 run_quota_example() {
-  local target_count="$1" target_minutes_each="$2"
-  local name="quota-${target_count}x${target_minutes_each}"
+  local quota_name="$1" hours="$2" expected_readout="$3"
+  local name="quota-${quota_name// /-}"
   setup_scenario "$name" || return
   local body
-  body="$(printf '{"kind":"quota","target_count":%s,"target_minutes_each":%s,"period":"week","life_area":"Work"}' \
-    "$target_count" "$target_minutes_each")"
+  body="$(python3 -c 'import json,sys; print(json.dumps({"kind":"quota","name":sys.argv[1],"hours":sys.argv[2]}))' "$quota_name" "$hours")"
   assert_status_created "$name" "$body"
   if assert_one_task "$name"; then
-    IFS='|' read -r kind deadline _dt _prio row_target_count row_target_minutes_each row_period < <(task_row)
+    IFS='|' read -r kind deadline _dt _prio _tc _tme _period < <(task_row)
     [[ "$kind" == "quota" ]] || { echo "FAIL: [$name] expected kind quota, got \"$kind\"" >&2; FAILURES=1; }
-    if [[ "$row_target_count" != "$target_count" || "$row_target_minutes_each" != "$target_minutes_each" || "$row_period" != "week" ]]; then
-      echo "FAIL: [$name] expected target_count=$target_count target_minutes_each=$target_minutes_each period=week, got target_count=$row_target_count target_minutes_each=$row_target_minutes_each period=$row_period" >&2
+    [[ -z "$deadline" ]] || { echo "FAIL: [$name] expected no deadline, got \"$deadline\"" >&2; FAILURES=1; }
+
+    local page meta readout
+    page="$(qa_get_quota)"
+    meta="$(qa_quota_meta "$page")"
+    if [[ "$meta" != "1 quota" ]]; then
+      echo "FAIL: [$name] expected meta \"1 quota\", got: $meta" >&2
       FAILURES=1
     fi
-    [[ -z "$deadline" ]] || { echo "FAIL: [$name] expected no deadline, got \"$deadline\"" >&2; FAILURES=1; }
+    readout="$(qa_quota_readout "$page" "$quota_name")"
+    if [[ "$readout" != "$expected_readout" ]]; then
+      echo "FAIL: [$name] expected the Quota screen to read \"$expected_readout\" for \"$quota_name\", got: \"$readout\"" >&2
+      FAILURES=1
+    fi
   fi
   qa_stop_server
 }
-run_quota_example "3" "45"
-run_quota_example "1" "90"
+run_quota_example "Piano" "4" "0m / 4h"
+# 0.5 is the row that earns its keep: the canvas's hours input is
+# step="0.5", so half an hour is a value the product can really submit, and
+# it is the only row where the hours-to-minutes conversion is visible in
+# the readout rather than implied by it. If this reads "0m / 0h" or is
+# rejected, the conversion is integer-truncating.
+run_quota_example "Running" "0.5" "0m / 30m"
 
 if [[ "$FAILURES" -ne 0 ]]; then
   exit 1

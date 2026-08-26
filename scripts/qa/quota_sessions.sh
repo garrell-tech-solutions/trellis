@@ -62,15 +62,16 @@ qa_get_quota() {
   curl -s "http://$ADDR/quota"
 }
 
+# #138 retired the Quota screen's own define form (POST /quota); a quota is
+# created only by triaging a capture as kind=quota with a name and an hour
+# target now. Submitting raw_text=name keeps this fixture's captures
+# distinguishable in the inbox if a scenario ever needs to look, though
+# nothing here does.
 qa_define_quota() {
-  local name="$1" hours="$2" data response
-  data="name=$(python3 -c 'import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1]))' "$name")"
-  data="$data&hours=$(python3 -c 'import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1]))' "$hours")"
-  response="$(curl -s -w '\n%{http_code}' -X POST "http://$ADDR/quota" \
-    -H 'content-type: application/x-www-form-urlencoded' \
-    -d "$data")"
-  STATUS="${response##*$'\n'}"
-  BODY="${response%$'\n'*}"
+  local name="$1" hours="$2" capture_id body
+  capture_id="$(qa_submit_capture "$name")"
+  body="$(python3 -c 'import json,sys; print(json.dumps({"kind":"quota","name":sys.argv[1],"hours":sys.argv[2]}))' "$name" "$hours")"
+  qa_triage "$capture_id" "$body"
 }
 
 qa_seed_quota() {

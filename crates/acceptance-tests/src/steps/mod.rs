@@ -33,6 +33,7 @@ mod migrations;
 mod one_screen;
 mod payloads;
 mod pool_screen;
+mod quota_migration;
 mod quota_screen;
 mod quota_sessions;
 mod quota_triage_validation;
@@ -300,6 +301,9 @@ pub async fn dispatch(
         return outcome;
     }
     if let Some(outcome) = quota_sessions::dispatch(world, text, example).await {
+        return outcome;
+    }
+    if let Some(outcome) = quota_migration::dispatch(world, text, example).await {
         return outcome;
     }
 

@@ -32,6 +32,15 @@ static THEN_SHOWS_NO_OTHER_KIND: LazyLock<Regex> = LazyLock::new(|| {
 static THEN_MARKS_CHOSEN: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r#"^the row for "([^"]+)" marks "([^"]+)" as the chosen kind$"#).unwrap()
 });
+static THEN_OFFERS_AS_NAME: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r#"^the row for "([^"]+)" offers "([^"]+)" as the quota name$"#).unwrap()
+});
+static THEN_NAME_CHANGEABLE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r#"^the row for "([^"]+)" offers the quota name as something that can be changed$"#)
+        .unwrap()
+});
+static THEN_ASKS_HOURS: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r#"^the row for "([^"]+)" asks for hours a week$"#).unwrap());
 
 pub async fn dispatch(
     world: &mut World,
@@ -55,6 +64,15 @@ pub async fn dispatch(
     }
     if let Some(caps) = THEN_MARKS_CHOSEN.captures(text) {
         return Some(dispatch_marks_chosen(world, example, &caps));
+    }
+    if let Some(caps) = THEN_OFFERS_AS_NAME.captures(text) {
+        return Some(dispatch_offers_as_name(world, example, &caps));
+    }
+    if let Some(caps) = THEN_NAME_CHANGEABLE.captures(text) {
+        return Some(dispatch_name_changeable(world, example, &caps));
+    }
+    if let Some(caps) = THEN_ASKS_HOURS.captures(text) {
+        return Some(dispatch_asks_hours(world, example, &caps));
     }
     None
 }
@@ -169,7 +187,7 @@ fn dispatch_shows_no_kind(
 fn kind_panel_marker(kind: &str) -> Result<&'static str, String> {
     match kind.to_lowercase().as_str() {
         "committed" => Ok("At a time"),
-        "quota" => Ok("Sessions"),
+        "quota" => Ok("Hours a week"),
         other => Err(format!("kind {other:?} has no fields panel to show")),
     }
 }
@@ -243,6 +261,75 @@ fn dispatch_marks_chosen(
     } else {
         Err(format!(
             "expected the {kind} button marked chosen, got:\n{button}"
+        ))
+    }
+}
+
+/// The quota panel's own `<input type="text" name="name" ...>` — scoped to
+/// its own tag rather than searched for as a bare substring, so a later
+/// step can inspect its `value` and its other attributes independently
+/// (`disclosures-quota-offers-the-captures-words-07`).
+fn quota_name_input<'a>(row: &'a str, raw_text: &str) -> Result<&'a str, String> {
+    let needle = r#"<input type="text" name="name""#;
+    row.find(needle)
+        .and_then(|start| {
+            row[start..]
+                .find('>')
+                .map(|end| &row[start..start + end + 1])
+        })
+        .ok_or_else(|| {
+            format!("expected {raw_text:?}'s row to offer a quota name field, got:\n{row}")
+        })
+}
+
+fn dispatch_offers_as_name(
+    world: &mut World,
+    example: &BTreeMap<String, String>,
+    caps: &regex::Captures<'_>,
+) -> Result<(), String> {
+    let raw_text = resolve(example, &caps[1])?;
+    let expected = resolve(example, &caps[2])?;
+    let row = row_for(world, &raw_text)?;
+    let input = quota_name_input(row, &raw_text)?;
+    let needle = format!(r#"value="{expected}""#);
+    if input.contains(&needle) {
+        Ok(())
+    } else {
+        Err(format!(
+            "expected the quota name field prefilled with {expected:?}, got:\n{input}"
+        ))
+    }
+}
+
+fn dispatch_name_changeable(
+    world: &mut World,
+    example: &BTreeMap<String, String>,
+    caps: &regex::Captures<'_>,
+) -> Result<(), String> {
+    let raw_text = resolve(example, &caps[1])?;
+    let row = row_for(world, &raw_text)?;
+    let input = quota_name_input(row, &raw_text)?;
+    if input.contains("readonly") || input.contains("disabled") {
+        Err(format!(
+            "expected the quota name field to be editable, got:\n{input}"
+        ))
+    } else {
+        Ok(())
+    }
+}
+
+fn dispatch_asks_hours(
+    world: &mut World,
+    example: &BTreeMap<String, String>,
+    caps: &regex::Captures<'_>,
+) -> Result<(), String> {
+    let raw_text = resolve(example, &caps[1])?;
+    let row = row_for(world, &raw_text)?;
+    if row.contains(kind_panel_marker("quota")?) {
+        Ok(())
+    } else {
+        Err(format!(
+            "expected {raw_text:?}'s row to ask for hours a week, got:\n{row}"
         ))
     }
 }
@@ -347,7 +434,7 @@ mod tests {
     async fn dispatch_shows_no_other_kind_errors_when_both_markers_are_present() {
         let panel = concat!(
             r#"<div class="fields-panel">"#,
-            r#"At a time Sessions"#,
+            r#"At a time Hours a week"#,
             r#"</div>"#,
         );
         let mut world = World::new();

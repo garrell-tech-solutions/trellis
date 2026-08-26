@@ -244,14 +244,14 @@ if qa_start_server "$BIN" "$TMP_DIR/$name.sqlite" "$TMP_DIR/$name.log"; then
       echo "FAIL: [$name] could not find the quota-triage control once the panel was open" >&2
       FAILURES=1
     else
-      # target_count omitted; target_minutes_each and period supplied.
-      qa_triage_form "$endpoint" "kind=quota&target_minutes_each=45&period=week"
+      # hours omitted; name supplied.
+      qa_triage_form "$endpoint" "kind=quota&name=workout"
       if [[ "$STATUS" -lt 400 || "$STATUS" -ge 500 ]]; then
         echo "FAIL: [$name] expected a client error, got status $STATUS" >&2
         FAILURES=1
       fi
-      if [[ "$BODY" != *"target_count is required"* ]]; then
-        echo "FAIL: [$name] expected the response to name target_count as required, got:
+      if [[ "$BODY" != *"hours is required"* ]]; then
+        echo "FAIL: [$name] expected the response to name hours as required, got:
 $BODY" >&2
         FAILURES=1
       fi

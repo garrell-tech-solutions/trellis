@@ -105,28 +105,44 @@ product has to say something and then get out of the way.
   confirm the database itself refuses it.** If only the Rust refuses, say so:
   that is the exact shape that decision row was written against.
 
-## Procedure — the warning as you type, in a browser
+## Procedure — typing a name costs nothing, in a browser
 
-**This is why the suite exists at this tier.** A warning you have not submitted
-is ephemeral (`T-ephemeral-view-state-rides-the-request`) — asserting it over
-HTTP would push it into a stored field, which is #126's mistake with a new
-subject.
+**⚠️ An earlier version of this document was wrong here** and QA caught it
+rather than scripting it. It described a warning that appears live as you type
+and asked whether that cost a request per keystroke. **The form has no
+`hx-trigger` on its inputs and no client script: the warning is submit-only,
+and typing makes no requests at all.** That is the cheaper end of what the old
+text itself flagged as "a finding either way", it is what the Gherkin actually
+asserts, and it is **not a defect** — the doc described something that was
+never specified as required.
+
+**The canvas draws the warning live** (`hasWarning` recomputed on every
+`onChange`) and that is a **gap rather than a statement**, the same reading the
+day picker got in `quota_sessions`: the canvas is a client-only mock where
+everything is live by construction, so it has no submit to be submit-only
+against and could not have drawn the distinction either way
+(`T-canvas-is-authoritative-where-it-speaks`). A live warning is a legitimate
+later improvement; it would be a client-side check on the rendered form, never
+a round trip per character, and never a stored draft.
 
 1. Seed `Piano`, 4 hours. Load Quota at 390×844 and open the new-quota form.
-2. Type `Pian` slowly. Then `Piano`. Then `Pianoo`.
-3. **Record network activity throughout.**
+2. Type `Pian`, then `Piano`, then `Pianoo`. **Record network activity
+   throughout.**
+3. Submit `Pianoo`. Read the form that comes back.
+4. Reload mid-typing, before submitting anything.
 
 ### Expected Observable Outcomes
-- The warning panel **appears and updates** as the name changes, and the
-  create control's label tracks it.
-- **Nothing about the half-typed name is stored.** Reload mid-typing: the form
-  is empty and no row exists. **Check the schema for a column holding a draft
-  name or a warning state — if one exists, that is the finding, and say it
-  before anything else in the report.**
-- **Report whether the live check costs a request per keystroke.** An htmx
-  round trip per character on a phone over a tailnet is a real cost;
-  `trip_controls`' toggle established that this project prefers client state
-  for this kind of thing. **This is a finding either way — say which it does.**
+- Step 2: **zero requests.** Typing is free. **If you observe a request per
+  keystroke, that is a finding** — an htmx round trip per character on a phone
+  over a tailnet is a real cost, and `trip_controls`' toggle established that
+  this project holds this kind of state client-side.
+- Step 3: **the warning arrives with the 422**, in the re-rendered form, and
+  the create control now reads `Create anyway`.
+- Step 4: **nothing about the half-typed name survives.** The form is empty and
+  no row exists. **Check the schema for a column holding a draft name or a
+  warning state — if one exists, that is the finding, and say it before
+  anything else in the report** (`T-ephemeral-view-state-rides-the-request`;
+  `T-migrations-append-only` means it can never be taken back).
 - **Every control is at least 44px** (`--tap`), including the create and cancel
   controls and the `+ Define a new quota` button.
 
@@ -137,10 +153,19 @@ six distinct messages, and a real bug found by doing it. **Each breakage below
 is paired with the assertion it must trip** — confirm the named one goes red,
 not merely that something did.
 
-1. **Compare names with `==` on the raw string.** → `-06`'s `Pi-ano` and
-   `pi ano` rows fail while `piano` and `PIANO` still pass, because the
-   collation still catches those two. **That split is the point** — it shows
-   which tier is doing which half of the work.
+1. **Compare names with `==` on the raw string** — that is, revert
+   `check_name`'s normalized comparison only. → **all four `-06` rows fail**,
+   and they fail on the *warning text*: with the exact tier broken, `piano`
+   still matches `Piano` through the **similar** tier's containment check, so
+   the screen warns *"reads a lot like"* instead of refusing.
+   **⚠️ An earlier version of this document predicted a 2-of-4 split** — the
+   collation rescuing `piano` and `PIANO` while `Pi-ano` and `pi ano` failed.
+   **That was wrong, and QA proved it by running the breakage.** `is_similar`
+   is evaluated on the normalized strings and matches long before the database
+   is consulted, so **this breakage never exercises the collation backstop at
+   all.** That is precisely why the direct-`INSERT` step in the name-guard
+   procedure exists as a separate check, and why breakage 4 below is the only
+   thing that reaches the column.
 2. **Drop the near-match tier entirely.** → `-07` fails: `Pianoo` is created on
    the first submit with no warning. Nothing in `-06` moves.
 3. **Make the near-match refuse instead of warn.** → `-07` fails at the second
@@ -204,6 +229,16 @@ not merely that something did.
   1.81% against 3%. **A whole new screen with its own step module is the most
   likely thing yet to cross it** — say whether a shared family was extracted
   early or bolted on at the end.
+- **⚠️ THE NEW SCREEN IS OUTSIDE TWO EXISTING GATES, and this slice opened
+  that.** `scripts/qa/colour.cjs` and `scripts/qa/phone_layout.cjs` both
+  enumerate a hardcoded `SCREENS` list of three — `/`, `/pool`, `/committed`.
+  **`/quota` is checked by neither**, so the fourth screen has never been
+  measured for palette conformance, dark mode, contrast, tap targets at 390px,
+  or the no-horizontal-scroll rule. **Report this as a finding even though it
+  is not a defect in what was built**: #137 settled the palette four days ago
+  and a whole screen escaping its gate is how that settlement quietly stops
+  being true. Extending those two lists is a one-line change each, but it
+  belongs to whoever owns those slices, not to this one.
 - **#108 is untouched** — nothing here goes near the pool query.
 
 ## Independent of Implementation

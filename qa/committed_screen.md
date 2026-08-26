@@ -65,8 +65,11 @@ rather than filing it twice.
    `at` showing its time and the `by` showing **BY**.
 5. Confirm the committed triage form asks **at or by** and **does not ask
    hard or soft**.
-6. Confirm the tab bar shows **three** tabs and marks the current one, on all
-   three screens.
+6. Confirm the tab bar shows **four** tabs and marks the current one, on all
+   four screens. **Updated by #93** — this said three, and `nav.rs` had been
+   holding `ALL: [Page; 3]` since #92 with the comment *"a dead link is worse
+   than no link"*, waiting for the Quota route to exist. It does now, so the
+   tab arrived with it and `committed-screen-tabs-06` counts four.
 
 ### Expected Observable Outcomes
 - All six steps hold literally, per `D-visible-slices`.

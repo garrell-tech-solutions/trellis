@@ -1,6 +1,6 @@
-# mutation-stamp: sha256=d71b55831274c760bf12ccf6207b724a4750b2c7ab27abdf2a7f9548d0c7414b
+# mutation-stamp: sha256=6c98ffdb861f0861b15b3e08162b1c4fd57eb09491e207369fdb9ac2e5869c2e
 # acceptance-mutation-manifest-begin
-# {"version":1,"tested_at":"2026-08-21T21:19:40.008367797Z","feature_name":"Committed triage requires deadline, commitment, priority and an estimate","feature_path":"features/committed_triage_validation.feature","background_hash":"213f9062faacbf3d0a2218fdb859b4c843bbee4724073795573a29ea693f9d44","implementation_hash":"sha256:2304bc384951c7673fdba860ad848ea42c847d8e7ccad566f5c2e9bd942c4736","scenarios":[{"index":0,"name":"Triaging as committed without a required field is rejected and creates nothing","scenario_hash":"fc08ec62615d29f25fe6a5900213c9d3f34d0af5a18c2896a29a012958b64c90","mutation_count":4,"result":{"Total":4,"Killed":4,"Survived":0,"Errors":0},"tested_at":"2026-08-21T21:19:40.008367797Z"},{"index":1,"name":"Triaging as committed with a required field left empty is rejected the same way as omitting it","scenario_hash":"0c16c29e990ff71b1f71a15d89212d963639bed377f1e6caf51c0466f400e7ae","mutation_count":4,"result":{"Total":4,"Killed":4,"Survived":0,"Errors":0},"tested_at":"2026-08-21T21:19:40.008367797Z"}]}
+# {"version":1,"tested_at":"2026-08-27T04:24:00.166118161Z","feature_name":"Committed triage requires deadline, commitment, priority and an estimate","feature_path":"features/committed_triage_validation.feature","background_hash":"213f9062faacbf3d0a2218fdb859b4c843bbee4724073795573a29ea693f9d44","implementation_hash":"sha256:2304bc384951c7673fdba860ad848ea42c847d8e7ccad566f5c2e9bd942c4736","scenarios":[{"index":0,"name":"Triaging as committed without a required field is rejected and creates nothing","scenario_hash":"56d06284f35fc940516fa8b4d4cd251bf8cf84a85c32ed2dbb3ebf8088bb6527","mutation_count":4,"result":{"Total":4,"Killed":4,"Survived":0,"Errors":0},"tested_at":"2026-08-27T04:24:00.166118161Z"},{"index":1,"name":"Triaging as committed with a required field left empty is rejected the same way as omitting it","scenario_hash":"3733a481439846bdd51983ab86f9ad03a981552da4e0dcef946fa8e851179408","mutation_count":4,"result":{"Total":4,"Killed":4,"Survived":0,"Errors":0},"tested_at":"2026-08-27T04:24:00.166118161Z"}]}
 # acceptance-mutation-manifest-end
 
 # committed-triage-validation-missing-field-01: committed triage is rejected when a required field is absent
@@ -28,7 +28,7 @@ Feature: Committed triage requires deadline, commitment, priority and an estimat
     When the capture is triaged as a committed task with "<missing_field>" omitted
     Then the triage is rejected
     And the rejection names "<missing_field>"
-    And the task list is still empty
+    And the committed screen lists nothing
     And the capture is still waiting in the untriaged queue
 
     Examples:
@@ -43,7 +43,7 @@ Feature: Committed triage requires deadline, commitment, priority and an estimat
     When the capture is triaged as a committed task with "<empty_field>" left empty
     Then the triage is rejected
     And the rejection names "<empty_field>"
-    And the task list is still empty
+    And the committed screen lists nothing
     And the capture is still waiting in the untriaged queue
 
     Examples:

@@ -1,5 +1,5 @@
 # acceptance-mutation-manifest-begin
-# {"version":1,"tested_at":"2026-08-21T21:19:26.983404169Z","feature_name":"Committed triage validates the values of deadline, commitment and priority, not just their presence","feature_path":"features/committed_field_domains.feature","background_hash":"213f9062faacbf3d0a2218fdb859b4c843bbee4724073795573a29ea693f9d44","implementation_hash":"sha256:cb9194cc4e83cebeb56cb950b77be5c6336c4dc534c17a3668d7a30501afdeda","scenarios":[{"index":0,"name":"A well-formed deadline round-trips to the same instant regardless of its exact textual form","scenario_hash":"401be35689e8498ce4c78d6be96172687ba4a47056db756ad6319af6dfb935c6","mutation_count":6,"result":{"Total":6,"Killed":6,"Survived":0,"Errors":0},"tested_at":"2026-08-21T21:19:26.983404169Z"}]}
+# {"version":1,"tested_at":"2026-08-27T04:23:01.324290894Z","feature_name":"Committed triage validates the values of deadline, commitment and priority, not just their presence","feature_path":"features/committed_field_domains.feature","background_hash":"213f9062faacbf3d0a2218fdb859b4c843bbee4724073795573a29ea693f9d44","implementation_hash":"sha256:cb9194cc4e83cebeb56cb950b77be5c6336c4dc534c17a3668d7a30501afdeda","scenarios":[{"index":0,"name":"A well-formed deadline round-trips to the same instant regardless of its exact textual form","scenario_hash":"401be35689e8498ce4c78d6be96172687ba4a47056db756ad6319af6dfb935c6","mutation_count":6,"result":{"Total":6,"Killed":6,"Survived":0,"Errors":0},"tested_at":"2026-08-21T21:19:26.983404169Z"}]}
 # acceptance-mutation-manifest-end
 
 # committed-field-domains-deadline-round-trip-01: a well-formed deadline round-trips to the same instant regardless of its exact textual form
@@ -32,7 +32,7 @@ Feature: Committed triage validates the values of deadline, commitment and prior
     When the capture is triaged as a committed task with a deadline of "<bad_deadline>"
     Then the triage is rejected
     And the rejection reports "deadline" as invalid
-    And the task list is still empty
+    And the committed screen lists nothing
     And the capture is still waiting in the untriaged queue
 
     Examples:
@@ -46,7 +46,7 @@ Feature: Committed triage validates the values of deadline, commitment and prior
     When the capture is triaged as a committed task with a commitment of "<bad_commitment>"
     Then the triage is rejected
     And the rejection reports "commitment" as invalid
-    And the task list is still empty
+    And the committed screen lists nothing
     And the capture is still waiting in the untriaged queue
 
     Examples:
@@ -59,7 +59,7 @@ Feature: Committed triage validates the values of deadline, commitment and prior
     When the capture is triaged as a committed task with a priority of "<bad_priority>"
     Then the triage is rejected
     And the rejection reports "priority" as invalid
-    And the task list is still empty
+    And the committed screen lists nothing
     And the capture is still waiting in the untriaged queue
 
     Examples:

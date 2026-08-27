@@ -139,6 +139,7 @@ pub async fn create_capture(
             error: None,
             committed_open: false,
             quota_open: false,
+            meta: None,
         };
         let suggestions = super::distinct_tags(&pool).await.map_err(write_failed)?;
         render_capture_row_response(

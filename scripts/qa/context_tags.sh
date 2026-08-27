@@ -119,7 +119,19 @@ for m in re.finditer(r"<li[^>]*>(.*?)</li>", section, re.S):
 }
 
 qa_capture_line_for() { qa_row_line_containing "$1" captures "$2"; }
-qa_task_line_for() { qa_row_line_containing "$1" tasks "$2"; }
+
+# #140 retired the flat Tasks list; a triaged pool task's tag now shows on
+# the Pool screen (loose end or trip row, per its own count threshold), and
+# on the triaged capture's own restyled Recent row.
+qa_get_pool() {
+  curl -s "http://$ADDR/pool"
+}
+
+qa_pool_line_for() {
+  local page="$1" needle="$2" loose
+  loose="$(qa_loose_section "$page")"
+  qa_loose_row_containing "$loose" "$needle"
+}
 
 # Elapsed milliseconds of a JSON capture POST, and its status, as
 # "status ms". Used to confirm the 50ms budget's subject did not move: the
@@ -303,11 +315,20 @@ if qa_start_server "$BIN" "$TMP_DIR/$name.sqlite" "$TMP_DIR/$name.log"; then
     FAILURES=1
   fi
 
+  pool_page="$(qa_get_pool)"
+  for text in "buy screws" "return the drill"; do
+    pool_line="$(qa_pool_line_for "$pool_page" "$text")"
+    if [[ "$pool_line" != *"@homedepot"* ]]; then
+      echo "FAIL: [$name] expected the Pool screen to show @homedepot for \"$text\", got: $pool_line" >&2
+      FAILURES=1
+    fi
+  done
+  # Both restyled Recent rows read their kind and tag too (#140).
   page="$(qa_get_inbox)"
   for text in "buy screws" "return the drill"; do
-    tasks_line="$(qa_task_line_for "$page" "$text")"
-    if [[ "$tasks_line" != *"@homedepot"* ]]; then
-      echo "FAIL: [$name] expected the task list to show @homedepot for \"$text\", got: $tasks_line" >&2
+    recent_line="$(qa_capture_line_for "$page" "$text")"
+    if [[ "$recent_line" != *"@homedepot"* ]]; then
+      echo "FAIL: [$name] expected the Recent row for \"$text\" to show @homedepot, got: $recent_line" >&2
       FAILURES=1
     fi
   done
@@ -344,14 +365,14 @@ if qa_start_server "$BIN" "$DB" "$TMP_DIR/$name-1.log"; then
   fi
   before_page="$(qa_get_inbox)"
   before_captures="$(qa_capture_line_for "$before_page" "buy screws")"
-  before_tasks="$(qa_task_line_for "$before_page" "buy tomatoes")"
+  before_tasks="$(qa_pool_line_for "$(qa_get_pool)" "buy tomatoes")"
   before_suggestions="$(qa_tag_suggestions "$before_page")"
   qa_stop_server
 
   if qa_start_server "$BIN" "$DB" "$TMP_DIR/$name-2.log"; then
     after_page="$(qa_get_inbox)"
     after_captures="$(qa_capture_line_for "$after_page" "buy screws")"
-    after_tasks="$(qa_task_line_for "$after_page" "buy tomatoes")"
+    after_tasks="$(qa_pool_line_for "$(qa_get_pool)" "buy tomatoes")"
     after_suggestions="$(qa_tag_suggestions "$after_page")"
     if [[ "$after_captures" != "$before_captures" ]]; then
       echo "FAIL: [$name] the inbox row's tag changed across restart: before=[$before_captures] after=[$after_captures]" >&2
@@ -408,14 +429,23 @@ print(m.group(1) if m else "")
   fi
 
   qa_triage "$capture_id" '{"kind":"pool"}'
-  page="$(qa_get_inbox)"
-  tasks_section="$(qa_html_section "$page" tasks)"
-  if [[ "$tasks_section" == *"<script>alert"* ]]; then
-    echo "FAIL: [$name] the task list renders an unescaped <script> tag" >&2
+  pool_page="$(qa_get_pool)"
+  if [[ "$pool_page" == *"<script>alert"* ]]; then
+    echo "FAIL: [$name] the Pool screen renders an unescaped <script> tag" >&2
     FAILURES=1
   fi
-  if [[ "$tasks_section" != *"boom"* ]]; then
-    echo "FAIL: [$name] expected the word boom to survive in the task list, escaped rather than stripped" >&2
+  if [[ "$pool_page" != *"boom"* ]]; then
+    echo "FAIL: [$name] expected the word boom to survive on the Pool screen, escaped rather than stripped" >&2
+    FAILURES=1
+  fi
+  recent_page="$(qa_get_inbox)"
+  recent_line="$(qa_capture_line_for "$recent_page" "buy milk")"
+  if [[ "$recent_line" == *"<script>alert"* ]]; then
+    echo "FAIL: [$name] the restyled Recent row renders an unescaped <script> tag" >&2
+    FAILURES=1
+  fi
+  if [[ "$recent_line" != *"boom"* ]]; then
+    echo "FAIL: [$name] expected the word boom to survive on the restyled Recent row, escaped rather than stripped" >&2
     FAILURES=1
   fi
 else

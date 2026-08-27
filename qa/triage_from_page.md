@@ -19,7 +19,7 @@ the parametrized procedures after it are `curl`-only.
 1. `cargo run -p trellis-server -- serve --db <fresh path>`.
 2. Open `http://localhost:8080` and capture `buy milk`.
 3. Confirm the inbox row for `buy milk` offers Pool, Committed and Quota.
-4. Click **Pool**. Confirm it leaves the inbox and appears in a task list on
+4. Click **Pool**. Confirm the row **stays in `Recent`, restyled**, and appears on the Pool screen, on
    the same page, without the page visibly reloading.
 5. Capture `call the dentist`. Click **Committed**. Confirm the form offers
    **at or by** as a fixed choice (not a free-text box), and priority as a
@@ -41,7 +41,7 @@ the parametrized procedures after it are `curl`-only.
 
 1. Start the trellis server against a fresh database file.
 2. Confirm the server is reachable.
-3. Confirm the task list is empty.
+3. Confirm the Pool, Committed and Quota screens all list nothing. **There is no `Tasks` list any more (#140).**
 
 ## Procedure — the inbox offers all three kinds
 
@@ -66,7 +66,7 @@ the parametrized procedures after it are `curl`-only.
   server-side half of "without a full page reload"; see the by-hand
   walkthrough for the browser-side half.
 - `buy milk` no longer appears in the inbox.
-- `buy milk` appears in the task list.
+- `buy milk` appears on the Pool screen, and its `Recent` row now reads `Pool · no context` instead of offering kind buttons.
 
 ## Procedure — committed rejection through the page
 
@@ -111,11 +111,11 @@ the parametrized procedures after it are `curl`-only.
   quota rule.
 - The tasks table is still empty.
 
-## Procedure — hostile capture text stays escaped in the task list
+## Procedure — hostile capture text stays escaped where it is rendered after triage
 
 1. Submit a capture with raw text `<script>alert('boom')</script>`.
 2. Triage it as pool through the page's control.
-3. `GET /` and read the **raw HTML source** of the task list.
+3. Read the **raw HTML source** of `/pool`, and of `Recent` on `GET /`. **Both halves in both places** — no unescaped tag, and the word `boom` present, so a dropped-rather-than-escaped text cannot pass.
 
 ### Expected Observable Outcomes
 - The raw response does not contain an unescaped `<script>` tag.

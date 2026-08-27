@@ -29,7 +29,7 @@ deliberately invisible on every page** (`D-kill-means-archive`), so read-only
 4. Click it. Confirm `asdfgh` leaves the inbox without the page visibly
    reloading, **no confirmation dialog appears** (`D-three-strike`: friction is
    a feature in exactly one place in this system, and this is not it), and no
-   task appears in the task list.
+   task appears on the Pool screen.
 5. Confirm the inbox now shows its **ordinary** empty state, not a
    dismissal-specific variant. **Read the current wording out of the page
    rather than trusting any quoted here**; what is under test is that
@@ -37,7 +37,7 @@ deliberately invisible on every page** (`D-kill-means-archive`), so read-only
    anything.
 6. Capture `buy milk`, pick a life area, click **Pool**.
 7. Restart the server and reload. Confirm the inbox is empty, `buy milk` is
-   still in the task list, and `asdfgh` has not come back.
+   still on the Pool screen and still in `Recent`, restyled; `asdfgh` has not come back.
 8. Confirm there is **no link, tab, or list anywhere on the page** that shows
    dismissed captures, and no way to un-dismiss one.
 
@@ -52,7 +52,7 @@ deliberately invisible on every page** (`D-kill-means-archive`), so read-only
 
 1. Start the trellis server against a fresh database file.
 2. Confirm the server is reachable.
-3. Confirm the task list is empty and the inbox is empty.
+3. Confirm the Pool screen lists nothing and the inbox is empty.
 
 ## Procedure — every untriaged capture offers a dismiss action
 
@@ -71,7 +71,7 @@ deliberately invisible on every page** (`D-kill-means-archive`), so read-only
 1. Submit a capture with raw text `asdfgh`.
 2. Dismiss it.
 3. Observe the response status and headers.
-4. `GET /` and read the inbox and the task list.
+4. `GET /` and read `Recent`, then read the Pool screen.
 5. Query the tasks table and count its rows.
 
 ### Expected Observable Outcomes
@@ -132,13 +132,13 @@ deliberately invisible on every page** (`D-kill-means-archive`), so read-only
 2. Dismiss `asdfgh`; triage `buy milk` as pool into a valid life area.
 3. `GET /` and confirm the inbox is empty.
 4. Stop the server. Restart it against the **same** database.
-5. `GET /` and read the inbox and the task list.
+5. `GET /` and read `Recent`, then read the Pool screen.
 6. Query the captures table and count its rows.
 
 ### Expected Observable Outcomes
 - The inbox is still empty. `asdfgh` has **not** come back — dismissal is a
   persisted stamp, not something the serving process remembered.
-- `buy milk` is still in the task list.
+- `buy milk` is still on the Pool screen.
 - The captures table still holds two rows after the restart.
 
 ## Procedure — the inbox says the same thing when everything is dismissed

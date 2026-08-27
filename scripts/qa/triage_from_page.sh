@@ -92,20 +92,24 @@ if qa_start_server "$BIN" "$TMP_DIR/$name.sqlite" "$TMP_DIR/$name.log"; then
     echo "FAIL: [$name] could not find the pool-triage control" >&2
     FAILURES=1
   else
-    qa_triage_form "$endpoint" "kind=pool&life_area=Work"
+    qa_triage_form "$endpoint" "kind=pool"
     if [[ "$STATUS" -ge 300 && "$STATUS" -lt 400 ]]; then
       echo "FAIL: [$name] pool triage redirected the browser (status $STATUS)" >&2
       FAILURES=1
     fi
     page="$(qa_get_inbox)"
-    inbox="$(qa_html_section "$page" captures)"
-    tasks="$(qa_html_section "$page" tasks)"
-    if [[ "$inbox" == *"buy milk"* ]]; then
-      echo "FAIL: [$name] \"buy milk\" still appears in the inbox after pool triage" >&2
+    row="$(qa_capture_row_block "$page" "$capture_id")"
+    if [[ "$row" != *"Pool · no context"* ]]; then
+      echo "FAIL: [$name] expected \"buy milk\"'s Recent row restyled \"Pool · no context\" after pool triage, got: $row" >&2
       FAILURES=1
     fi
-    if [[ "$tasks" != *"buy milk"* ]]; then
-      echo "FAIL: [$name] \"buy milk\" does not appear in the task list after pool triage" >&2
+    if [[ "$row" == *"<button type=\"submit\">Pool</button>"* ]]; then
+      echo "FAIL: [$name] expected no kind buttons on the triaged row, got: $row" >&2
+      FAILURES=1
+    fi
+    pool_page="$(curl -s "http://$ADDR/pool")"
+    if [[ "$pool_page" != *"buy milk"* ]]; then
+      echo "FAIL: [$name] \"buy milk\" does not appear on the Pool screen after pool triage" >&2
       FAILURES=1
     fi
   fi
@@ -267,8 +271,11 @@ else
 fi
 qa_stop_server
 
-# --- Procedure: hostile capture text stays escaped in the task list ---
-name="hostile-text-in-tasks"
+# --- Procedure: hostile capture text stays escaped where it is rendered
+# after triage --- #140: both halves (the pool screen and Recent's own
+# restyled row), not just one -- a text-dropped-not-escaped bug could pass
+# on one surface and not the other.
+name="hostile-text-after-triage"
 if qa_start_server "$BIN" "$TMP_DIR/$name.sqlite" "$TMP_DIR/$name.log"; then
   capture_id="$(qa_submit_capture "<script>alert('boom')</script>")"
   controls="$(qa_extract_controls "$(qa_get_inbox)" "$capture_id")"
@@ -277,18 +284,27 @@ if qa_start_server "$BIN" "$TMP_DIR/$name.sqlite" "$TMP_DIR/$name.log"; then
     echo "FAIL: [$name] could not find the pool-triage control" >&2
     FAILURES=1
   else
-    qa_triage_form "$endpoint" "kind=pool&life_area=Work"
+    qa_triage_form "$endpoint" "kind=pool"
     if [[ "$STATUS" != "201" ]]; then
       echo "FAIL: [$name] setup triage returned status $STATUS, expected 201" >&2
       FAILURES=1
     fi
-    tasks="$(qa_html_section "$(qa_get_inbox)" tasks)"
-    if [[ "$tasks" == *"<script>"* ]]; then
-      echo "FAIL: [$name] task list contains an unescaped <script> tag" >&2
+    pool_page="$(curl -s "http://$ADDR/pool")"
+    if [[ "$pool_page" == *"<script>alert"* ]]; then
+      echo "FAIL: [$name] the Pool screen contains an unescaped <script> tag" >&2
       FAILURES=1
     fi
-    if [[ "$tasks" != *"boom"* ]]; then
-      echo "FAIL: [$name] task list does not contain the word \"boom\" -- content may have been stripped instead of escaped" >&2
+    if [[ "$pool_page" != *"boom"* ]]; then
+      echo "FAIL: [$name] the Pool screen does not contain the word \"boom\" -- content may have been stripped instead of escaped" >&2
+      FAILURES=1
+    fi
+    recent_row="$(qa_capture_row_block "$(qa_get_inbox)" "$capture_id")"
+    if [[ "$recent_row" == *"<script>alert"* ]]; then
+      echo "FAIL: [$name] the restyled Recent row contains an unescaped <script> tag" >&2
+      FAILURES=1
+    fi
+    if [[ "$recent_row" != *"boom"* ]]; then
+      echo "FAIL: [$name] the restyled Recent row does not contain the word \"boom\" -- content may have been stripped instead of escaped" >&2
       FAILURES=1
     fi
   fi

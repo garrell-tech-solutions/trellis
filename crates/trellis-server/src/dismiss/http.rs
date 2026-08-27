@@ -136,7 +136,7 @@ mod tests {
     /// capture already gone from the inbox has no row left in `#lists` to
     /// carry it, the same way a triage rejection's per-row message has
     /// nothing to attach to once its row is gone (the inbox only attaches an
-    /// error to a capture still in `list_untriaged`).
+    /// error to a capture still waiting in `Recent`).
     #[test]
     fn the_not_open_message_names_why() {
         assert_eq!(

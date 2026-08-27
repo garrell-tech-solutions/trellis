@@ -55,8 +55,6 @@ static THEN_INBOX_SHOWS_NO_TAG: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r#"^the inbox shows no context tag for "([^"]+)"$"#).unwrap());
 static THEN_SUGGESTIONS_EXACTLY: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r#"^the context tag suggestions are exactly "([^"]+)"$"#).unwrap());
-static THEN_TASK_LIST_SHOWS_TAGGED: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r#"^the task list shows "([^"]+)" tagged "([^"]+)"$"#).unwrap());
 
 pub async fn dispatch(
     world: &mut World,
@@ -86,9 +84,6 @@ pub async fn dispatch(
     }
     if let Some(caps) = THEN_SUGGESTIONS_EXACTLY.captures(text) {
         return Some(dispatch_suggestions_exactly(world, example, &caps));
-    }
-    if let Some(caps) = THEN_TASK_LIST_SHOWS_TAGGED.captures(text) {
-        return Some(dispatch_task_list_shows_tagged(world, example, &caps));
     }
     None
 }
@@ -174,18 +169,6 @@ fn dispatch_inbox_lists_tagged(
     let row = html::row_containing(section, &raw_text)?;
     let row_text = html::between(row, r#"<div class="row-text">"#, "</div>")?;
     then_row_contains(row_text, &raw_text, &tag)
-}
-
-fn dispatch_task_list_shows_tagged(
-    world: &mut World,
-    example: &BTreeMap<String, String>,
-    caps: &regex::Captures<'_>,
-) -> Result<(), String> {
-    let raw_text = resolve(example, &caps[1])?;
-    let tag = resolve(example, &caps[2])?;
-    let section = html::tasks_section(html_body(world)?)?;
-    let row = html::row_containing(section, &raw_text)?;
-    then_row_contains(row, &raw_text, &tag)
 }
 
 fn then_row_contains(row: &str, raw_text: &str, tag: &str) -> Result<(), String> {
@@ -492,37 +475,6 @@ mod tests {
             dispatch_inbox_lists_tagged(&mut world, &example, &re),
             Ok(())
         );
-    }
-
-    fn world_with_tasks_section(html: &str) -> World {
-        let mut world = World::new();
-        world.last_html_body = Some(format!(r#"<ul id="tasks">{html}</ul>"#));
-        world
-    }
-
-    #[test]
-    fn dispatch_task_list_shows_tagged_passes_when_the_row_carries_the_tag() {
-        let mut world = world_with_tasks_section(r#"<li>[pool] buy screws @homedepot</li>"#);
-        let example = BTreeMap::new();
-        let re = THEN_TASK_LIST_SHOWS_TAGGED
-            .captures(r#"the task list shows "buy screws" tagged "@homedepot""#)
-            .unwrap();
-
-        assert_eq!(
-            dispatch_task_list_shows_tagged(&mut world, &example, &re),
-            Ok(())
-        );
-    }
-
-    #[test]
-    fn dispatch_task_list_shows_tagged_errors_when_the_tag_is_absent() {
-        let mut world = world_with_tasks_section(r#"<li>[pool] buy screws</li>"#);
-        let example = BTreeMap::new();
-        let re = THEN_TASK_LIST_SHOWS_TAGGED
-            .captures(r#"the task list shows "buy screws" tagged "@homedepot""#)
-            .unwrap();
-
-        assert!(dispatch_task_list_shows_tagged(&mut world, &example, &re).is_err());
     }
 
     #[test]

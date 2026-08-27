@@ -41,8 +41,6 @@ static THEN_REJECTED: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^the triage is rejected$").unwrap());
 static THEN_REJECTION_NAMES: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r#"^the rejection names "([^"]+)"$"#).unwrap());
-static THEN_TASK_LIST_EMPTY: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"^the task list is still empty$").unwrap());
 static THEN_CAPTURE_STILL_WAITING: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^the capture is still waiting in the untriaged queue$").unwrap());
 
@@ -89,9 +87,6 @@ pub async fn dispatch(
     }
     if let Some(caps) = THEN_REJECTION_NAMES.captures(text) {
         return Some(dispatch_rejection_names(world, example, &caps));
-    }
-    if THEN_TASK_LIST_EMPTY.is_match(text) {
-        return Some(then_task_list_is_empty(world).await);
     }
     if THEN_CAPTURE_STILL_WAITING.is_match(text) {
         return Some(then_capture_still_waiting(world).await);
@@ -221,12 +216,21 @@ pub fn given_server_believes_it_is(world: &mut World, timestamp: &str) -> Result
     Ok(())
 }
 
+/// Stamped with the scenario's own clock (real, unless pinned) rather than a
+/// fixed epoch -- #140's `list_recent` merges a capture's own `created_at_ms`
+/// against a triaged task's, so a capture set up here must carry a timestamp
+/// that means the same thing "now" does to whatever triages happen around it
+/// (`inbox-view-untriaged-never-drop-06` catches a hardcoded stamp: an
+/// untriaged capture created after four earlier ones were triaged must still
+/// sort as the most recent thing in Recent).
 pub async fn given_capture_waiting(world: &mut World, raw_text: &str) -> Result<(), String> {
     let pool = world.pool()?;
+    let now_ms = world.clock().now_ms();
     let id: i64 = sqlx::query_scalar(
-        "INSERT INTO captures (raw_text, source, created_at_ms) VALUES (?, 'web', 0) RETURNING id",
+        "INSERT INTO captures (raw_text, source, created_at_ms) VALUES (?, 'web', ?) RETURNING id",
     )
     .bind(raw_text)
+    .bind(now_ms)
     .fetch_one(pool)
     .await
     .map_err(|e| format!("insert capture: {e}"))?;
@@ -412,19 +416,6 @@ pub fn then_rejection_reports_invalid(
     }
 }
 
-pub async fn then_task_list_is_empty(world: &World) -> Result<(), String> {
-    let pool = world.pool()?;
-    let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM tasks")
-        .fetch_one(pool)
-        .await
-        .map_err(|e| format!("count tasks: {e}"))?;
-    if count == 0 {
-        Ok(())
-    } else {
-        Err(format!("expected an empty task list, found {count} row(s)"))
-    }
-}
-
 pub async fn then_capture_still_waiting(world: &World) -> Result<(), String> {
     let pool = world.pool()?;
     let capture_id = capture_id(world)?;
@@ -444,6 +435,23 @@ pub async fn then_capture_still_waiting(world: &World) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// No feature file names "the task list is still empty" any more (#140
+    /// retired that wording for a pair naming the specific screen and the
+    /// still-waiting capture); this stays as a plain DB-level fact two of
+    /// this file's own round-trip tests still check alongside it.
+    async fn then_task_list_is_empty(world: &World) -> Result<(), String> {
+        let pool = world.pool()?;
+        let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM tasks")
+            .fetch_one(pool)
+            .await
+            .map_err(|e| format!("count tasks: {e}"))?;
+        if count == 0 {
+            Ok(())
+        } else {
+            Err(format!("expected an empty task list, found {count} row(s)"))
+        }
+    }
 
     /// Folded in from the PR #31 review: this used to accept anything in
     /// `400..500`, so a malformed-JSON 400 (an axum extractor failure, never

@@ -48,6 +48,17 @@ qa_get_inbox() {
   curl -s "http://$ADDR/"
 }
 
+# #140: Recent keeps a triaged capture's row, restyled -- only a dismissed
+# capture actually leaves the visible list. qa/dismiss_capture.md's own
+# prose ("the inbox lists nothing" after one triage and one dismissal)
+# disagrees with its own feature file's scenario 03 ("the inbox lists
+# <triaged>... and does not list <dismissed>"), which is what actually
+# shipped and is what mutation-tested; this script follows the feature and
+# flags the doc's prose as stale rather than silently trusting either.
+qa_get_pool() {
+  curl -s "http://$ADDR/pool"
+}
+
 # The dismiss control's hx-post endpoint for capture_id, read from the
 # page's own markup -- not assumed. Prints nothing if the row (or a dismiss
 # control on it) cannot be found.
@@ -176,9 +187,20 @@ if qa_start_server "$BIN" "$TMP_DIR/$name.sqlite" "$TMP_DIR/$name.log"; then
     FAILURES=1
   fi
   inbox="$(qa_html_section "$(qa_get_inbox)" captures)"
-  if [[ -n "$inbox" ]]; then
-    echo "FAIL: [$name] expected the inbox to list no captures, got:
+  if [[ "$inbox" != *"buy milk"* ]]; then
+    echo "FAIL: [$name] expected the triaged \"buy milk\" row to stay in Recent, restyled, got:
 $inbox" >&2
+    FAILURES=1
+  fi
+  if [[ "$inbox" == *"asdfgh"* ]]; then
+    echo "FAIL: [$name] expected the dismissed \"asdfgh\" row to be gone from Recent, got:
+$inbox" >&2
+    FAILURES=1
+  fi
+  pool_page="$(qa_get_pool)"
+  if [[ "$pool_page" != *"buy milk"* ]]; then
+    echo "FAIL: [$name] expected the Pool screen to list \"buy milk\", got:
+$pool_page" >&2
     FAILURES=1
   fi
   qa_assert_row_and_task_counts "$name" 2 1
@@ -261,8 +283,8 @@ if qa_start_server "$BIN" "$DB" "$TMP_DIR/$name-1.log"; then
     FAILURES=1
   fi
   inbox="$(qa_html_section "$(qa_get_inbox)" captures)"
-  if [[ -n "$inbox" ]]; then
-    echo "FAIL: [$name] expected the inbox to be empty before restart, got:
+  if [[ "$inbox" != *"buy milk"* || "$inbox" == *"asdfgh"* ]]; then
+    echo "FAIL: [$name] expected only the triaged \"buy milk\" row in Recent before restart (dismissed asdfgh gone), got:
 $inbox" >&2
     FAILURES=1
   fi
@@ -271,14 +293,14 @@ $inbox" >&2
   if qa_start_server "$BIN" "$DB" "$TMP_DIR/$name-2.log"; then
     page="$(qa_get_inbox)"
     inbox="$(qa_html_section "$page" captures)"
-    tasks="$(qa_html_section "$page" tasks)"
-    if [[ -n "$inbox" ]]; then
-      echo "FAIL: [$name] expected the inbox to still be empty after restart, got:
+    pool_page="$(qa_get_pool)"
+    if [[ "$inbox" != *"buy milk"* || "$inbox" == *"asdfgh"* ]]; then
+      echo "FAIL: [$name] expected only the triaged \"buy milk\" row in Recent after restart (dismissed asdfgh still gone), got:
 $inbox" >&2
       FAILURES=1
     fi
-    if [[ "$tasks" != *"buy milk"* ]]; then
-      echo "FAIL: [$name] expected buy milk to still be in the task list after restart" >&2
+    if [[ "$pool_page" != *"buy milk"* ]]; then
+      echo "FAIL: [$name] expected buy milk to still be on the Pool screen after restart" >&2
       FAILURES=1
     fi
     row_count="$(qa_capture_row_count)"

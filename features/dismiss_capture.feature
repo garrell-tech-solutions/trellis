@@ -1,6 +1,5 @@
-# mutation-stamp: sha256=a74bbe3ebb88fdcefdf29fd26ef2287c015f6b19c1d903f8462125694f359272
 # acceptance-mutation-manifest-begin
-# {"version":1,"tested_at":"2026-08-17T17:57:30.288312157Z","feature_name":"A capture can be dismissed, and its row is kept","feature_path":"features/dismiss_capture.feature","background_hash":"01db5b6232c439c5b108b5e869cd6178d5cdba30bf901eed9dc0738685f7b18e","implementation_hash":"sha256:3940663b77d50b9408daf9ceb23258c83423f56a888edd7da07dccd68155699a","scenarios":[{"index":2,"name":"Neither way out of the inbox deletes the capture row","scenario_hash":"a4e387170dca3db0a458e28c37b2ccee5cff4027e1cc50c5d356dad1639e425f","mutation_count":2,"result":{"Total":2,"Killed":2,"Survived":0,"Errors":0},"tested_at":"2026-08-17T17:57:30.288312157Z"},{"index":3,"name":"A triaged capture cannot then be dismissed","scenario_hash":"abb7dfb5a3661b22c31b4bd61e9d72dacca9cdcded22cc44b1c609fe48fe9034","mutation_count":2,"result":{"Total":2,"Killed":2,"Survived":0,"Errors":0},"tested_at":"2026-08-17T17:57:30.288312157Z"},{"index":4,"name":"A dismissed capture cannot then be triaged","scenario_hash":"0ac1b40076d821730ed397ff4f16589d7bd865a2fcb3b8e51e8e662950bc5492","mutation_count":2,"result":{"Total":2,"Killed":2,"Survived":0,"Errors":0},"tested_at":"2026-08-17T17:57:30.288312157Z"},{"index":5,"name":"A dismissed capture cannot be dismissed again","scenario_hash":"ce067455f3cc62b47f56e7324227bd2ec984e08f7c22e244f10bb067d26ef267","mutation_count":2,"result":{"Total":2,"Killed":2,"Survived":0,"Errors":0},"tested_at":"2026-08-17T17:57:30.288312157Z"},{"index":6,"name":"A triaged capture cannot be triaged again","scenario_hash":"098e716035dcc9e882d23ffff7f15e7937bb69ed62ac7963d19f420a63bc6dc1","mutation_count":2,"result":{"Total":2,"Killed":2,"Survived":0,"Errors":0},"tested_at":"2026-08-17T17:57:30.288312157Z"}]}
+# {"version":1,"tested_at":"2026-08-27T04:25:03.428929569Z","feature_name":"A capture can be dismissed, and its row is kept","feature_path":"features/dismiss_capture.feature","background_hash":"01db5b6232c439c5b108b5e869cd6178d5cdba30bf901eed9dc0738685f7b18e","implementation_hash":"sha256:3940663b77d50b9408daf9ceb23258c83423f56a888edd7da07dccd68155699a","scenarios":[{"index":3,"name":"A triaged capture cannot then be dismissed","scenario_hash":"0346f546b07c0b59470947aaf4c6283d7ac5dc5a0dbba8fca2c0683eeacba656","mutation_count":2,"result":{"Total":2,"Killed":2,"Survived":0,"Errors":0},"tested_at":"2026-08-27T04:25:03.428929569Z"},{"index":4,"name":"A dismissed capture cannot then be triaged","scenario_hash":"03b7af56f8fccbd528058c737d474c32646922298678995907a33149e28aa291","mutation_count":1,"result":{"Total":1,"Killed":1,"Survived":0,"Errors":0},"tested_at":"2026-08-27T04:25:03.428929569Z"},{"index":5,"name":"A dismissed capture cannot be dismissed again","scenario_hash":"74612ae53e9e8344d4e79a8c95abfa72e2dccf655c9f67b6afd7a86ee2405afd","mutation_count":1,"result":{"Total":1,"Killed":1,"Survived":0,"Errors":0},"tested_at":"2026-08-27T04:25:03.428929569Z"},{"index":6,"name":"A triaged capture cannot be triaged again","scenario_hash":"1cbcd7db42748056e2fe9a707f5c0c529c7f63899f3358f553291b8207ee7ba9","mutation_count":2,"result":{"Total":2,"Killed":2,"Survived":0,"Errors":0},"tested_at":"2026-08-27T04:25:03.428929569Z"}]}
 # acceptance-mutation-manifest-end
 
 # dismiss-capture-offers-01: every untriaged capture offers a dismiss action on the page
@@ -35,7 +34,7 @@ Feature: A capture can be dismissed, and its row is kept
     Then the dismissal response does not redirect the browser
     When the inbox is viewed
     Then the inbox does not list "asdfgh"
-    And the task list is still empty
+    And the pool screen lists nothing
 
   # dismiss-capture-keeps-the-row-03: neither way out of the inbox deletes the capture row
   Scenario: Neither way out of the inbox deletes the capture row
@@ -43,13 +42,14 @@ Feature: A capture can be dismissed, and its row is kept
     When the capture is triaged as a pool task in life area "Home"
     And "asdfgh" is dismissed from the inbox
     And the inbox is viewed
-    Then the inbox lists no captures
+    Then the inbox lists "<triaged>"
+    And the inbox does not list "<dismissed>"
     And the capture row count is "<rows>"
-    And the task list has "<tasks>" tasks
+    And the pool screen lists "<triaged>"
 
     Examples:
-      | rows | tasks |
-      | 2    | 1     |
+      | triaged  | dismissed | rows |
+      | buy milk | asdfgh    | 2    |
 
   # dismiss-capture-no-dismissal-after-triage-04: a triaged capture cannot then be dismissed
   Scenario: A triaged capture cannot then be dismissed
@@ -57,11 +57,11 @@ Feature: A capture can be dismissed, and its row is kept
     When the capture is dismissed from the inbox
     Then the dismissal is rejected
     And the capture row count is "<rows>"
-    And the task list has "<tasks>" tasks
+    And the pool screen lists "<pooled>"
 
     Examples:
-      | rows | tasks |
-      | 1    | 1     |
+      | rows | pooled |
+      | 1    | asdfgh |
 
   # dismiss-capture-no-triage-after-dismissal-05: a dismissed capture cannot then be triaged, and the rejection says why
   Scenario: A dismissed capture cannot then be triaged
@@ -70,11 +70,11 @@ Feature: A capture can be dismissed, and its row is kept
     Then the triage is rejected
     And the rejection says the capture is no longer in the inbox
     And the capture row count is "<rows>"
-    And the task list has "<tasks>" tasks
+    And the pool screen lists nothing
 
     Examples:
-      | rows | tasks |
-      | 1    | 0     |
+      | rows |
+      | 1    |
 
   # dismiss-capture-no-second-dismissal-06: a dismissed capture cannot be dismissed again
   Scenario: A dismissed capture cannot be dismissed again
@@ -82,11 +82,11 @@ Feature: A capture can be dismissed, and its row is kept
     When the capture is dismissed from the inbox
     Then the dismissal is rejected
     And the capture row count is "<rows>"
-    And the task list has "<tasks>" tasks
+    And the pool screen lists nothing
 
     Examples:
-      | rows | tasks |
-      | 1    | 0     |
+      | rows |
+      | 1    |
 
   # dismiss-capture-no-second-triage-07: a triaged capture cannot be triaged again
   Scenario: A triaged capture cannot be triaged again
@@ -94,11 +94,11 @@ Feature: A capture can be dismissed, and its row is kept
     When the capture is triaged as a pool task in life area "Home"
     Then the triage is rejected
     And the capture row count is "<rows>"
-    And the task list has "<tasks>" tasks
+    And the pool screen lists "<pooled>"
 
     Examples:
-      | rows | tasks |
-      | 1    | 1     |
+      | rows | pooled |
+      | 1    | asdfgh |
 
   # dismiss-capture-empty-state-08: dismissing the last capture leaves the inbox showing its ordinary empty-state message
   Scenario: Dismissing the last capture leaves the inbox showing its ordinary empty-state message

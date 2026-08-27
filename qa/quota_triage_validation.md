@@ -65,7 +65,7 @@ not exist. It now names the two things that are actually possible.
 ## Setup — repeat before each procedure
 
 1. Start the server against a fresh database file.
-2. Confirm the task list is empty and the Quota screen offers no quotas.
+2. Confirm the Quota screen offers no quotas. **The `Tasks` list on the capture page is gone (#140)**; the destination screens are where a write is visible.
 3. Submit a capture with raw text `go to the gym`.
 4. Confirm it is present in the untriaged queue.
 

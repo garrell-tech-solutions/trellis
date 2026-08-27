@@ -37,7 +37,7 @@ page render and into `POST /captures`.**
    `@homedepot` is offered** and can be accepted. **This is the step that
    cannot be scripted, and it is why the walkthrough exists.**
 4. Triage both as **pool** — one tap each; pool asks for nothing else now.
-   Confirm both keep their tags in the task list.
+   Confirm both keep their tags on the Pool screen.
 5. Quick-add **"pick up milk"**, tag `@supermarket`.
 6. Restart and reload. Confirm all three keep their tags.
 
@@ -114,7 +114,7 @@ page render and into `POST /captures`.**
 1. Quick-add `buy screws` tagged `@homedepot`; triage it as pool.
 2. Quick-add `return the drill` with no tag; triage it as pool supplying
    `@homedepot` on the triage control.
-3. Read the task list and query both rows.
+3. Read the Pool screen and query both rows.
 
 ### Expected Observable Outcomes
 - Both tasks show `@homedepot`.
@@ -130,7 +130,7 @@ page render and into `POST /captures`.**
 
 1. Create tagged captures, triage one.
 2. Stop the server. Restart against the **same** database.
-3. Read the inbox, the task list and the suggestion list.
+3. Read `Recent`, the Pool screen and the suggestion list.
 
 ### Expected Observable Outcomes
 - Every tag is still there, on captures and on tasks.
@@ -141,7 +141,7 @@ page render and into `POST /captures`.**
 
 1. Quick-add a capture tagged `<script>alert('boom')</script>`.
 2. Read the **raw HTML source** of the inbox.
-3. Triage it and read the task list, and read the suggestion list.
+3. Triage it and read the Pool screen, and read the suggestion list.
 
 ### Expected Observable Outcomes
 - No unescaped `<script>` tag on **any** of the three surfaces; `boom` still

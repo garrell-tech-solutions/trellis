@@ -1,5 +1,5 @@
 # acceptance-mutation-manifest-begin
-# {"version":1,"tested_at":"2026-08-26T17:14:41.208307033Z","feature_name":"A capture row offers three kinds, and shows one set of fields","feature_path":"features/disclosures.feature","background_hash":"304f93e93e2b217b49069c091950b87589f0c7e789e2d0dc3aaa8d845450cb64","implementation_hash":"sha256:8cf9f4aa9e526e15ece45784ab1a23e9c99cde70f9918d1f04183dadb939c1ef","scenarios":[{"index":0,"name":"An untriaged row offers three kind buttons, and no fields until one is chosen","scenario_hash":"b600f70c85c13f5b382778d46ce69ffce0892edd9e3162a9fc5fdc7c5126a381","mutation_count":1,"result":{"Total":1,"Killed":1,"Survived":0,"Errors":0},"tested_at":"2026-08-24T02:10:34.554025604Z"},{"index":5,"name":"Every kind still submits exactly what it submitted before","scenario_hash":"7cf20d3bd9fe7de716261e3778a309d7b07859d9a416992b48eb7e96c9688f52","mutation_count":4,"result":{"Total":4,"Killed":4,"Survived":0,"Errors":0},"tested_at":"2026-08-24T02:07:04.129100418Z"}]}
+# {"version":1,"tested_at":"2026-08-27T04:24:43.946730348Z","feature_name":"A capture row offers three kinds, and shows one set of fields","feature_path":"features/disclosures.feature","background_hash":"304f93e93e2b217b49069c091950b87589f0c7e789e2d0dc3aaa8d845450cb64","implementation_hash":"sha256:8cf9f4aa9e526e15ece45784ab1a23e9c99cde70f9918d1f04183dadb939c1ef","scenarios":[{"index":5,"name":"Every kind still submits exactly what it submitted before","scenario_hash":"894fd7871c8dfd2da4119154899981d7181ce00cd0e2a885c21e11d1fd7c2b6e","mutation_count":4,"result":{"Total":4,"Killed":4,"Survived":0,"Errors":0},"tested_at":"2026-08-27T04:24:43.946730348Z"},{"index":0,"name":"An untriaged row offers three kind buttons, and no fields until one is chosen","scenario_hash":"b600f70c85c13f5b382778d46ce69ffce0892edd9e3162a9fc5fdc7c5126a381","mutation_count":1,"result":{"Total":1,"Killed":1,"Survived":0,"Errors":0},"tested_at":"2026-08-24T02:10:34.554025604Z"}]}
 # acceptance-mutation-manifest-end
 
 # disclosures-three-buttons-01: an untriaged row offers three kind buttons, and no fields until one is chosen
@@ -92,8 +92,9 @@ Feature: A capture row offers three kinds, and shows one set of fields
     Given a capture with raw text "buy screws" is waiting in the untriaged queue
     When the kind "Pool" is chosen for "buy screws"
     And the inbox is viewed
-    Then the task list shows "buy screws"
-    And the inbox does not list "buy screws"
+    Then the row for "buy screws" offers no kind buttons
+    When the pool screen is viewed
+    Then the pool screen lists "buy screws"
 
   # disclosures-one-panel-at-a-time-03: choosing a kind shows that kind's fields and no other kind's
   Scenario: Choosing a kind shows that kind's fields and no other kind's
@@ -140,7 +141,8 @@ Feature: A capture row offers three kinds, and shows one set of fields
     And the capture is triaged as a committed task through the page with "<missing_field>" omitted
     Then the triage is rejected
     And the rejection names "<missing_field>"
-    And the task list is still empty
+    And the committed screen lists nothing
+    And the capture is still waiting in the untriaged queue
 
     Examples:
       | missing_field     |

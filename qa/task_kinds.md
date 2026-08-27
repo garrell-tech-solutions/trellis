@@ -17,12 +17,12 @@ Two user-facing affordances are exercised:
 
 ## Setup — repeat before each procedure below
 
-Each procedure starts from an empty task list, matching the feature's
+Each procedure starts from an empty database, matching the feature's
 `Background`.
 
 1. Start the trellis server against a fresh database file.
 2. Confirm the server is reachable.
-3. Confirm the task list is empty before triaging.
+3. Confirm the Pool, Committed and Quota screens all list nothing before triaging. **The capture page no longer carries a `Tasks` list (#140).**
 4. Submit a capture with raw text `buy milk` and observe the capture's
    identifier in the response.
 

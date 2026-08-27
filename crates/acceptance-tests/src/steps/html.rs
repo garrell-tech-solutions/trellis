@@ -29,12 +29,6 @@ pub fn captures_section(body: &str) -> Result<&str, String> {
     between(body, r#"<ul id="captures">"#, "</ul>")
 }
 
-/// The task list's own section — everything `triage_from_page.feature`'s
-/// "the task list ..." steps mean.
-pub fn tasks_section(body: &str) -> Result<&str, String> {
-    between(body, r#"<ul id="tasks">"#, "</ul>")
-}
-
 /// The shared header's own section — everything `pool_screen.feature`'s
 /// "the tab bar ..." steps mean. Returned in #92 alongside the header
 /// itself, which #88 had deleted along with the pages it linked between.
@@ -214,14 +208,6 @@ mod tests {
         let section = captures_section(body).unwrap();
         assert!(section.contains("buy milk"));
         assert!(!section.contains("call the dentist"));
-    }
-
-    #[test]
-    fn tasks_section_is_scoped_to_the_task_list_only() {
-        let body = r#"<ul id="captures"><li>buy milk</li></ul><ul id="tasks"><li>[pool] call the dentist</li></ul>"#;
-        let section = tasks_section(body).unwrap();
-        assert!(section.contains("call the dentist"));
-        assert!(!section.contains("buy milk"));
     }
 
     #[test]

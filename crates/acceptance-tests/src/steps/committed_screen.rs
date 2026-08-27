@@ -40,6 +40,8 @@ static WHEN_TRIAGED_THROUGH_TRANSPORT_OMITTING_COMMITMENT: LazyLock<Regex> = Laz
 });
 static THEN_LISTS: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r#"^the committed screen lists "([^"]+)"$"#).unwrap());
+static THEN_LISTS_NOTHING: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^the committed screen lists nothing$").unwrap());
 static THEN_ROW_SHOWS_CONTEXT: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r#"^the committed row "([^"]+)" shows the context "([^"]+)"$"#).unwrap()
 });
@@ -86,6 +88,9 @@ pub async fn dispatch(
     }
     if let Some(caps) = THEN_LISTS.captures(text) {
         return Some(dispatch_lists(world, example, &caps));
+    }
+    if THEN_LISTS_NOTHING.is_match(text) {
+        return Some(then_lists_nothing(world).await);
     }
     if let Some(caps) = THEN_ROW_SHOWS_CONTEXT.captures(text) {
         return Some(dispatch_row_shows_context(world, example, &caps));
@@ -255,6 +260,24 @@ fn dispatch_lists(
         committed_texts_in_order(body),
         "the committed screen to list",
     )
+}
+
+/// "The committed screen lists nothing" (#140, reused by other features that
+/// only care whether the screen is empty) always fetches `/committed` itself
+/// rather than trusting `world.last_html_body` -- several call sites check
+/// this straight after checking the pool screen in the same scenario, with
+/// no "is viewed" step of its own in between.
+async fn then_lists_nothing(world: &mut World) -> Result<(), String> {
+    view_screen(world).await?;
+    let body = html_body(world)?;
+    let texts = committed_texts_in_order(body);
+    if texts.is_empty() {
+        Ok(())
+    } else {
+        Err(format!(
+            "expected the committed screen to list nothing, got {texts:?}"
+        ))
+    }
 }
 
 fn committed_row<'a>(body: &'a str, raw_text: &str) -> Result<&'a str, String> {

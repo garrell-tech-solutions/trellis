@@ -252,7 +252,7 @@ pub async fn dispatch(
     if let Some(outcome) = unknown_kind_rejection::dispatch(world, text, example).await {
         return outcome;
     }
-    if let Some(outcome) = inbox_view::dispatch(world, text).await {
+    if let Some(outcome) = inbox_view::dispatch(world, text, example).await {
         return outcome;
     }
     if let Some(outcome) = triage_from_page::dispatch(world, text, example).await {

@@ -9,7 +9,7 @@
 #   reports five violations, all Gherkin step dispatchers, and the project has
 #   already refused the only change that would move them: a (Regex, handler)
 #   table needing roughly forty boxed-future wrappers to replace forty one-line
-#   branches. docs/decisions.md, 2026-08-12, in bold: "Do not flatten these
+#   branches. docs/decisions-history.md, 2026-08-12, in bold: "Do not flatten these
 #   into a registry to make the number go down."
 #
 #   A gate that can only be satisfied by a change the project forbids is not a
@@ -229,7 +229,7 @@ WHAT TO DO
     violation hides.
 
   - Tempted to flatten a dispatcher into a (Regex, handler) table to make the
-    number go down? Do not. docs/decisions.md, 2026-08-12, settles it: the
+    number go down? Do not. docs/decisions-history.md, 2026-08-12, settles it: the
     handlers are async with differing arities, so a uniform table needs roughly
     forty boxed-future wrappers to replace forty one-line branches -- exactly
     the "indirection that is strictly worse to read" that T-complexity-8

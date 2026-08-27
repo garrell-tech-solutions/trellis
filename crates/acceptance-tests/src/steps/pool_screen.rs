@@ -74,12 +74,16 @@ static THEN_NO_UNESCAPED_SCRIPT: LazyLock<Regex> = LazyLock::new(|| {
 });
 static THEN_CONTAINS_WORD: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r#"^the pool screen contains the word "([^"]+)"$"#).unwrap());
-static THEN_POOL_LISTS_NOTHING: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"^the pool screen lists nothing$").unwrap());
-static THEN_POOL_LISTS_TAGGED: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r#"^the pool screen lists "([^"]+)" tagged "([^"]+)"$"#).unwrap());
-static THEN_POOL_LISTS: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r#"^the pool screen lists "([^"]+)"$"#).unwrap());
+/// One assertion -- "the pool screen lists exactly this" -- at three
+/// arities, so it is ONE arm rather than three (#155). It began as three
+/// regexes and pushed `dispatch` to a CRAP score of 31 against a threshold
+/// of 30, which at full coverage is just the cyclomatic count. Collapsing
+/// them is not arm-shaving to move a number: `nothing` is the empty case of
+/// `lists "..."`, and `tagged` is an optional clause on it. The Gherkin is
+/// unchanged; all three step texts still read as they did.
+static THEN_POOL_LISTS: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r#"^the pool screen lists (?:nothing|"([^"]*)")(?: tagged "([^"]+)")?$"#).unwrap()
+});
 
 pub async fn dispatch(
     world: &mut World,
@@ -163,12 +167,6 @@ pub async fn dispatch(
     }
     if let Some(caps) = THEN_CONTAINS_WORD.captures(text) {
         return Some(then_html_body_contains(world, &caps[1]));
-    }
-    if THEN_POOL_LISTS_NOTHING.is_match(text) {
-        return Some(then_pool_lists_nothing(world).await);
-    }
-    if let Some(caps) = THEN_POOL_LISTS_TAGGED.captures(text) {
-        return Some(dispatch_pool_lists_tagged(world, example, &caps).await);
     }
     if let Some(caps) = THEN_POOL_LISTS.captures(text) {
         return Some(dispatch_pool_lists(world, example, &caps).await);
@@ -502,9 +500,40 @@ async fn fetch_pool_body(world: &mut World) -> Result<(), String> {
     view_screen(world, "/pool").await
 }
 
-async fn then_pool_lists_nothing(world: &mut World) -> Result<(), String> {
+/// A capture group that may not have participated, resolved through the
+/// example row. Kept out of the dispatcher below so that branching on
+/// arity is the only thing it does.
+fn optional_capture(
+    example: &BTreeMap<String, String>,
+    caps: &regex::Captures<'_>,
+    index: usize,
+) -> Result<Option<String>, String> {
+    caps.get(index)
+        .map(|m| resolve(example, m.as_str()))
+        .transpose()
+}
+
+/// Dispatches on which of the three arities matched: no capture is
+/// `nothing`, group 1 alone is the plain list, and group 2 adds the tag.
+/// The branching lives here rather than in `dispatch`, which is what
+/// `T-complexity-8` asks for -- extract the logic that is not the match.
+async fn dispatch_pool_lists(
+    world: &mut World,
+    example: &BTreeMap<String, String>,
+    caps: &regex::Captures<'_>,
+) -> Result<(), String> {
+    let expected = optional_capture(example, caps, 1)?;
+    let tag = optional_capture(example, caps, 2)?;
     fetch_pool_body(world).await?;
     let body = html_body(world)?;
+    match (expected, tag) {
+        (None, _) => then_pool_lists_nothing(body),
+        (Some(text), None) => then_pool_lists_text(body, &text),
+        (Some(text), Some(tag)) => then_pool_row_carries_tag(body, &text, &tag),
+    }
+}
+
+fn then_pool_lists_nothing(body: &str) -> Result<(), String> {
     if body.contains("trip-item-text") || body.contains("loose-text") {
         Err(format!(
             "expected the pool screen to list nothing, got:\n{body}"
@@ -514,15 +543,8 @@ async fn then_pool_lists_nothing(world: &mut World) -> Result<(), String> {
     }
 }
 
-async fn dispatch_pool_lists(
-    world: &mut World,
-    example: &BTreeMap<String, String>,
-    caps: &regex::Captures<'_>,
-) -> Result<(), String> {
-    let raw_text = resolve(example, &caps[1])?;
-    fetch_pool_body(world).await?;
-    let body = html_body(world)?;
-    if body.contains(raw_text.as_str()) {
+fn then_pool_lists_text(body: &str, raw_text: &str) -> Result<(), String> {
+    if body.contains(raw_text) {
         Ok(())
     } else {
         Err(format!(
@@ -531,17 +553,9 @@ async fn dispatch_pool_lists(
     }
 }
 
-async fn dispatch_pool_lists_tagged(
-    world: &mut World,
-    example: &BTreeMap<String, String>,
-    caps: &regex::Captures<'_>,
-) -> Result<(), String> {
-    let raw_text = resolve(example, &caps[1])?;
-    let tag = resolve(example, &caps[2])?;
-    fetch_pool_body(world).await?;
-    let body = html_body(world)?;
-    let row = html::row_containing(body, raw_text.as_str())?;
-    if row.contains(tag.as_str()) {
+fn then_pool_row_carries_tag(body: &str, raw_text: &str, tag: &str) -> Result<(), String> {
+    let row = html::row_containing(body, raw_text)?;
+    if row.contains(tag) {
         Ok(())
     } else {
         Err(format!(

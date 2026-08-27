@@ -106,8 +106,8 @@
     {
       "file": "crates/acceptance-tests/src/steps/pool_screen.rs",
       "function": "dispatch",
-      "cyclomatic_complexity": 31,
-      "why": "Gherkin step dispatcher; regex chain, one-line delegation per arm. 27 -> 28 (#94): then_does_not_mention moved to steps::mod as a shared helper taking `body` directly, and the tab-path lookup gained a \"committed\" arm. Both are new arms, not conditionals in the match. 28 -> 31 (#140): three arms -- `lists nothing`, `lists \"X\" tagged`, and the hostile-text pair that moved here from the retired task list."
+      "cyclomatic_complexity": 29,
+      "why": "Gherkin step dispatcher; regex chain, one-line delegation per arm. 27 -> 28 (#94): then_does_not_mention moved to steps::mod as a shared helper taking `body` directly, and the tab-path lookup gained a \"committed\" arm. Both are new arms, not conditionals in the match. 28 -> 29 (#140): the retired task list pushed its assertions onto this screen. It was 31 until #155 -- CRAP failed at exactly that number, because at full coverage CRAP is the cyclomatic count and it has no baseline to record an exception in. The three `lists ...` arms were ONE assertion at three arities and became one arm; the arity branch moved into a handler, which is what T-complexity-8 asks for."
     },
     {
       "file": "crates/acceptance-tests/src/steps/quota_migration.rs",

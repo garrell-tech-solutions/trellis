@@ -14,8 +14,28 @@
 <div class="quota-rows">
 {% for quota in quotas %}
 <div class="quota-row" id="quota-row-{{ quota.id }}">
+
+{# The name and the readout share a baseline the way `.pool-header` and
+   `.trip-header` do. `.quota-name` carries the name and NOTHING ELSE:
+   `steps/html.rs`'s `quota_row` finds a row by an exact needle built from
+   the name div and its text, so anything that decorates the name -- a met
+   marker, a count -- is a sibling of that div, never a child of it.
+
+   These are Askama comments, not HTML ones, for the same reason: an HTML
+   comment quoting the needle is still the needle as far as a scraper that
+   splits on markup is concerned, and `quota_migration` reads the screen's
+   quota names exactly that way. #}
+<div class="quota-row-top">
 <div class="quota-name">{{ quota.name }}</div>
 <div class="quota-readout">{{ quota.readout }}</div>
+</div>
+
+{# A weekly hour target's whole question is "how far am I", and until now
+   the screen answered it only in prose. The width is the one number the
+   note already spells out (`view::bar_percent`, clamped to 100), so the
+   bar cannot disagree with the sentence under it. #}
+<div class="quota-track"><div class="quota-fill" style="width: {{ quota.bar_percent }}%"></div></div>
+
 <div class="quota-note">{{ quota.note }}</div>
 
 <div class="quota-quick-log">
@@ -29,6 +49,13 @@
 <input type="hidden" name="minutes" value="60">
 <button type="submit" class="quota-quick-log-1h">+1h</button>
 </form>
+</div>
+
+{# `Other…` is the escape hatch, so it sits below the two one-tap paths
+   rather than competing with them for a third of the row. It stays a
+   sibling inside `.quota-row` (scripts/qa/quota_sessions.cjs reads
+   `details.quota-other > summary`) and its own open state still rides the
+   request rather than being stored. #}
 <details class="quota-other">
 <summary>Other…</summary>
 <form hx-post="/quota/{{ quota.id }}/sessions" hx-target="#quota-body" hx-swap="outerHTML">
@@ -43,16 +70,22 @@
 <button type="submit">Add</button>
 </form>
 </details>
-</div>
 
 <details class="quota-expand"{% if quota.expanded %} open{% endif %}>
-<summary>Expand</summary>
+<summary><span class="quota-expand-label">This week</span></summary>
 <div class="quota-this-week">
-<h2>This week</h2>
 <ul class="quota-sessions">
 {% for session in quota.sessions %}
 <li class="quota-session" id="quota-session-{{ session.id }}">
+{# The correction form is behind its own disclosure: a session that is
+   merely being READ is one line ("Mon 60m"), not a day picker, a number
+   field and a Save button standing permanently open. Delete stays outside
+   it, so removing a session you can already see never costs two taps. #}
+<details class="quota-session-tools">
+<summary>
 <span class="quota-session-label">{{ session.label }}</span>
+<span class="quota-session-edit-hint">Edit</span>
+</summary>
 <form class="quota-session-edit" hx-post="/quota/sessions/{{ session.id }}" hx-target="#quota-body" hx-swap="outerHTML">
 <select name="day">
 {% for day in day_options %}
@@ -62,8 +95,9 @@
 <input type="number" name="minutes" min="5" step="5" value="{{ session.minutes }}">
 <button type="submit">Save</button>
 </form>
+</details>
 <form class="quota-session-delete" hx-post="/quota/sessions/{{ session.id }}/delete" hx-target="#quota-body" hx-swap="outerHTML">
-<button type="submit">Delete</button>
+<button type="submit" aria-label="Delete this session">&times;</button>
 </form>
 </li>
 {% endfor %}
@@ -74,6 +108,7 @@
 <div class="quota-sessions-summary">{{ quota.summary }}</div>
 </div>
 </details>
+
 </div>
 {% endfor %}
 </div>

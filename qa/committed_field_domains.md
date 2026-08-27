@@ -23,7 +23,7 @@ library, module, or test helper is used.
 
 1. Start the trellis server against a fresh database file.
 2. Confirm the server is reachable.
-3. Confirm the task list is empty.
+3. Confirm the Pool, Committed and Quota screens all list nothing. **There is no `Tasks` list on the capture page any more (#140)** — the destination screens are where a write is now visible.
 4. Submit a capture with raw text `call the dentist` and observe the capture's
    identifier in the response.
 5. Confirm the capture is present in the untriaged queue.

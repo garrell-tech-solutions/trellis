@@ -103,7 +103,8 @@ Feature: A committed date is chosen, not typed, and lands on the day intended
     When the capture is triaged as a committed "by" with "<missing_field>" omitted
     Then the triage is rejected
     And the rejection names "<missing_field>"
-    And the task list is still empty
+    And the committed screen lists nothing
+    And the capture is still waiting in the untriaged queue
 
     Examples:
       | missing_field |

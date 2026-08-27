@@ -103,8 +103,9 @@ Feature: A capture carries a context tag, and the tags autocomplete on what came
     Given a capture with raw text "buy screws" tagged "@homedepot" is waiting in the untriaged queue
     When the capture is triaged as a pool task
     And the inbox is viewed
-    Then the task list shows "buy screws" tagged "<tag>"
-    And the inbox does not list "buy screws"
+    Then the row for "buy screws" reads "Pool · <tag>"
+    When the pool screen is viewed
+    Then the pool screen lists "buy screws" tagged "<tag>"
 
     Examples:
       | tag        |
@@ -115,7 +116,7 @@ Feature: A capture carries a context tag, and the tags autocomplete on what came
     Given a capture with raw text "buy screws" is waiting in the untriaged queue
     When the capture is triaged as a pool task tagged "<tag>"
     And the inbox is viewed
-    Then the task list shows "buy screws" tagged "<tag>"
+    Then the pool screen lists "buy screws" tagged "<tag>"
 
     Examples:
       | tag        |

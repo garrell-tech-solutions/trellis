@@ -127,7 +127,8 @@ Feature: The committed screen lists what has a date on it
     When the capture is triaged as a committed task through the "<transport>" with "commitment" omitted
     Then the triage is rejected
     And the rejection names "commitment"
-    And the task list is still empty
+    And the committed screen lists nothing
+    And the capture is still waiting in the untriaged queue
 
     Examples:
       | transport |

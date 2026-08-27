@@ -4,11 +4,11 @@
 # acceptance-mutation-manifest-end
 
 # triage-from-page-offers-all-kinds-01: each untriaged capture offers all three triage kinds from the page
-# triage-from-page-pool-02: triaging as pool through the page moves the capture into the task list without a full page reload
+# triage-from-page-pool-02: triaging as pool through the page files it without a full page reload, and the row stays
 # triage-from-page-committed-rejected-03: triaging as committed through the page with a required field omitted is rejected the same way as the API
 # triage-from-page-committed-closed-choices-04: the committed form offers commitment and priority as fixed choices, not free text
 # triage-from-page-quota-rejected-05: triaging as quota through the page with a required field omitted is rejected the same way as the API
-# triage-from-page-escapes-hostile-text-06: hostile capture text stays escaped in the task list
+# triage-from-page-escapes-hostile-text-06: hostile capture text stays escaped where it is rendered after triage
 # triage-from-page-pool-needs-no-form-07: pool triage is submitted straight from the row, with nothing to open first
 # triage-from-page-pool-is-cheapest-08: the pool form asks for fewer inputs than committed or quota
 #
@@ -26,14 +26,16 @@ Feature: Triage happens on the page, using the same validation as the API
     When the inbox is viewed
     Then the inbox offers to triage "buy milk" as pool, committed and quota
 
-  # triage-from-page-pool-02: triaging as pool through the page moves the capture into the task list without a full page reload
-  Scenario: Triaging as pool through the page moves the capture into the task list without a full page reload
+  # triage-from-page-pool-02: triaging as pool through the page files it without a full page reload, and the row stays
+  Scenario: Triaging as pool through the page files it without a full page reload, and the row stays
     Given a capture with raw text "buy milk" is waiting in the untriaged queue
     When the capture is triaged as a pool task through the page
     Then the page's triage response does not redirect the browser
     When the inbox is viewed
-    Then the inbox does not list "buy milk"
-    And the task list shows "buy milk"
+    Then the inbox lists "buy milk"
+    And the row for "buy milk" reads "Pool · no context"
+    When the pool screen is viewed
+    Then the pool screen lists "buy milk"
 
   # triage-from-page-committed-rejected-03: triaging as committed through the page with a required field omitted is rejected the same way as the API
   Scenario: Triaging as committed through the page without a required field is rejected the same way as the API
@@ -41,7 +43,7 @@ Feature: Triage happens on the page, using the same validation as the API
     When the capture is triaged as a committed task through the page with "deadline" omitted
     Then the triage is rejected
     And the rejection names "deadline"
-    And the task list is still empty
+    And the committed screen lists nothing
     And the capture is still waiting in the untriaged queue
 
   # triage-from-page-committed-closed-choices-04: the committed form offers commitment and priority as fixed choices, not free text
@@ -57,16 +59,16 @@ Feature: Triage happens on the page, using the same validation as the API
     When the capture is triaged as a quota task through the page with "hours" omitted
     Then the triage is rejected
     And the rejection names "hours"
-    And the task list is still empty
+    And the quota screen offers no quotas
     And the capture is still waiting in the untriaged queue
 
-  # triage-from-page-escapes-hostile-text-06: hostile capture text stays escaped in the task list
-  Scenario: Hostile capture text stays escaped in the task list
+  # triage-from-page-escapes-hostile-text-06: hostile capture text stays escaped where it is rendered after triage
+  Scenario: Hostile capture text stays escaped where it is rendered after triage
     Given a capture with raw text "<script>alert('boom')</script>" is waiting in the untriaged queue
     When the capture is triaged as a pool task through the page
-    And the inbox is viewed
-    Then the task list does not contain an unescaped "<script>" tag
-    And the task list contains the word "boom"
+    And the pool screen is viewed
+    Then the pool screen does not contain an unescaped "<script>" tag
+    And the pool screen contains the word "boom"
 
   # triage-from-page-pool-needs-no-form-07: pool triage is submitted straight from the row, with nothing to open first
   Scenario: Pool triage is submitted straight from the row, with nothing to open first

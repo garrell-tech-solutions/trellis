@@ -35,7 +35,7 @@ Feature: A capture can be dismissed, and its row is kept
     Then the dismissal response does not redirect the browser
     When the inbox is viewed
     Then the inbox does not list "asdfgh"
-    And the task list is still empty
+    And the pool screen lists nothing
 
   # dismiss-capture-keeps-the-row-03: neither way out of the inbox deletes the capture row
   Scenario: Neither way out of the inbox deletes the capture row
@@ -43,13 +43,14 @@ Feature: A capture can be dismissed, and its row is kept
     When the capture is triaged as a pool task in life area "Home"
     And "asdfgh" is dismissed from the inbox
     And the inbox is viewed
-    Then the inbox lists no captures
+    Then the inbox lists "<triaged>"
+    And the inbox does not list "<dismissed>"
     And the capture row count is "<rows>"
-    And the task list has "<tasks>" tasks
+    And the pool screen lists "<triaged>"
 
     Examples:
-      | rows | tasks |
-      | 2    | 1     |
+      | triaged  | dismissed | rows |
+      | buy milk | asdfgh    | 2    |
 
   # dismiss-capture-no-dismissal-after-triage-04: a triaged capture cannot then be dismissed
   Scenario: A triaged capture cannot then be dismissed
@@ -57,11 +58,11 @@ Feature: A capture can be dismissed, and its row is kept
     When the capture is dismissed from the inbox
     Then the dismissal is rejected
     And the capture row count is "<rows>"
-    And the task list has "<tasks>" tasks
+    And the pool screen lists "<pooled>"
 
     Examples:
-      | rows | tasks |
-      | 1    | 1     |
+      | rows | pooled |
+      | 1    | asdfgh |
 
   # dismiss-capture-no-triage-after-dismissal-05: a dismissed capture cannot then be triaged, and the rejection says why
   Scenario: A dismissed capture cannot then be triaged
@@ -70,11 +71,11 @@ Feature: A capture can be dismissed, and its row is kept
     Then the triage is rejected
     And the rejection says the capture is no longer in the inbox
     And the capture row count is "<rows>"
-    And the task list has "<tasks>" tasks
+    And the pool screen lists nothing
 
     Examples:
-      | rows | tasks |
-      | 1    | 0     |
+      | rows |
+      | 1    |
 
   # dismiss-capture-no-second-dismissal-06: a dismissed capture cannot be dismissed again
   Scenario: A dismissed capture cannot be dismissed again
@@ -82,11 +83,11 @@ Feature: A capture can be dismissed, and its row is kept
     When the capture is dismissed from the inbox
     Then the dismissal is rejected
     And the capture row count is "<rows>"
-    And the task list has "<tasks>" tasks
+    And the pool screen lists nothing
 
     Examples:
-      | rows | tasks |
-      | 1    | 0     |
+      | rows |
+      | 1    |
 
   # dismiss-capture-no-second-triage-07: a triaged capture cannot be triaged again
   Scenario: A triaged capture cannot be triaged again
@@ -94,11 +95,11 @@ Feature: A capture can be dismissed, and its row is kept
     When the capture is triaged as a pool task in life area "Home"
     Then the triage is rejected
     And the capture row count is "<rows>"
-    And the task list has "<tasks>" tasks
+    And the pool screen lists "<pooled>"
 
     Examples:
-      | rows | tasks |
-      | 1    | 1     |
+      | rows | pooled |
+      | 1    | asdfgh |
 
   # dismiss-capture-empty-state-08: dismissing the last capture leaves the inbox showing its ordinary empty-state message
   Scenario: Dismissing the last capture leaves the inbox showing its ordinary empty-state message

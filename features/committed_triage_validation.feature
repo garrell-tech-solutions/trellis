@@ -28,7 +28,7 @@ Feature: Committed triage requires deadline, commitment, priority and an estimat
     When the capture is triaged as a committed task with "<missing_field>" omitted
     Then the triage is rejected
     And the rejection names "<missing_field>"
-    And the task list is still empty
+    And the committed screen lists nothing
     And the capture is still waiting in the untriaged queue
 
     Examples:
@@ -43,7 +43,7 @@ Feature: Committed triage requires deadline, commitment, priority and an estimat
     When the capture is triaged as a committed task with "<empty_field>" left empty
     Then the triage is rejected
     And the rejection names "<empty_field>"
-    And the task list is still empty
+    And the committed screen lists nothing
     And the capture is still waiting in the untriaged queue
 
     Examples:

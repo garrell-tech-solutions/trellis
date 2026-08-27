@@ -92,8 +92,9 @@ Feature: A capture row offers three kinds, and shows one set of fields
     Given a capture with raw text "buy screws" is waiting in the untriaged queue
     When the kind "Pool" is chosen for "buy screws"
     And the inbox is viewed
-    Then the task list shows "buy screws"
-    And the inbox does not list "buy screws"
+    Then the row for "buy screws" offers no kind buttons
+    When the pool screen is viewed
+    Then the pool screen lists "buy screws"
 
   # disclosures-one-panel-at-a-time-03: choosing a kind shows that kind's fields and no other kind's
   Scenario: Choosing a kind shows that kind's fields and no other kind's
@@ -140,7 +141,8 @@ Feature: A capture row offers three kinds, and shows one set of fields
     And the capture is triaged as a committed task through the page with "<missing_field>" omitted
     Then the triage is rejected
     And the rejection names "<missing_field>"
-    And the task list is still empty
+    And the committed screen lists nothing
+    And the capture is still waiting in the untriaged queue
 
     Examples:
       | missing_field     |

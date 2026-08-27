@@ -32,7 +32,7 @@ Feature: Committed triage validates the values of deadline, commitment and prior
     When the capture is triaged as a committed task with a deadline of "<bad_deadline>"
     Then the triage is rejected
     And the rejection reports "deadline" as invalid
-    And the task list is still empty
+    And the committed screen lists nothing
     And the capture is still waiting in the untriaged queue
 
     Examples:
@@ -46,7 +46,7 @@ Feature: Committed triage validates the values of deadline, commitment and prior
     When the capture is triaged as a committed task with a commitment of "<bad_commitment>"
     Then the triage is rejected
     And the rejection reports "commitment" as invalid
-    And the task list is still empty
+    And the committed screen lists nothing
     And the capture is still waiting in the untriaged queue
 
     Examples:
@@ -59,7 +59,7 @@ Feature: Committed triage validates the values of deadline, commitment and prior
     When the capture is triaged as a committed task with a priority of "<bad_priority>"
     Then the triage is rejected
     And the rejection reports "priority" as invalid
-    And the task list is still empty
+    And the committed screen lists nothing
     And the capture is still waiting in the untriaged queue
 
     Examples:

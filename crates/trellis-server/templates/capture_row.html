@@ -1,4 +1,8 @@
 <li id="capture-row-{{ capture.id }}" class="row">
+{% if let Some(meta) = capture.meta %}
+<div class="row-text">{{ capture.text }}</div>
+<div class="row-meta">{{ meta }}</div>
+{% else %}
 <div class="row-text">{{ capture.text }}{% if let Some(tag) = capture.context_tag %} {{ tag }}{% endif %}</div>
 <div class="kinds">
 <form class="kind-choice kind-wide" hx-post="/captures/{{ capture.id }}/triage" hx-target="#lists" hx-swap="outerHTML">
@@ -74,5 +78,6 @@
 </form>
 {% if let Some(message) = capture.error %}
 <p class="triage-error">{{ message }}</p>
+{% endif %}
 {% endif %}
 </li>

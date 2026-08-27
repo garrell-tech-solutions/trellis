@@ -33,32 +33,33 @@ pub struct CaptureRow {
     pub error: Option<String>,
     pub committed_open: bool,
     pub quota_open: bool,
-}
-
-/// One task as the task list shows it. `context_tag` is the capture's, read
-/// through the join `inbox::store::list_tasks` issues — a task carries no
-/// tag column of its own (`context-tags-survives-triage-07`'s "one fact, one
-/// row").
-pub struct TaskRow {
-    pub kind: String,
-    pub text: String,
-    pub context_tag: Option<String>,
+    /// `Some("Pool · @homedepot")` once triaged — the row's kind buttons
+    /// give way to this line, restyled rather than removed (#140,
+    /// `inbox-view-triaged-row-stays-04`: there are four screens for a
+    /// triaged task to live on now, but no feedback at all if this one
+    /// vanishes). `None` while the capture is still untriaged.
+    pub meta: Option<String>,
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    #[test]
-    fn a_capture_row_carries_its_id_text_tag_and_error() {
-        let row = CaptureRow {
+    fn untriaged_row() -> CaptureRow {
+        CaptureRow {
             id: 7,
             text: "buy milk".to_string(),
             context_tag: Some("@homedepot".to_string()),
             error: Some("deadline is required".to_string()),
             committed_open: false,
             quota_open: false,
-        };
+            meta: None,
+        }
+    }
+
+    #[test]
+    fn a_capture_row_carries_its_id_text_tag_and_error() {
+        let row = untriaged_row();
         assert_eq!(row.id, 7);
         assert_eq!(row.text, "buy milk");
         assert_eq!(row.context_tag.as_deref(), Some("@homedepot"));
@@ -68,26 +69,19 @@ mod tests {
     #[test]
     fn a_capture_row_carries_which_kinds_panel_is_open() {
         let row = CaptureRow {
-            id: 7,
-            text: "buy milk".to_string(),
-            context_tag: None,
-            error: None,
             committed_open: true,
-            quota_open: false,
+            ..untriaged_row()
         };
         assert!(row.committed_open);
         assert!(!row.quota_open);
     }
 
     #[test]
-    fn a_task_row_carries_its_kind_text_and_tag() {
-        let row = TaskRow {
-            kind: "pool".to_string(),
-            text: "buy milk".to_string(),
-            context_tag: Some("@homedepot".to_string()),
+    fn a_triaged_capture_row_carries_what_it_became_and_no_kind_panel() {
+        let row = CaptureRow {
+            meta: Some("Pool · @homedepot".to_string()),
+            ..untriaged_row()
         };
-        assert_eq!(row.kind, "pool");
-        assert_eq!(row.text, "buy milk");
-        assert_eq!(row.context_tag.as_deref(), Some("@homedepot"));
+        assert_eq!(row.meta.as_deref(), Some("Pool · @homedepot"));
     }
 }

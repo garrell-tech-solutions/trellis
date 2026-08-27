@@ -28,8 +28,6 @@ static THEN_PAGE_RESPONSE_NOT_REDIRECT: LazyLock<Regex> = LazyLock::new(|| {
 });
 static THEN_INBOX_DOES_NOT_LIST: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r#"^the inbox does not list "([^"]+)"$"#).unwrap());
-static THEN_TASK_LIST_SHOWS: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r#"^the task list shows "([^"]+)"$"#).unwrap());
 static WHEN_TRIAGED_AS_COMMITTED_THROUGH_PAGE_OMITTING: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(
         r#"^the capture is triaged as a committed task through the page with "([^"]+)" omitted$"#,
@@ -52,11 +50,6 @@ static THEN_OFFERS_PRIORITY_CHOICES: LazyLock<Regex> = LazyLock::new(|| {
     )
     .unwrap()
 });
-static THEN_TASK_LIST_NO_UNESCAPED_SCRIPT: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r#"^the task list does not contain an unescaped "<script>" tag$"#).unwrap()
-});
-static THEN_TASK_LIST_CONTAINS_WORD: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r#"^the task list contains the word "([^"]+)"$"#).unwrap());
 static THEN_POOL_NOT_BEHIND_CONTROL: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"^the pool triage form is not behind a control that must be opened first$").unwrap()
 });
@@ -85,10 +78,7 @@ pub async fn dispatch(
         return Some(then_page_response_not_redirect(world));
     }
     if let Some(caps) = THEN_INBOX_DOES_NOT_LIST.captures(text) {
-        return Some(then_inbox_does_not_list(world, &caps[1]));
-    }
-    if let Some(caps) = THEN_TASK_LIST_SHOWS.captures(text) {
-        return Some(then_task_list_contains(world, &caps[1]));
+        return Some(dispatch_inbox_does_not_list(world, example, &caps));
     }
     if let Some(caps) = WHEN_TRIAGED_AS_COMMITTED_THROUGH_PAGE_OMITTING.captures(text) {
         return Some(dispatch_committed_omitting(world, example, &caps).await);
@@ -101,12 +91,6 @@ pub async fn dispatch(
     }
     if THEN_OFFERS_PRIORITY_CHOICES.is_match(text) {
         return Some(dispatch_offers_priority_choices(world).await);
-    }
-    if THEN_TASK_LIST_NO_UNESCAPED_SCRIPT.is_match(text) {
-        return Some(then_task_list_excludes(world, "<script>"));
-    }
-    if let Some(caps) = THEN_TASK_LIST_CONTAINS_WORD.captures(text) {
-        return Some(then_task_list_contains(world, &caps[1]));
     }
     if THEN_POOL_NOT_BEHIND_CONTROL.is_match(text) {
         return Some(then_pool_not_behind_control(world));
@@ -260,41 +244,20 @@ fn then_page_response_not_redirect(world: &mut World) -> Result<(), String> {
     }
 }
 
+fn dispatch_inbox_does_not_list(
+    world: &mut World,
+    example: &BTreeMap<String, String>,
+    caps: &regex::Captures<'_>,
+) -> Result<(), String> {
+    let raw_text = resolve(example, &caps[1])?;
+    then_inbox_does_not_list(world, &raw_text)
+}
+
 fn then_inbox_does_not_list(world: &mut World, raw_text: &str) -> Result<(), String> {
     let section = captures_list_section(world)?;
     if section.contains(raw_text) {
         Err(format!(
             "expected {raw_text:?} to be gone from the inbox, got:\n{section}"
-        ))
-    } else {
-        Ok(())
-    }
-}
-
-fn task_list_section(world: &World) -> Result<&str, String> {
-    let body = world
-        .last_html_body
-        .as_deref()
-        .ok_or_else(|| "no HTML response recorded".to_string())?;
-    html::tasks_section(body)
-}
-
-fn then_task_list_contains(world: &mut World, expected: &str) -> Result<(), String> {
-    let section = task_list_section(world)?;
-    if section.contains(expected) {
-        Ok(())
-    } else {
-        Err(format!(
-            "expected {expected:?} in the task list, got:\n{section}"
-        ))
-    }
-}
-
-fn then_task_list_excludes(world: &mut World, forbidden: &str) -> Result<(), String> {
-    let section = task_list_section(world)?;
-    if section.contains(forbidden) {
-        Err(format!(
-            "expected no {forbidden:?} in the task list, got:\n{section}"
         ))
     } else {
         Ok(())
@@ -472,7 +435,7 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    async fn pool_triage_through_the_page_moves_the_capture_into_the_task_list() {
+    async fn pool_triage_through_the_page_files_it_without_a_reload_and_the_row_stays() {
         let mut world = migrated_world().await;
         given_capture_waiting(&mut world, "buy milk").await.unwrap();
 
@@ -488,8 +451,15 @@ mod tests {
         let request = Request::builder().uri("/").body(Body::empty()).unwrap();
         html_response(&mut world, request).await.unwrap();
 
-        then_inbox_does_not_list(&mut world, "buy milk").unwrap();
-        then_task_list_contains(&mut world, "buy milk").unwrap();
+        let section = captures_list_section(&world).unwrap();
+        assert!(
+            section.contains("buy milk"),
+            "expected the triaged row to stay in Recent, got:\n{section}"
+        );
+        assert!(
+            section.contains("Pool \u{b7} no context"),
+            "expected the row to read what it became, got:\n{section}"
+        );
     }
 
     #[tokio::test]

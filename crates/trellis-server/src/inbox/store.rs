@@ -30,6 +30,44 @@ pub async fn list_untriaged(pool: &SqlitePool) -> Result<Vec<UntriagedCapture>, 
     .await
 }
 
+/// A row of [`list_recent`]: either a still-untriaged capture (`kind` is
+/// `None`) or one of the three most recently triaged (`kind` names what it
+/// became).
+#[derive(Debug, Clone, PartialEq, Eq, sqlx::FromRow)]
+pub struct RecentCapture {
+    pub id: i64,
+    pub raw_text: String,
+    pub context_tag: Option<String>,
+    pub shown_kind: Option<String>,
+    pub kind: Option<String>,
+}
+
+/// Every untriaged capture, plus the three most recently triaged, in one
+/// strict-recency order (#140, `D-four-screens`: the flat `Tasks` list this
+/// used to live in is gone, and a capture that has just been triaged has
+/// nowhere else on this page to show it went somewhere).
+///
+/// The untriaged half never ages out
+/// (`inbox-view-untriaged-never-drop-06`) — only the triaged half is
+/// bounded, so confirming old work can never crowd out something still
+/// waiting. The bound is this query's own `LIMIT`, not a slice a caller
+/// takes afterward (`T-set-operations-execute-in-the-store`).
+pub async fn list_recent(pool: &SqlitePool) -> Result<Vec<RecentCapture>, sqlx::Error> {
+    sqlx::query_as(
+        "SELECT id, raw_text, context_tag, shown_kind, NULL AS kind, created_at_ms AS sort_ms \
+         FROM captures WHERE left_inbox_at IS NULL \
+         UNION ALL \
+         SELECT captures.id, captures.raw_text, captures.context_tag, NULL AS shown_kind, \
+                recent.kind, recent.created_at_ms AS sort_ms \
+         FROM (SELECT id, capture_id, kind, created_at_ms FROM tasks \
+               ORDER BY created_at_ms DESC, id DESC LIMIT 3) AS recent \
+         JOIN captures ON captures.id = recent.capture_id \
+         ORDER BY sort_ms DESC, id DESC",
+    )
+    .fetch_all(pool)
+    .await
+}
+
 /// Records which kind's panel `capture_id`'s row should show (#119) —
 /// presentation only, never read by triage validation. `kind` is the
 /// caller's job to have already checked against the closed domain the
@@ -88,30 +126,6 @@ pub(super) async fn close_capture(
         .execute(pool)
         .await?;
     Ok(())
-}
-
-/// A row of [`list_tasks`]: a task, alongside the text and context tag of
-/// the capture it was triaged from — the task list's own rows have neither
-/// of their own to show, so both are this query's business, not the page's.
-/// `context_tag` comes through the join rather than a column of its own
-/// (`context-tags-survives-triage-07`'s "one fact, one row": the tag lives
-/// on `captures`, and a task reads it, never copies it).
-#[derive(Debug, Clone, PartialEq, Eq, sqlx::FromRow)]
-pub struct TaskWithCaptureText {
-    pub kind: String,
-    pub raw_text: String,
-    pub context_tag: Option<String>,
-}
-
-/// Every task, newest first.
-pub async fn list_tasks(pool: &SqlitePool) -> Result<Vec<TaskWithCaptureText>, sqlx::Error> {
-    sqlx::query_as(
-        "SELECT tasks.kind, captures.raw_text, captures.context_tag FROM tasks \
-         JOIN captures ON captures.id = tasks.capture_id \
-         ORDER BY tasks.id DESC",
-    )
-    .fetch_all(pool)
-    .await
 }
 
 #[cfg(test)]
@@ -298,68 +312,127 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn list_tasks_is_empty_against_a_fresh_database() {
+    async fn list_recent_is_empty_against_a_fresh_database() {
         let (_dir, pool) = test_pool().await;
 
-        assert_eq!(list_tasks(&pool).await.unwrap(), Vec::new());
+        assert_eq!(list_recent(&pool).await.unwrap(), Vec::new());
     }
 
     #[tokio::test]
-    async fn list_tasks_reports_each_tasks_kind_and_the_text_of_the_capture_it_came_from() {
+    async fn list_recent_reports_an_untriaged_capture_with_no_kind() {
         let (_dir, pool) = test_pool().await;
-        let capture_id = insert_capture(&pool, "buy milk", None).await;
+        insert_capture(&pool, "buy milk", None).await;
 
-        insert_task(&pool, capture_id, &TaskKind::Pool, 7)
+        let recent = list_recent(&pool).await.unwrap();
+
+        assert_eq!(recent.len(), 1);
+        assert_eq!(recent[0].raw_text, "buy milk");
+        assert_eq!(recent[0].kind, None);
+    }
+
+    /// A real triage is two writes: the task, then closing the capture
+    /// (`inbox::close_capture`) — [`insert_task`] alone (as most of this
+    /// file's other fixtures use it, to test the task-side columns in
+    /// isolation) leaves `left_inbox_at` `NULL`, which would double-count
+    /// the capture as both still-untriaged and triaged here.
+    async fn given_triaged(pool: &SqlitePool, raw_text: &str, created_at_ms: i64) -> i64 {
+        let capture_id = insert_capture(pool, raw_text, None).await;
+        insert_task(pool, capture_id, &TaskKind::Pool, created_at_ms)
             .await
             .unwrap();
-
-        assert_eq!(
-            list_tasks(&pool).await.unwrap(),
-            vec![TaskWithCaptureText {
-                kind: "pool".to_string(),
-                raw_text: "buy milk".to_string(),
-                context_tag: None,
-            }]
-        );
+        close_capture(pool, capture_id, created_at_ms)
+            .await
+            .unwrap();
+        capture_id
     }
 
     #[tokio::test]
-    async fn list_tasks_reports_the_context_tag_of_the_capture_it_came_from() {
+    async fn list_recent_reports_a_triaged_captures_kind_and_context_tag() {
         let (_dir, pool) = test_pool().await;
         let (capture_id, _) =
             crate::capture::create(&pool, "buy screws", "web", Some("@homedepot"), 0)
                 .await
                 .unwrap();
-
         insert_task(&pool, capture_id, &TaskKind::Pool, 7)
             .await
             .unwrap();
+        close_capture(&pool, capture_id, 7).await.unwrap();
 
-        let tasks = list_tasks(&pool).await.unwrap();
-        assert_eq!(tasks[0].context_tag.as_deref(), Some("@homedepot"));
+        let recent = list_recent(&pool).await.unwrap();
+
+        assert_eq!(recent.len(), 1);
+        assert_eq!(recent[0].raw_text, "buy screws");
+        assert_eq!(recent[0].kind.as_deref(), Some("pool"));
+        assert_eq!(recent[0].context_tag.as_deref(), Some("@homedepot"));
     }
 
     #[tokio::test]
-    async fn list_tasks_lists_tasks_newest_first() {
+    async fn list_recent_orders_by_strict_recency_across_both_kinds() {
         let (_dir, pool) = test_pool().await;
-        let first_capture = insert_capture(&pool, "buy milk", None).await;
-        let second_capture = insert_capture(&pool, "call the dentist", None).await;
-
-        insert_task(&pool, first_capture, &TaskKind::Pool, 1)
-            .await
-            .unwrap();
-        insert_task(&pool, second_capture, &TaskKind::Pool, 2)
+        given_triaged(&pool, "call the dentist", 1).await;
+        crate::capture::store::insert(&pool, "buy milk", "web", None, 2)
             .await
             .unwrap();
 
-        let tasks = list_tasks(&pool).await.unwrap();
+        let recent = list_recent(&pool).await.unwrap();
+
         assert_eq!(
-            tasks
+            recent
                 .iter()
-                .map(|t| t.raw_text.as_str())
+                .map(|c| c.raw_text.as_str())
                 .collect::<Vec<_>>(),
-            vec!["call the dentist", "buy milk"]
+            vec!["buy milk", "call the dentist"],
+            "the untriaged capture happened most recently and lists first"
         );
+    }
+
+    #[tokio::test]
+    async fn list_recent_keeps_only_the_three_most_recently_triaged() {
+        let (_dir, pool) = test_pool().await;
+        for (index, text) in ["one", "two", "three", "four"].into_iter().enumerate() {
+            given_triaged(&pool, text, index as i64).await;
+        }
+
+        let recent = list_recent(&pool).await.unwrap();
+
+        assert_eq!(
+            recent
+                .iter()
+                .map(|c| c.raw_text.as_str())
+                .collect::<Vec<_>>(),
+            vec!["four", "three", "two"],
+            "the oldest triaged capture drops off"
+        );
+    }
+
+    #[tokio::test]
+    async fn list_recent_never_drops_an_untriaged_capture_for_the_triaged_cap() {
+        let (_dir, pool) = test_pool().await;
+        for (index, text) in ["one", "two", "three", "four"].into_iter().enumerate() {
+            given_triaged(&pool, text, index as i64).await;
+        }
+        crate::capture::store::insert(&pool, "still waiting", "web", None, 10)
+            .await
+            .unwrap();
+
+        let recent = list_recent(&pool).await.unwrap();
+
+        assert_eq!(
+            recent
+                .iter()
+                .map(|c| c.raw_text.as_str())
+                .collect::<Vec<_>>(),
+            vec!["still waiting", "four", "three", "two"]
+        );
+    }
+
+    #[tokio::test]
+    async fn list_recent_excludes_a_dismissed_capture() {
+        let (_dir, pool) = test_pool().await;
+        let dismissed = insert_capture(&pool, "asdfgh", None).await;
+        close_capture(&pool, dismissed, 9999).await.unwrap();
+
+        assert_eq!(list_recent(&pool).await.unwrap(), Vec::new());
     }
 
     proptest! {

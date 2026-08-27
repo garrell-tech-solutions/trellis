@@ -9,7 +9,7 @@
 //! triage reaches in.
 
 use crate::inbox::store;
-use crate::inbox::view::{CaptureRow, TaskRow};
+use crate::inbox::view::CaptureRow;
 use crate::platform::response::{render_template, write_failed};
 use askama::Template;
 use axum::http::StatusCode;
@@ -19,17 +19,16 @@ use sqlx::SqlitePool;
 /// The `#lists` fragment on its own — what a page-originated triage or
 /// dismissal swaps in. Kept separate from the full-page template (rather than
 /// making that template the response) because such a response is not a page:
-/// it has no `<head>`, no quick-add form, nothing but the two lists htmx is
+/// it has no `<head>`, no quick-add form, nothing but the list htmx is
 /// replacing.
 #[derive(Template)]
 #[template(path = "lists.html")]
 pub(super) struct ListsTemplate {
     pub(super) captures: Vec<CaptureRow>,
-    pub(super) tasks: Vec<TaskRow>,
     /// Every tag in use, for the `<datalist>` every triage form and the
     /// quick-add box reference by `list=` (`context-tags-suggestions-05`).
     /// Rebuilt on every render from stored values, never from anything the
-    /// process remembers — the same reason `captures` and `tasks` are.
+    /// process remembers — the same reason `captures` is.
     pub(super) context_tag_suggestions: Vec<String>,
 }
 
@@ -67,20 +66,52 @@ pub(super) async fn build_lists(
 ) -> Result<ListsTemplate, sqlx::Error> {
     Ok(ListsTemplate {
         captures: build_capture_rows(pool, error).await?,
-        tasks: build_task_rows(pool).await?,
         context_tag_suggestions: crate::capture::distinct_tags(pool).await?,
     })
+}
+
+/// `"pool"` reads `"Pool"` (#140): the row's own meta line spells the kind
+/// the way the Menu tabs do, not the lowercase discriminant `tasks.kind`
+/// stores. A table rather than a `match`, for the reason a fixed lookup
+/// already is one -- three arms of no logic beyond the lookup.
+const KIND_LABELS: [(&str, &str); 3] = [
+    (scheduler_core::task::POOL, "Pool"),
+    (scheduler_core::task::COMMITTED, "Committed"),
+    (scheduler_core::task::QUOTA, "Quota"),
+];
+
+fn kind_label(kind: &str) -> &str {
+    KIND_LABELS
+        .iter()
+        .find(|(stored, _)| *stored == kind)
+        .map(|(_, label)| *label)
+        .unwrap_or(kind)
+}
+
+/// `"Pool · @homedepot"`, or `"Pool · no context"` untagged -- what a
+/// triaged row reads in place of its kind buttons
+/// (`inbox-view-triaged-row-stays-04`).
+fn triaged_meta(kind: &str, context_tag: Option<&str>) -> String {
+    format!(
+        "{} \u{b7} {}",
+        kind_label(kind),
+        context_tag.unwrap_or("no context")
+    )
 }
 
 async fn build_capture_rows(
     pool: &SqlitePool,
     error: Option<(i64, String)>,
 ) -> Result<Vec<CaptureRow>, sqlx::Error> {
-    Ok(store::list_untriaged(pool)
+    Ok(store::list_recent(pool)
         .await?
         .into_iter()
         .map(|capture| CaptureRow {
             id: capture.id,
+            meta: capture
+                .kind
+                .as_deref()
+                .map(|kind| triaged_meta(kind, capture.context_tag.as_deref())),
             context_tag: capture.context_tag,
             error: error
                 .as_ref()
@@ -93,24 +124,35 @@ async fn build_capture_rows(
         .collect())
 }
 
-async fn build_task_rows(pool: &SqlitePool) -> Result<Vec<TaskRow>, sqlx::Error> {
-    Ok(store::list_tasks(pool)
-        .await?
-        .into_iter()
-        .map(|task| TaskRow {
-            kind: task.kind,
-            text: task.raw_text,
-            context_tag: task.context_tag,
-        })
-        .collect())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::capture::store::insert as insert_capture;
     use crate::platform::test_support::test_pool;
     use scheduler_core::task::TaskKind;
+
+    #[test]
+    fn kind_label_titlecases_each_of_the_three_kinds() {
+        assert_eq!(kind_label("pool"), "Pool");
+        assert_eq!(kind_label("committed"), "Committed");
+        assert_eq!(kind_label("quota"), "Quota");
+    }
+
+    #[test]
+    fn triaged_meta_names_the_context_tag_when_present() {
+        assert_eq!(
+            triaged_meta("pool", Some("@homedepot")),
+            "Pool \u{b7} @homedepot"
+        );
+    }
+
+    #[test]
+    fn triaged_meta_reads_no_context_when_untagged() {
+        assert_eq!(
+            triaged_meta("committed", None),
+            "Committed \u{b7} no context"
+        );
+    }
 
     #[tokio::test]
     async fn an_error_attaches_only_to_the_capture_that_failed_triage() {
@@ -133,7 +175,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn the_task_list_carries_each_triaged_tasks_kind_and_capture_text() {
+    async fn a_triaged_capture_stays_and_reads_what_it_became() {
         let (_dir, pool) = test_pool().await;
         let capture_id = insert_capture(&pool, "buy milk", "web", None, 0)
             .await
@@ -141,12 +183,46 @@ mod tests {
         crate::triage::store::insert_task(&pool, capture_id, &TaskKind::Pool, 0)
             .await
             .unwrap();
+        crate::inbox::close_capture(&pool, capture_id, 0)
+            .await
+            .unwrap();
 
-        let tasks = build_lists(&pool, None).await.unwrap().tasks;
+        let captures = build_lists(&pool, None).await.unwrap().captures;
 
-        assert_eq!(tasks.len(), 1);
-        assert_eq!(tasks[0].kind, "pool");
-        assert_eq!(tasks[0].text, "buy milk");
+        assert_eq!(captures.len(), 1);
+        assert_eq!(captures[0].text, "buy milk");
+        assert_eq!(captures[0].meta.as_deref(), Some("Pool \u{b7} no context"));
+    }
+
+    #[tokio::test]
+    async fn a_triaged_captures_meta_names_its_context_tag() {
+        let (_dir, pool) = test_pool().await;
+        let (capture_id, _) =
+            crate::capture::create(&pool, "buy screws", "web", Some("@homedepot"), 0)
+                .await
+                .unwrap();
+        crate::triage::store::insert_task(&pool, capture_id, &TaskKind::Pool, 0)
+            .await
+            .unwrap();
+        crate::inbox::close_capture(&pool, capture_id, 0)
+            .await
+            .unwrap();
+
+        let captures = build_lists(&pool, None).await.unwrap().captures;
+
+        assert_eq!(captures[0].meta.as_deref(), Some("Pool \u{b7} @homedepot"));
+    }
+
+    #[tokio::test]
+    async fn an_untriaged_captures_meta_is_none() {
+        let (_dir, pool) = test_pool().await;
+        insert_capture(&pool, "buy milk", "web", None, 0)
+            .await
+            .unwrap();
+
+        let captures = build_lists(&pool, None).await.unwrap().captures;
+
+        assert_eq!(captures[0].meta, None);
     }
 
     #[tokio::test]

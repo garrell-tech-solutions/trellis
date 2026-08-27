@@ -8,7 +8,7 @@
 use super::lists;
 use super::lists::build_lists;
 use super::CAPTURE_NOT_OPEN_MESSAGE;
-use crate::inbox::view::{CaptureRow, TaskRow};
+use crate::inbox::view::CaptureRow;
 use crate::platform::nav::{self, NavLink, Page};
 use crate::platform::response::{render_template, write_failed};
 use askama::Template;
@@ -21,16 +21,15 @@ use sqlx::SqlitePool;
 #[template(path = "inbox.html")]
 struct InboxTemplate {
     captures: Vec<CaptureRow>,
-    tasks: Vec<TaskRow>,
     context_tag_suggestions: Vec<String>,
     nav: Vec<NavLink>,
 }
 
 /// The full page is the only thing that is not the `#lists` fragment, so it
-/// is the only caller that takes `build_lists`' three fields apart instead
-/// of going through `lists::respond`. `inbox.html` `{% include %}`s
+/// is the only caller that takes `build_lists`' fields apart instead of
+/// going through `lists::respond`. `inbox.html` `{% include %}`s
 /// `lists.html`, and an Askama include renders in its parent's context, so
-/// the page template has to carry the same three fields by the same names.
+/// the page template has to carry the same fields by the same names.
 ///
 /// The header returned in #92: `base.html` renders `nav` regardless of
 /// which page extends it, so every page template carries it now.
@@ -40,7 +39,6 @@ pub async fn show_inbox(State(pool): State<SqlitePool>) -> Result<Response, Stat
         StatusCode::OK,
         &InboxTemplate {
             captures: lists.captures,
-            tasks: lists.tasks,
             context_tag_suggestions: lists.context_tag_suggestions,
             nav: nav::links(Page::Capture),
         },

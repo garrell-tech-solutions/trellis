@@ -74,6 +74,12 @@ static THEN_NO_UNESCAPED_SCRIPT: LazyLock<Regex> = LazyLock::new(|| {
 });
 static THEN_CONTAINS_WORD: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r#"^the pool screen contains the word "([^"]+)"$"#).unwrap());
+static THEN_POOL_LISTS_NOTHING: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^the pool screen lists nothing$").unwrap());
+static THEN_POOL_LISTS_TAGGED: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r#"^the pool screen lists "([^"]+)" tagged "([^"]+)"$"#).unwrap());
+static THEN_POOL_LISTS: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r#"^the pool screen lists "([^"]+)"$"#).unwrap());
 
 pub async fn dispatch(
     world: &mut World,
@@ -157,6 +163,15 @@ pub async fn dispatch(
     }
     if let Some(caps) = THEN_CONTAINS_WORD.captures(text) {
         return Some(then_html_body_contains(world, &caps[1]));
+    }
+    if THEN_POOL_LISTS_NOTHING.is_match(text) {
+        return Some(then_pool_lists_nothing(world).await);
+    }
+    if let Some(caps) = THEN_POOL_LISTS_TAGGED.captures(text) {
+        return Some(dispatch_pool_lists_tagged(world, example, &caps).await);
+    }
+    if let Some(caps) = THEN_POOL_LISTS.captures(text) {
+        return Some(dispatch_pool_lists(world, example, &caps).await);
     }
     None
 }
@@ -473,6 +488,65 @@ fn then_way_back(world: &mut World) -> Result<(), String> {
         Ok(())
     } else {
         Err(format!("expected a link back to Capture, got:\n{body}"))
+    }
+}
+
+/// "The pool screen lists ..." (#140, reused from `pool_screen.feature`'s
+/// own "trip"/"loose ends" vocabulary by other features that only care
+/// whether *something* landed here, not which group it landed in) always
+/// fetches `/pool` itself rather than trusting `world.last_html_body` --
+/// several call sites check the pool screen and the committed screen back
+/// to back in one scenario, and a cached body from whichever screen was
+/// fetched last would silently answer for the wrong one.
+async fn fetch_pool_body(world: &mut World) -> Result<(), String> {
+    view_screen(world, "/pool").await
+}
+
+async fn then_pool_lists_nothing(world: &mut World) -> Result<(), String> {
+    fetch_pool_body(world).await?;
+    let body = html_body(world)?;
+    if body.contains("trip-item-text") || body.contains("loose-text") {
+        Err(format!(
+            "expected the pool screen to list nothing, got:\n{body}"
+        ))
+    } else {
+        Ok(())
+    }
+}
+
+async fn dispatch_pool_lists(
+    world: &mut World,
+    example: &BTreeMap<String, String>,
+    caps: &regex::Captures<'_>,
+) -> Result<(), String> {
+    let raw_text = resolve(example, &caps[1])?;
+    fetch_pool_body(world).await?;
+    let body = html_body(world)?;
+    if body.contains(raw_text.as_str()) {
+        Ok(())
+    } else {
+        Err(format!(
+            "expected the pool screen to list {raw_text:?}, got:\n{body}"
+        ))
+    }
+}
+
+async fn dispatch_pool_lists_tagged(
+    world: &mut World,
+    example: &BTreeMap<String, String>,
+    caps: &regex::Captures<'_>,
+) -> Result<(), String> {
+    let raw_text = resolve(example, &caps[1])?;
+    let tag = resolve(example, &caps[2])?;
+    fetch_pool_body(world).await?;
+    let body = html_body(world)?;
+    let row = html::row_containing(body, raw_text.as_str())?;
+    if row.contains(tag.as_str()) {
+        Ok(())
+    } else {
+        Err(format!(
+            "expected the row for {raw_text:?} to carry the tag {tag:?}, got:\n{row}"
+        ))
     }
 }
 

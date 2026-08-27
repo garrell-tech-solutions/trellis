@@ -135,6 +135,78 @@ jobs:
       - name: No capability reaches into another capability's store
         run: ./scripts/ci/capability_front_doors.sh
 
+  # Issue #26: every features/*.feature must have produced a generated
+  # acceptance entrypoint, and no entrypoint may exist without a feature behind
+  # it. The failure it guards is silence -- the entrypoints are gitignored, so
+  # a clone where generation produced nothing has Cargo discovering no
+  # integration test binaries, printing `ok`, and asserting nothing at all.
+  #
+  # WHY IT IS A JOB AND NOT A STEP IN `quality`
+  #
+  #   It used to be the twelfth step of `quality`, and eleven setup steps stood
+  #   in front of it: apt, rustup, a rust-cache restore, a babashka install, an
+  #   APS clone, npm, cargo-llvm-cov, a from-source cargo install. The gate that
+  #   exists to make a silent failure loud could not report at all if any one of
+  #   those was the thing that broke, and when it did report it was twenty
+  #   minutes into a forty-five minute job. A gate that arrives after everyone
+  #   has stopped looking is the shape it was written to prevent.
+  #
+  #   Here it answers in about a minute from a fresh checkout, against
+  #   features/*.feature exactly as committed, and it is nobody else's step.
+  #
+  #   It still has to generate before it can compare -- the entrypoints are
+  #   gitignored and a checkout has none -- but generation is now all that
+  #   run.sh does, and it needs no Rust build, no analyzers and no test run to
+  #   do it. So this job asserts precisely one thing: that the committed
+  #   features, put through the committed generator, produce one entrypoint and
+  #   one metadata file each. Same reasoning as `decision-slugs` and
+  #   `front-doors` above -- a property of the repository, answered in seconds,
+  #   in its own job.
+  acceptance-entrypoints:
+    name: every feature has an entrypoint
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v5
+
+      # scripts/acceptance/generate.bb shells out to rustfmt so the generated
+      # entrypoints satisfy `cargo fmt --all -- --check` like hand-written
+      # source. That is the only part of the Rust toolchain this job needs --
+      # nothing here compiles or runs a test.
+      - name: Install rustfmt from the pinned toolchain
+        run: |
+          rustup toolchain install --profile minimal
+          rustup component add rustfmt
+          rustfmt --version
+
+      # Same install as `quality`, and out of the checkout for the same reason:
+      # nothing that is not this project's source belongs in the tree.
+      - name: Install babashka
+        run: |
+          curl -sSL https://raw.githubusercontent.com/babashka/babashka/master/install \
+            -o "$RUNNER_TEMP/install-babashka"
+          chmod +x "$RUNNER_TEMP/install-babashka"
+          sudo "$RUNNER_TEMP/install-babashka"
+          bb --version
+
+      - name: Install the APS pipeline
+        run: |
+          echo "APS_HOME=$RUNNER_TEMP/aps-pipeline" >> "$GITHUB_ENV"
+          git clone --depth 1 \
+            https://github.com/unclebob/Acceptance-Pipeline-Specification.git \
+            "$RUNNER_TEMP/aps-pipeline"
+          test -f "$RUNNER_TEMP/aps-pipeline/bb.edn"
+
+      - name: Generate the entrypoints from features/*.feature
+        run: ./scripts/acceptance/run.sh
+
+      # !cancelled() so it reports even when generation failed partway: what
+      # generation managed to produce is exactly the diagnostic worth having.
+      - name: Every feature generated an entrypoint
+        if: ${{ !cancelled() }}
+        run: ./scripts/ci/acceptance_entrypoints.sh
+
   gate:
     name: fmt, clippy, test, T4 purity, musl release
     runs-on: ubuntu-latest
@@ -339,34 +411,38 @@ jobs:
       - name: Clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
 
-      # Unit tests only, and that is not a shortcoming of this step -- it is
-      # what `cargo test --workspace` means in a fresh clone. The generated
-      # acceptance entrypoints are gitignored (.gitignore:29, correctly: the
-      # .feature file is the source of truth), so Cargo discovers no
-      # integration test binaries here and prints `ok` for a strict subset of
-      # what a reader assumes it ran. The Gherkin suite is gated in `quality`
-      # below, which generates the entrypoints first. Issue #26.
-      - name: Test
-        run: cargo test --workspace
-
-      # The step above is exactly what its own comment says: a strict subset.
-      # The other half of that subset is the property tests. Every one of them
+      # ONE invocation, and it is the `--include-ignored` one. There used to be
+      # two steps here: `cargo test --workspace`, then the same command with
+      # `-- --include-ignored`. `--include-ignored` does not select the ignored
+      # tests, it ADDS them -- it runs everything the plain invocation runs and
+      # the `#[ignore]`d ones as well -- so the first step was a strict subset
+      # of the second and every unit test in the workspace ran twice for one
+      # answer. What the pair bought was a separate red X for "a normal test
+      # broke" versus "a property broke", which the test names in the output
+      # already say.
+      #
+      # Why the ignored half has to be in the run at all: every property test
       # is `#[ignore]`d by project convention -- so that a normal `cargo test`
       # stays fast and so mutation and coverage runs do not pay for 1024 cases
-      # per property -- which means `cargo test --workspace` skips 37 tests and
-      # still prints `ok`.
-      #
-      # Among them are the invariant properties #11's strongest acceptance
-      # criterion names by number ("Invariants 1-5 hold under proptest, >= 1000
-      # cases"), the interval algebra M4's calendar busy will inherit, and the
-      # test tying pool's plain-equality grouping to capture's canonicalisation
-      # (T-cross-capability-invariants-need-an-owner). Until this step existed
-      # none of them ran unless an agent remembered a flag, which is this
-      # project's own recurring failure -- a gate nothing runs is a comment.
+      # per property -- which means a plain `cargo test --workspace` skips 37
+      # tests and still prints `ok`. Among them are the invariant properties
+      # #11's strongest acceptance criterion names by number ("Invariants 1-5
+      # hold under proptest, >= 1000 cases"), the interval algebra M4's
+      # calendar busy will inherit, and the test tying pool's plain-equality
+      # grouping to capture's canonicalisation
+      # (T-cross-capability-invariants-need-an-owner). Until #101 none of them
+      # ran unless an agent remembered a flag, which is this project's own
+      # recurring failure -- a gate nothing runs is a comment.
       #
       # It belongs in `gate` rather than `quality`: 38s warm, measured, against
       # the twenty minutes of analyzers `quality` carries.
-      - name: Property tests (the `#[ignore]`d half of the suite)
+      #
+      # What this step does NOT run is the Gherkin acceptance suite. The
+      # generated entrypoints are gitignored (.gitignore:35, correctly: the
+      # .feature file is the source of truth), so a fresh clone has none and
+      # Cargo discovers no integration test binaries to run here. `quality`
+      # generates them and runs them, exactly once. Issue #26.
+      - name: Test (unit and property; `--include-ignored` is a superset)
         run: cargo test --workspace -- --include-ignored
 
       # decisions.md T-core-no-tokio / issue #8 acceptance criterion 3:
@@ -562,7 +638,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      # features/release_binary.feature is one of the eleven, and its step
+      # features/release_binary.feature is one of the 27, and its step
       # handler runs the musl release build, so this job needs the same musl C
       # toolchain `gate` does. libsqlite3-sys compiles C against the target.
       #
@@ -721,7 +797,7 @@ jobs:
       # ---------------------------------------------------------------------
       # ORDER BELOW IS LOAD-BEARING. DO NOT REORDER.
       #
-      # coverage.sh and crap.sh must run AFTER scripts/acceptance/run.sh.
+      # coverage.sh and crap.sh must run AFTER the acceptance step below.
       # The step handlers under crates/acceptance-tests/src/steps/ are ordinary
       # library code, and the only thing that executes them is a generated
       # entrypoint. Run the analyzers first and every handler reads as dead
@@ -737,22 +813,45 @@ jobs:
       # regression that did not happen.
       # ---------------------------------------------------------------------
 
-      - name: Acceptance suite (Gherkin, 11 features)
-        id: acceptance
-        run: ./scripts/acceptance/run.sh
-
-      # The cheap guard, and the one that closes the silence. run.sh ends in
-      # `cargo test -p acceptance-tests`; if generation produced nothing that
-      # command finds nothing, passes, and run.sh exits 0 having asserted
-      # nothing at all. This compares the generated entrypoints against
-      # features/*.feature by name.
+      # Generate, then run -- two commands, both written out here.
       #
-      # !cancelled() so it reports even when the step above failed: if run.sh
-      # broke partway, what generation managed to produce is exactly the
-      # diagnostic worth having.
-      - name: Every feature generated an entrypoint
-        if: ${{ !cancelled() }}
-        run: ./scripts/ci/acceptance_entrypoints.sh
+      # run.sh no longer ends in `cargo test -p acceptance-tests`; it stops at
+      # generation, because `crates/acceptance-tests` is a workspace member and
+      # `cargo test --workspace` runs every generated entrypoint too, so an
+      # agent verifying locally ran the whole suite twice. Its header has the
+      # full reasoning. The consequence for CI is that the run has to be
+      # spelled out rather than inherited, which is what the second line below
+      # is -- and spelling it out is the point: a change to run.sh can no
+      # longer silently stop CI executing the acceptance suite.
+      #
+      # Named targets rather than `-p acceptance-tests`, and the difference is
+      # exactly one duplicated run. `gate` has already run every unit and
+      # property test in the workspace, and `-p acceptance-tests` would run
+      # this crate's 281 library unit tests and its doc-tests a second time on
+      # the way to the entrypoints. Listing the generated entrypoints as
+      # `--test` targets runs those and nothing else, so between the two jobs
+      # every tier executes exactly once: unit and property in `gate`,
+      # acceptance here.
+      #
+      # It cannot go quiet. If generation produced nothing the glob does not
+      # expand, cargo is handed a target name that matches nothing, and the
+      # step fails loudly -- where `-p acceptance-tests` would have found no
+      # integration tests, passed, and asserted nothing. `acceptance-entrypoints`
+      # above is the gate that says so in words.
+      #
+      # One step rather than two so `steps.acceptance.outcome`, which the
+      # coverage and CRAP steps below gate on, still means "generation AND the
+      # suite succeeded". A failure in either part fails the step.
+      - name: Acceptance suite (Gherkin, 27 features)
+        id: acceptance
+        run: |
+          ./scripts/acceptance/run.sh
+          targets=()
+          for f in crates/acceptance-tests/tests/*_acceptance.rs; do
+            targets+=(--test "$(basename "$f" .rs)")
+          done
+          echo "running ${#targets[@]} acceptance entrypoints"
+          cargo test -p acceptance-tests "${targets[@]}"
 
       # Coverage and CRAP are gated on the acceptance run having SUCCEEDED,
       # not merely on the job not being cancelled -- see the ordering note
@@ -862,11 +961,17 @@ jobs:
     # red analyzer run produced would be a quiet loosening of the bar the
     # owner's host is held to today.
     #
+    # `acceptance-entrypoints` is named here because it used to be a step of
+    # `quality` and so was already gating a release through it. Moving it to
+    # its own job without naming it here would have been a quiet loosening: a
+    # release could then be published from a run in which the acceptance suite
+    # had asserted nothing.
+    #
     # `migration-immutability` is absent on purpose. It is `pull_request`
     # only, GitHub reports it as skipped on push, and a skipped `needs`
     # dependency skips its dependents -- naming it here would mean trunk
     # never released at all.
-    needs: [gate, quality, decision-slugs]
+    needs: [gate, quality, decision-slugs, acceptance-entrypoints]
 
     permissions:
       contents: write

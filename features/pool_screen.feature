@@ -12,69 +12,39 @@
 # pool-screen-empty-07: with nothing pooled the screen says so and points at Capture
 # pool-screen-escapes-hostile-text-09: a hostile context tag stays escaped on this screen
 #
-# THE TAB-BAR SCENARIO IS GONE, not inverted. pool-screen-tabs-08 asserted
-# the tab bar offered exactly Capture and Pool -- true only while Pool was
-# the last tab. #94 adds Committed, and committed-screen-tabs-06 already
-# names all three screens over all three tabs, so keeping a second,
-# narrower assertion here would just be two features restating one fact
-# until one of them drifts. The guarantee moved rather than lapsed, the
-# same shape one_screen.feature's own no-header scenario took under #92.
+# THE TAB-BAR SCENARIO IS GONE, not inverted: pool-screen-tabs-08 asserted
+# exactly Capture and Pool, true only while Pool was the last tab, and
+# committed-screen-tabs-06 now names them all. The guarantee moved.
 #
-# THE TRIP THRESHOLD IS THREE, and it is the idea the whole screen turns on.
-# A context tag becomes a trip only once three things are waiting there;
-# fewer, and those items drop into loose ends STILL SHOWING THEIR TAG. Two
-# errands at the supermarket are not a trip, they are two strays that happen
-# to share a place. The canvas says this (`tripThreshold || 3`) and the
-# brief's demo contradicts it by drawing a two-item group as a trip; the
-# canvas wins on layout, and the owner confirmed the number.
+# THE TRIP THRESHOLD IS THREE, and it is the idea the whole screen turns on. A
+# context tag becomes a trip only once three things are waiting there; fewer,
+# and those items drop into loose ends STILL SHOWING THEIR TAG. Two errands at
+# the supermarket are not a trip, they are two strays that happen to share a
+# place. The canvas says this (`tripThreshold || 3`), the brief's demo
+# contradicts it, the canvas wins on layout and the owner confirmed the number.
 #
-# REORDERING IS NOT IN THIS SLICE. The canvas draws up/down arrows on trip
-# items, on loose ends and on quota rows; none of them are built here, and 05
-# asserts their absence rather than leaving it to be inferred -- a coder
-# reading the canvas would otherwise add them in good faith.
+# REORDERING IS NOT IN THIS SLICE and 05 asserts its absence rather than
+# leaving it inferred -- the canvas draws arrows a coder would otherwise add in
+# good faith. WHEN IT COMES IT BELONGS TO LOOSE ENDS ALONE: a trip is a unit
+# you clear in one stop, so the order of its items is noise; a loose end is a
+# thing you decide about, so it earns a control. Item order inside a trip is
+# newest first, inherited from the inbox rather than invented. Trips get no
+# priority in this slice or any later one -- they are ranked by how many things
+# they clear, which is exactly what "worth a trip" means
+# (T-trips-are-derived-not-ranked). `tasks.priority` already means P1-P4 for
+# committed work, and a loose end's manual order must not use that column.
 #
-# WHEN IT COMES, IT BELONGS TO LOOSE ENDS ALONE, and the threshold is why.
-# A TRIP IS A UNIT YOU CLEAR IN ONE STOP, so the order of its items is noise
-# and should never get a control. A LOOSE END IS A THING YOU DECIDE ABOUT, so
-# it should. Recorded here because it is the reasoning the reordering slice
-# inherits, and it was reached by reading the canvas against the threshold
-# rather than from the brief, which excluded reordering on the mistaken
-# ground that the canvas drew none.
+# DELIBERATELY NOT BUILT, though the canvas draws it: the per-group note ("One
+# stop clears all 3."), computed from a hardcoded list of which tags are places
+# -- that needs Trellis to know @homedepot is a shop, which is the managed
+# taxonomy D-context-tags-are-the-taxonomy exists to refuse.
 #
-# TRIPS AND GROUPS GET NO PRIORITY, IN THIS SLICE OR ANY LATER ONE. They are
-# ranked by how many things they clear -- derived from the data, never
-# maintained, and exactly what "worth a trip" means.
-#
-# ITEM ORDER INSIDE A TRIP IS NEWEST FIRST, inherited from the inbox rather
-# than invented, because the order is noise and a second convention would be
-# one more thing to remember. It is also what the canvas's own sort degrades
-# to once priority is removed from it: its tiebreak is `b.seq - a.seq`.
-#
-# DELIBERATELY NOT BUILT, though the canvas draws it: the per-group note
-# ("One stop clears all 3."). The canvas computes it from a hardcoded list of
-# which tags are places and which are sittings, which needs Trellis to know
-# that @homedepot is a shop -- the managed taxonomy
-# D-context-tags-are-the-taxonomy exists to refuse. Raised rather than
-# resolved quietly, per D-four-screens.
-#
-# Scenario 05 names the same step three times -- <before>, <after>, <top> --
-# because it asserts one order at three points as it changes, which is the
-# whole scenario. Reported as placeholder drift and it is not; splitting it
-# would lose the progression that is the point.
-#
-# SCENARIO 06 CHANGED WITH #120, AND THE OLD ASSERTION WAS ABOUT STRUCTURE.
-# It read "lists 3 items" for a trip of five, and `trip_visible_items` answers
-# that by reading the FIRST `<ul class="trip-items">` in the panel -- which
-# only distinguishes anything while the hidden items are a SECOND list inside
-# a `<details>`. That two-list shape is precisely the defect #120 removes:
-# the canvas draws one list whose visible slice grows, so over HTTP the trip
-# now holds all five and the control offers the other two. THE GUARANTEE
-# MOVED RATHER THAN LAPSED -- "only three are on screen" is now asserted in
-# `qa/trip_controls.md`, against a rendered page, where it is a fact rather
-# than an artefact of markup. See `features/trip_controls.feature`.
-#
-# `tasks.priority` already means P1-P4 for committed work. A loose end's
-# manual order is a different thing and must not be spelled with that column.
+# 05 names the same step three times on purpose: it asserts one order at three
+# points as it changes, which is the whole scenario. Reported as placeholder
+# drift and it is not. 06 CHANGED WITH #120 -- its old "lists 3 items" only
+# meant anything while the hidden items were a SECOND list inside a
+# `<details>`, which is the defect #120 removes. "Only three are on screen" now
+# lives in qa/trip_controls.md, against a rendered page.
 Feature: The pool screen groups loose work by where it can be done
 
   Background:

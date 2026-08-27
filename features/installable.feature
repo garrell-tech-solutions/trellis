@@ -11,42 +11,29 @@
 # installable-no-service-worker-06: nothing registers a service worker
 #
 # WHAT IS ASSERTED HERE AND WHAT CANNOT BE. Everything above is visible over
-# HTTP: the link, the document it points at, its members, and whether each
-# icon it names actually resolves. NONE OF IT PROVES THE BROWSER WILL OFFER
-# TO INSTALL -- that judgement is the browser's, it depends on engagement
-# heuristics that vary by version, and no headless driver in this project can
-# make it. THE INSTALL ITSELF IS A BY-HAND CHECK and qa/installable.md says
-# so rather than implying otherwise.
-#
-# The same is true of the thing most likely to look wrong: AN INSTALLED
-# WINDOW IS NOT A BROWSER TAB. scripts/qa/phone_layout.cjs asserts the tab
-# bar sits on the viewport's bottom edge, but it drives a tab -- it cannot
-# open a standalone window, so the safe-area behaviour that only appears once
-# installed is unverified by anything automated. Said plainly; three
+# HTTP. NONE OF IT PROVES THE BROWSER WILL OFFER TO INSTALL -- that judgement
+# is the browser's and depends on engagement heuristics no headless driver here
+# can make, so THE INSTALL ITSELF IS A BY-HAND CHECK in qa/installable.md. Nor
+# can anything automated see the safe-area behaviour: phone_layout.cjs drives a
+# tab, and AN INSTALLED WINDOW IS NOT A BROWSER TAB. Said plainly; three
 # phone-first screens already shipped on an unchecked layout.
 #
-# A MANIFEST IS NOT A PAGE, so T-nav-is-the-site-map does not apply to it.
-# That rule is otherwise unconditional -- every page in the route table gets
-# a header link -- and a reader finding a new route with no tab would be
-# right to ask. It is a document the browser fetches, not a place the owner
-# navigates to, and nothing links it from the tab bar.
+# A MANIFEST IS NOT A PAGE, so T-nav-is-the-site-map does not apply and nothing
+# links it from the tab bar. That rule is otherwise unconditional, so a reader
+# finding a new route with no tab would be right to ask.
 #
-# THE ICON IS PROVISIONAL AND SAYS SO. A `T` in the product's own typeface,
+# THE ICON IS PROVISIONAL AND SAYS SO: a `T` in the product's own typeface,
 # white on the primary green, inset inside the maskable safe zone. The canvas
-# draws no app icon -- the fourth gap it has left, after the done control,
-# the date input and this -- and nothing in the repository could be reused:
-# there are no images at all, only a woff2 and a stylesheet. A new palette
-# and a dark mode are in flight, and a manifest's colours are LITERAL VALUES
-# that cannot be CSS custom properties, so both the icon and the two hex
-# values here will want redrawing. That is cheaper than guessing at a palette
-# that does not exist yet.
+# draws no app icon and the repository has no images to reuse; a manifest's
+# colours are LITERAL VALUES that cannot be custom properties, so both the icon
+# and the two hex values will want redrawing once the palette lands. Cheaper
+# than guessing at a palette that does not exist yet.
 #
 # NO SERVICE WORKER, AND 06 ASSERTS ITS ABSENCE rather than leaving it
-# inferred. An installed app that cannot reach the tailnet shows nothing, and
-# caching the shell would wrap an app frame around an empty screen -- failing
-# as a broken app rather than as a page that did not load, which is worse
-# than the browser's own error. A coder reading "installable" would add one
-# in good faith, which is exactly why the absence is a scenario.
+# inferred. Caching the shell would wrap an app frame around an empty screen,
+# failing as a broken app rather than as a page that did not load -- worse than
+# the browser's own error. A coder reading "installable" would add one in good
+# faith, which is exactly why the absence is a scenario.
 Feature: Trellis installs to the home screen
 
   Background:

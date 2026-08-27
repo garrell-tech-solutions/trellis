@@ -11,8 +11,19 @@
 - Release:  `cargo build --release --target x86_64-unknown-linux-musl`
 
 ### Test
-- All:      `cargo test --workspace`
+- Generate first: `./scripts/acceptance/run.sh`
+  Regenerates the acceptance entrypoints from `features/*.feature`. It does
+  NOT run them. It is idempotent -- unchanged features leave the generated
+  files untouched, so nothing rebuilds -- which is why running it costs
+  seconds and skipping it costs correctness: edit a feature, skip this, and
+  `cargo test --workspace` silently tests the previous entrypoints.
+- All:      `./scripts/acceptance/run.sh && cargo test --workspace`
+  `crates/acceptance-tests` is a workspace member, so this ONE command runs
+  the unit tests and every generated acceptance entrypoint. Do not also run
+  the acceptance suite separately; that runs it twice.
 - Property: `cargo test --workspace -- --include-ignored`
+  A SUPERSET of `All`, not a filter: it re-runs everything above and adds the
+  ignored tests. Running both is running the whole suite twice.
 
 ### Type Check / Lint
 - `cargo clippy --workspace --all-targets -- -D warnings`

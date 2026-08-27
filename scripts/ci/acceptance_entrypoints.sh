@@ -13,11 +13,11 @@
 #   `cargo test --workspace` prints `ok` having run unit tests only. It does
 #   not warn, and it does not compare its test count against an expected one.
 #
-#   run.sh ends in `cargo test -p acceptance-tests`, so if generation produces
-#   nothing, that command finds nothing, passes, and run.sh exits 0. The
-#   acceptance step goes green while asserting nothing whatsoever. This gate is
-#   the check that makes that state loud: it counts, by name, what generation
-#   was supposed to produce against what it did.
+#   The run that follows generation is `cargo test -p acceptance-tests`, so if
+#   generation produces nothing that command finds nothing, passes, and exits
+#   0. The acceptance step goes green while asserting nothing whatsoever. This
+#   gate is the check that makes that state loud: it counts, by name, what
+#   generation was supposed to produce against what it did.
 #
 #   It is deliberately cheap and deliberately independent of the APS toolchain.
 #   It needs no babashka, no APS clone and no Rust toolchain, so it keeps
@@ -30,7 +30,8 @@
 # migration_immutability.sh and decision_slugs.sh next door.
 #
 # Usage: scripts/ci/acceptance_entrypoints.sh
-#        Run it AFTER scripts/acceptance/run.sh, never before.
+#        Run it AFTER scripts/acceptance/run.sh, never before. In CI it has its
+#        own job, which does exactly that against a fresh checkout.
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
@@ -134,7 +135,7 @@ WHY THIS IS BLOCKED
 
 WHAT TO DO
 
-  - Ran the suite? Run it again and read the output:
+  - Ran generation? Run it again and read the output:
 
         ./scripts/acceptance/run.sh
 
@@ -144,8 +145,8 @@ WHAT TO DO
   - Added a feature? It is only wired up once run.sh has generated its
     entrypoint. Do not hand-write one; nothing under $GEN_DIR is
     hand-maintained.
-  - Deleted or renamed a feature? Stale entrypoints are removed by run.sh,
-    which deletes $GEN_DIR/*_acceptance.rs before regenerating. Run it.
+  - Deleted or renamed a feature? run.sh prunes any entrypoint and metadata
+    file with no feature behind it, by name, at the end of generation. Run it.
 EOF
 } >&2
 exit 1

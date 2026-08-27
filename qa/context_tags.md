@@ -9,39 +9,24 @@ row, and read-only `sqlite3` inspection. No project library, module, or test
 helper is used. **Read the quick-add endpoint and its fields out of the
 page's own markup.**
 
-## What a context tag is, and why it is free text
+## Three things to hold before you start
 
-**It is the product's only taxonomy** (`D-context-tags-are-the-taxonomy`) —
-numerous, cheap, disposable. Free text is deliberate: a typo costs one
-badly-grouped item, not an unschedulable one, and autocomplete on prior
-values is enough structure.
+**A tag is free text and there is no managed set**
+(`D-context-tags-are-the-taxonomy`; the deliberate opposite of
+`D-quotas-are-selected-not-typed`, argued in
+`features/context_tags.feature`'s header). **If any procedure tempts you to
+check that a tag is validated against a set, stop.**
 
-**If any procedure tempts you to check that a tag is validated against a
-managed set, stop.** There is no set. That is the decision, not an oversight
-— and it is the deliberate opposite of `D-quotas-are-selected-not-typed`,
-where a quota is picked and never typed because a mistyped quota name splits
-a week's hours across two counters and makes both wrong. A mistyped tag
-mis-files one item. Same product, opposite rules, for a reason.
+**Prefix narrowing cannot be checked here.** These procedures assert what the
+server sends — every prior tag, exactly once. `qa/phone_layout.md`'s browser
+automation asserts page *geometry* and does not drive typing. **Report prefix
+narrowing as unverified** rather than assuming that check covers it.
 
-## What autocomplete can and cannot be checked here
-
-The control offers **the whole set of prior tags**, and the browser narrows
-it as the owner types. These procedures assert **what the server sends** —
-every tag used before, exactly once — and **cannot** assert prefix narrowing,
-which is the browser's behaviour. **Prefix narrowing is still unverified.** `qa/phone_layout.md` added
-browser automation in #101, but it asserts page *geometry* — it does not
-drive typing, and a `datalist`'s narrowing is the browser's own behaviour.
-Report it as unverified rather than assuming the new check covers it.
-
-## The 50 ms budget's subject must not move
-
-`T-latency-is-a-qa-assertion` put the capture latency budget in QA, and this
-slice adds a field to the endpoint it describes. **Adding a nullable column
-does not change that endpoint's work — computing the suggestion set would.**
-The distinct-values query belongs to the page render, not to `POST
-/captures`. **Check it: if capture slowed measurably, the suggestions are
-being computed in the wrong path**, and the budget is quietly describing
-something else.
+**The 50 ms capture budget's subject must not move**
+(`T-latency-is-a-qa-assertion`). Adding a nullable column does not change
+that endpoint's work; computing the suggestion set would. **Check it: if
+capture slowed measurably, the distinct-values query has leaked out of the
+page render and into `POST /captures`.**
 
 ## By-hand walkthrough — do this once, in a real browser
 
@@ -118,9 +103,8 @@ something else.
 - **One suggestion, not two**, reading `@HomeDepot` — the spelling first used.
 - **Both rows display `@HomeDepot`**, including the one typed in lower case.
   The tag is one thing; the display is the spelling it was introduced with.
-- **The failure this prevents is invisible until #85 exists**: a Menu showing
-  two Home Depot lists and sending the owner twice. That is why it is settled
-  now rather than then.
+- **The failure this prevents**: a Menu showing two Home Depot lists and
+  sending the owner twice.
 - Confirm where identity is enforced. If it is a column constraint, try it
   **through the database** as well as the page; if it is application code,
   say so, because the two fail differently.
@@ -173,12 +157,11 @@ something else.
 ### Expected Observable Outcomes
 - **All pass.** This slice adds an optional field; it changes no existing
   behaviour.
-- **PR #87's drift was invisible to CI and only a QA re-run found it.** That
+- **PR #87's drift was invisible to CI and only a QA re-run found it**: a
   restyle touched three templates and no test surface, so CI stayed green
   while `capture_row.html`'s `<li>` gained `class="row"` and broke the
-  exact-match regex every script uses to find a capture row. **You are
-  editing `capture_row.html` and `inbox.html` again. Re-run everything and
-  believe the result, not the expectation.**
+  exact-match regex every script uses. **You are editing those templates
+  again. Re-run everything and believe the result, not the expectation.**
 - `one_screen` still holds: no header renders, and the five removed routes
   still 404. Adding a field adds no route.
 

@@ -4,21 +4,6 @@ Covers: `features/quota_sessions.feature`, and the two halves no acceptance
 scenario can hold — **the expand and `Other…` disclosures**, and **a real week
 boundary.**
 
-## This document is now due, and it is what turns `trunk` green
-
-**Written for `quota-screen`, which stopped at the line the brief drew and was
-then merged red.** `quota_sessions.feature` went to `trunk` at `bf8c7f9`
-carrying nine failing scenarios, and the cost is wider than the one red check:
-no release published for that commit, so **the owner's live Trellis cannot be
-updated to the version with the fourth screen in it**; `migrations are
-append-only` skipped, so `0014` merged without that gate reporting; the
-language-mutation run gone `trunk`-wide, because `cargo-mutants` aborts on a
-failed baseline; and the preview poller (**#146**) selecting on run-level
-success, so the phone never showed the fourth tab at all.
-
-**All of it clears the moment these nine scenarios pass.** That is what this
-slice is for.
-
 **What is not acceptable is a half-built session surface**: a `+30m` that
 writes nothing, a `This week` that cannot delete, or a Monday reset that is a
 `TODO`. **If you find one, that is the finding**, and it outranks everything
@@ -40,47 +25,23 @@ waiting until Monday.
 **Log every session through the controls.** A row inserted with `sqlite3`
 proves nothing about `+30m`.
 
-## Logging is retrospective, and that is a rule with teeth
+## The two rules this suite exists to check
 
-`D-logging-is-retrospective-and-separate` rejected a start/stop timer because
-*"an unstarted timer silently reports zero — inaction producing a false number
-rather than a missing one."*
-
-**Settled by the owner 2026-08-25: the day picker offers only days that have
-already happened.** On Tuesday it offers Monday and Tuesday; on Sunday, all
-seven. **You cannot record time you have not done yet** — four hours logged
-against Saturday on a Tuesday would fill the bar and the week would read as
-met, which is the same false number arriving from the other direction.
-
-**The canvas draws all seven days and that is a gap, not a statement**
-(`T-canvas-is-authoritative-where-it-speaks`, checked rather than assumed):
-`days: DAYS` is a static constant beside `const TODAY = "Tue"`, so the mock has
-no notion of the week passing and could not have drawn the distinction either
-way. **Flagged, not filled silently.**
-
-## Monday, and the hour with nowhere to go
-
-`D-quota-no-rollover`: **counters reset Monday and shortfalls never carry
-forward.** A week is a closed box.
-
-**A consequence the owner was shown and kept: you cannot log Sunday evening's
-practice on Monday morning.** Monday is a new week and last week has been
-reckoned. **Look for this in real use and report how it feels** — it is the
-most likely thing in this slice to be found wrong within an hour of merging,
-the way #129 was. It is recorded as chosen, not missed.
+`D-logging-is-retrospective-and-separate` — the day picker offers only days
+that have already happened. `D-quota-no-rollover` — counters reset Monday and
+shortfalls never carry forward. Both, and the consequence the owner was shown
+and kept (you cannot log Sunday evening's practice on Monday morning), are
+argued in `features/quota_sessions.feature`'s header. **Look for that
+consequence in real use and report how it feels** — it is the most likely thing
+here to be found wrong within an hour of merging, the way #129 was.
 
 **"Monday" needs a timezone**, and the path is `settings::current_timezone` +
-`scheduler_core::timezone::resolve`, exactly as `committed/body.rs:30-32` does
-it (`T-timezone-is-a-setting`). **Check it took that path and did not reach for
-UTC.**
-
-**⚠️ The trap this slice inherits.** **#118** is open because `/timezone` is
-`POST`-only and reachable from no page. The live database reads
-`America/New_York` so the owner is fine today, **but the schema default is
-`UTC`** (`0006_guardrails.sql:39`). **This slice makes a second capability
-depend on a setting nobody can edit.** Fixing #118 is not in scope; **saying so
-in the report is**, because a fresh install now gets a Monday that is not the
-owner's Monday in two places rather than one.
+`scheduler_core::timezone::resolve`, exactly as `committed/body.rs` does it
+(`T-timezone-is-a-setting`). **Check it took that path and did not reach for
+UTC.** ⚠️ **#118** is open — `/timezone` is `POST`-only and reachable from no
+page, the live database reads `America/New_York` but the schema default is
+`UTC` — so **this slice makes a second capability depend on a setting nobody
+can edit.** Fixing #118 is not in scope; **saying so in the report is.**
 
 ## Procedure — the logging loop
 
@@ -100,7 +61,7 @@ owner's Monday in two places rather than one.
 - **Corroborate in `sqlite3`**: three rows, each carrying enough to know which
   day of which week it belongs to. **A row storing only `"Mon"` cannot survive
   a week boundary** — if that is what you find, go straight to the Monday
-  procedure below, because it will fail there.
+  procedure, because it will fail there.
 
 ## Procedure — the day picker shrinks to the week so far
 
@@ -132,10 +93,10 @@ owner's Monday in two places rather than one.
   it.`** and the summary **`nothing logged`** — and **the quota itself is still
   there.** Deleting every session must not delete the quota.
 - **All three routes go through one front door**
-  (`T-one-front-door-per-capability`). This is a proxy and worth saying so: log 20 sessions and delete
+  (`T-one-front-door-per-capability`). Proxy for it: log 20 sessions and delete
   them one at a time, and confirm nothing degrades in a way that suggests a
-  second write path or a per-row round trip that should have been one
-  statement (`T-set-operations-execute-in-the-store`).
+  second write path or a per-row round trip that should have been one statement
+  (`T-set-operations-execute-in-the-store`).
 
 ## Procedure — Monday starts again at zero
 
@@ -154,9 +115,9 @@ owner's Monday in two places rather than one.
   survive; only the week resets.**
 - **Last week's sessions are still in the database.** Confirm in `sqlite3` —
   `D-quota-no-rollover` says the counter does not carry, **not** that the
-  history is destroyed. **If the reset deleted rows, that is a finding**: it is
-  `D-kill-means-archive`'s concern arriving on a new surface, and it makes the
-  reset irreversible.
+  history is destroyed. **If the reset deleted rows, that is a finding**:
+  `D-kill-means-archive`'s concern on a new surface, and it makes the reset
+  irreversible.
 - Step 4: **`30m / 4h`** — the new week counts normally.
 - **Then try to log Sunday's session on that Monday.** Confirm the picker does
   not offer last week and the total does not move. **Report how this felt.**
@@ -165,36 +126,33 @@ owner's Monday in two places rather than one.
 
 **Which row is expanded, and whether its `Other…` panel is open, are exactly
 the state that must not buy a column**
-(`T-ephemeral-view-state-rides-the-request`). `expanded=<tags>` on the pool is the worked example and
-`scripts/qa/trip_controls.cjs` **step 10 is the pattern**; that check is
-CI-gated at `ci.yml:452` under a no-skip contract, and anything added here must
-be too.
+(`T-ephemeral-view-state-rides-the-request`); `scripts/qa/trip_controls.cjs`
+step 10 is the pattern, CI-gated under a no-skip contract, and anything added
+here must be too.
 
 1. Seed three quotas, each with sessions. Load Quota at 390×844.
 2. **Expand one.** The others stay collapsed.
 3. **Open `Other…` on a different row.** Confirm what happens to the first.
 4. **With a row expanded, log a session in it.** ⚠️ **The row must still be
    expanded afterwards, and the session you just logged must be on screen.**
-5. **Reload.** 
+5. **Reload.**
 6. **Check the schema.**
 
 ### Expected Observable Outcomes
 - **Step 4 is the one this slice is most likely to get wrong.** If the fragment
   swap collapses the row, the panel closes under your thumb and takes the
-  session you just logged off the screen with it — **which is exactly the
-  failure `D-a-trip-survives-being-worked` was written against**, arriving on a
-  third screen through a third door. It has now been the hard part of three
-  slices running.
+  session you just logged off the screen with it — **the failure
+  `D-a-trip-survives-being-worked` was written against**, arriving on a third
+  screen through a third door.
 - Step 5: a fresh load starting collapsed is **correct and expected**, the same
   as the pool's expand state.
 - Step 6: **no column holds which row is expanded, or whether `Other…` is
   open.** If one does, **that is the finding and it goes first in the report** —
   `T-migrations-append-only` means it can never be taken back.
-- **A logged session is the opposite and earns its table.** Read
-  `D-a-trip-survives-being-tidied` (`cb02b3a`) beside this: a column there was
-  *permitted* and derived anyway. **The test says when storage is legitimate,
-  never that it is required.** Report which way each question went and whether
-  the pull-request body argues it.
+- **A logged session is the opposite and earns its table**
+  (`D-a-trip-survives-being-tidied`: storage permitted is not storage
+  required). Report which way each question went and whether the pull-request
+  body argues it.
 
 ## Procedure — prove the checks can fail
 
@@ -227,16 +185,15 @@ assertion it must trip; confirm the named one goes red.
 - **Breakages 1, 3 and 4 are the ones to do if you do only three.** All three
   leave the entire acceptance suite green, which is precisely why this document
   exists.
-- **⚠️ These nine scenarios have never been observed failing against an
-  implementation.** They were written before one existed and have only ever
-  been red on "no route yet", which is not the same thing at all
+- **⚠️ These nine scenarios were written before an implementation existed** and
+  have only ever been red on "no route yet", which is not the same thing
   (`T-a-check-must-be-seen-to-fail`). **Going red-to-green is not evidence.**
   Every breakage above must be run once the feature works.
-- **⚠️ Do not read the mutation manifest as evidence either.** **#145**:
-  a scenario with a surviving mutant is dropped from the manifest rather than
+- **⚠️ Do not read the mutation manifest as evidence either.** **#145**: a
+  scenario with a surviving mutant is dropped from the manifest rather than
   recorded, so every checked-in manifest reads 100% killed whether or not it
-  is, and `quota_sessions.feature`'s will too. **Report what the tool printed
-  on the run**, not what the file says afterwards — and do not hand-edit it.
+  is. **Report what the tool printed on the run**, not what the file says
+  afterwards — and do not hand-edit it.
 
 ## By-hand walkthrough — on a real phone
 
@@ -285,20 +242,15 @@ assertion it must trip; confirm the named one goes red.
   either gate red, that is the point** — report what it found rather than
   adjusting the screen to suit the check. **The quota row is the densest header
   the product has**, so phone layout is the likelier of the two to bite.
-- **`qa/installable.md` still says "three screens" and was not in this slice's
-  scope.** Worth thirty seconds anyway: **confirm `/quota` links the same
-  manifest the other three do.** A screen that does not is a real defect for an
-  installable app, and nothing currently checks it. Report it; do not fix it
-  here.
+- **Confirm `/quota` links the same manifest the other three do.** A screen
+  that does not is a real defect for an installable app and nothing currently
+  checks it. Report it; do not fix it here.
 - **DRY: report the number and the formats.** #144 measured 2.05% against a 3%
   product-code threshold. **A second step module for the same screen is the
   thing most likely to cross it** — say whether a shared family was extracted
   early or bolted on at the end.
-- **#118 is not fixed here and is now load-bearing twice.** The Monday boundary
-  reads the owner's timezone, which `/timezone` can only set by `POST` from no
-  page. The live database reads `America/New_York`; **the schema default is
-  `UTC`**, so a fresh install gets a Monday that is not the owner's Monday.
-  **Say so in the report.**
+- **#118 is not fixed here and is now load-bearing twice**, so a fresh install
+  gets a Monday that is not the owner's Monday. **Say so in the report.**
 
 ## Independent of Implementation
 

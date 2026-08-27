@@ -4,17 +4,15 @@
 
 # capture-endpoint-persists-01: a capture request persists a row and returns 201
 #
-# The 50 ms budget left this scenario in #88 (T-latency-is-a-qa-assertion) and
-# is now qa/capture_endpoint.md's, measured against a real server on a quiet
-# machine. It remains the design constraint -- capture's own module header
-# cites it and T-classifier-covers-domain reasons from it -- it simply stops
-# being asserted where a busy machine can falsify it.
-#
-# It was not merely a flake. It fired spuriously in four of six slices, and
-# the harm that decided it was silent: under mutation-run contention the
-# request took 1.885s, which failed cargo-mutants' UNMUTATED BASELINE, so it
-# refused to test a single mutant and the whole trellis-server crate had zero
-# mutation coverage with nothing connecting cause to effect.
+# The 50 ms budget left this scenario in #88 and is now qa/capture_endpoint.md's,
+# measured against a real server on a quiet machine (T-latency-is-a-qa-assertion).
+# It remains the design constraint -- capture's own module header cites it and
+# T-classifier-covers-domain reasons from it -- it simply stops being asserted
+# where a busy machine can falsify it. The harm that decided it was silent
+# rather than flaky: under mutation-run contention the request took 1.885s,
+# which failed cargo-mutants' UNMUTATED BASELINE, so it refused to test a single
+# mutant and the whole trellis-server crate had zero mutation coverage with
+# nothing connecting cause to effect.
 Feature: Capture endpoint accepts and persists captures
 
   Scenario: Submitting a capture persists it

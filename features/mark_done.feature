@@ -9,70 +9,38 @@
 # mark-done-no-completed-list-05: nothing lists completed work, and the control is not a reorder arrow
 # mark-done-escapes-hostile-text-06: hostile text stays escaped in the fragment marking done returns
 #
-# ONE COLUMN, NOT TWO, AND NO DISCRIMINATOR YET. `tasks.archived_at` has
-# existed since 0002 and nothing has ever written it; marking done writes it.
-# T-archived-at-only stays literally true -- it remains the single archive
-# signal.
+# ONE COLUMN, NOT TWO, AND NO DISCRIMINATOR YET. Marking done writes
+# `tasks.archived_at`, which has existed since 0002 with nothing ever writing
+# it; T-archived-at-only stays literally true. T-capture-leaves-inbox-once is
+# the precedent, and where it STOPS transferring is the point: there one column
+# sufficed because the exit was DERIVABLE -- a triaged capture has a `tasks`
+# row and a dismissed one does not. Here nothing downstream distinguishes a
+# task you did from a task you killed, so a discriminator would have to be
+# stored, and NOTHING CAN KILL A TASK TODAY -- a column that can only ever hold
+# one value is the speculative schema this project refuses. When a kill control
+# arrives it adds the discriminator and backfills every existing row as `done`,
+# which is PROVABLY correct rather than a guess. Recorded because M8's
+# reckoning and D-quota-no-rollover both need the distinction eventually.
 #
-# T-capture-leaves-inbox-once is the precedent the brief points at, and the
-# interesting part is where it STOPS transferring. There, one column sufficed
-# because the exit was DERIVABLE: a triaged capture has a `tasks` row
-# referencing it and a dismissed one does not. Here there is no such row.
-# Nothing downstream distinguishes a task you did from a task you killed, so
-# the discriminator could not be derived -- it would have to be stored.
+# THE CANVAS DRAWS NO DONE CONTROL -- a GAP under D-four-screens rather than a
+# disagreement with it. The checkbox sits at each row's LEADING EDGE ON BOTH
+# SCREENS, Committed included, before the 66px date cell: one rule and one
+# place the thumb learns. The cost is named because nobody can see it -- a
+# Committed row becomes four columns on a 430px canvas with 18px padding, so
+# its text loses roughly 32px, the tightest thing on the phone.
 #
-# It is not stored, because NOTHING CAN KILL A TASK TODAY. A column that can
-# only ever hold one value is the speculative schema this project refuses --
-# the same ground S4's `captures.life_area` was cut on, and the reason #48
-# would not add a second timestamp for a state that could not occur. When a
-# kill control arrives it adds the discriminator and backfills every existing
-# row as `done`, which is PROVABLY correct rather than a guess: nothing else
-# could have set the column.
+# IT IS A CHECKBOX AND MUST NOT BE AN ARROW; 05 asserts that what this slice
+# adds did not become the reorder control pool-screen-nothing-reorders-05
+# forbids. A QUOTA TASK IS NEVER DONE -- it recurs, so completing it is logging
+# a session (D-logging-is-retrospective-and-separate); leave that seam clean. A
+# done task keeps its context tag, so "done" is a filter over one list rather
+# than a second list.
 #
-# Recorded because M8's reckoning ("47 archived this quarter, 31 Learning")
-# and D-quota-no-rollover's "you did 1 of 3 runs" both need the distinction
-# eventually. They get it the day something can produce both values.
-#
-# THE CANVAS DRAWS NO DONE CONTROL. Its complete aria-label set is Raise
-# priority, Lower priority, Minutes, Day, Save capture, Hours a week, Delete
-# session. D-four-screens makes the canvas authoritative on layout, so this
-# is a GAP IN THE DESIGN rather than a disagreement with it: the checkbox at
-# each row's LEADING EDGE, on both screens, was chosen by the owner and is
-# not drawn anywhere. Said plainly so the design can be corrected rather than
-# quietly diverged from.
-#
-# LEADING EDGE MEANS LEADING EDGE ON COMMITTED TOO, before the 66px date
-# cell -- one rule and one place the thumb learns, ticking down a column
-# rather than reaching across a row. The cost is named because nobody can see
-# it: a Committed row becomes four columns on a 430px canvas with 18px
-# padding, so its text loses roughly 32px, and a long item beside
-# "BY THU 17:00" and a context tag is the tightest thing on the phone.
-#
-# THE CONTROL IS A CHECKBOX AND MUST NOT BE AN ARROW.
-# pool-screen-nothing-reorders-05 asserts the absence of every reorder
-# control and its QA document calls finding one a defect; #95 owns those. 05
-# below asserts that what this slice adds did not become one.
-#
-# A QUOTA TASK IS NEVER DONE -- it recurs, so completing it is logging a
-# session, which is #93's (D-logging-is-retrospective-and-separate:
-# completing may OFFER to log time and never does it silently). No done
-# control belongs on quota work, and this slice must leave that seam clean.
-#
-# A DONE TASK KEEPS ITS CONTEXT TAG. The tag lives on the capture and nothing
-# removes it, so "done" is a filter over one list rather than a second list --
-# which is what lets M8 later ask what was done at @homedepot.
-#
-# mark-done-trip-drops-below-three-02 IS REMOVED, NOT NARROWED. It asserted
+# mark-done-trip-drops-below-three-02 IS REMOVED, NOT NARROWED: it asserted
 # that marking 2 of 3 tagged tasks done dissolved the trip into loose ends --
-# true when this slice landed, false since #122 (trip-progress): PERSISTENCE
-# now counts everything displayed, so working a trip never dissolves it, and
-# a group only drops to loose ends when the owner explicitly clears its done
-# items (trip-progress-clearing-can-drop-a-group-05). Both the "checking
-# items off never dissolves the panel" case this scenario meant to guard and
-# the "a group can still drop to loose ends" case it was actually testing are
-# now trip_progress.feature's own (trip-progress-panel-holds-02 and -05
-# respectively) -- keeping a second, contradicting copy here would just be
-# the next agent's stale-scenario bug.
+# true when this slice landed, false since #122. Both cases it covered are now
+# trip_progress.feature's -02 and -05, and a second contradicting copy here
+# would be the next agent's stale-scenario bug.
 Feature: A task you have done leaves the screen it lives on
 
   Background:

@@ -174,18 +174,36 @@ mod tests {
         assert_eq!(other_row.error, None);
     }
 
+    /// A capture created, triaged as `Pool`, and closed -- the shared setup
+    /// for this module's own "what a triaged row reads" tests, with or
+    /// without a context tag.
+    async fn given_a_triaged_pool_capture(
+        pool: &SqlitePool,
+        text: &str,
+        context_tag: Option<&str>,
+    ) -> i64 {
+        let capture_id = match context_tag {
+            Some(tag) => {
+                crate::capture::create(pool, text, "web", Some(tag), 0)
+                    .await
+                    .unwrap()
+                    .0
+            }
+            None => insert_capture(pool, text, "web", None, 0).await.unwrap(),
+        };
+        crate::triage::store::insert_task(pool, capture_id, &TaskKind::Pool, 0)
+            .await
+            .unwrap();
+        crate::inbox::close_capture(pool, capture_id, 0)
+            .await
+            .unwrap();
+        capture_id
+    }
+
     #[tokio::test]
     async fn a_triaged_capture_stays_and_reads_what_it_became() {
         let (_dir, pool) = test_pool().await;
-        let capture_id = insert_capture(&pool, "buy milk", "web", None, 0)
-            .await
-            .unwrap();
-        crate::triage::store::insert_task(&pool, capture_id, &TaskKind::Pool, 0)
-            .await
-            .unwrap();
-        crate::inbox::close_capture(&pool, capture_id, 0)
-            .await
-            .unwrap();
+        given_a_triaged_pool_capture(&pool, "buy milk", None).await;
 
         let captures = build_lists(&pool, None).await.unwrap().captures;
 
@@ -197,16 +215,7 @@ mod tests {
     #[tokio::test]
     async fn a_triaged_captures_meta_names_its_context_tag() {
         let (_dir, pool) = test_pool().await;
-        let (capture_id, _) =
-            crate::capture::create(&pool, "buy screws", "web", Some("@homedepot"), 0)
-                .await
-                .unwrap();
-        crate::triage::store::insert_task(&pool, capture_id, &TaskKind::Pool, 0)
-            .await
-            .unwrap();
-        crate::inbox::close_capture(&pool, capture_id, 0)
-            .await
-            .unwrap();
+        given_a_triaged_pool_capture(&pool, "buy screws", Some("@homedepot")).await;
 
         let captures = build_lists(&pool, None).await.unwrap().captures;
 

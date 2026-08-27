@@ -366,6 +366,17 @@ mod tests {
         assert_eq!(recent[0].context_tag.as_deref(), Some("@homedepot"));
     }
 
+    /// [`list_recent`], reduced to the recency order itself -- what every
+    /// test below this point checks, none of the other fields.
+    async fn recent_texts(pool: &SqlitePool) -> Vec<String> {
+        list_recent(pool)
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|c| c.raw_text)
+            .collect()
+    }
+
     #[tokio::test]
     async fn list_recent_orders_by_strict_recency_across_both_kinds() {
         let (_dir, pool) = test_pool().await;
@@ -374,13 +385,8 @@ mod tests {
             .await
             .unwrap();
 
-        let recent = list_recent(&pool).await.unwrap();
-
         assert_eq!(
-            recent
-                .iter()
-                .map(|c| c.raw_text.as_str())
-                .collect::<Vec<_>>(),
+            recent_texts(&pool).await,
             vec!["buy milk", "call the dentist"],
             "the untriaged capture happened most recently and lists first"
         );
@@ -393,13 +399,8 @@ mod tests {
             given_triaged(&pool, text, index as i64).await;
         }
 
-        let recent = list_recent(&pool).await.unwrap();
-
         assert_eq!(
-            recent
-                .iter()
-                .map(|c| c.raw_text.as_str())
-                .collect::<Vec<_>>(),
+            recent_texts(&pool).await,
             vec!["four", "three", "two"],
             "the oldest triaged capture drops off"
         );
@@ -415,13 +416,8 @@ mod tests {
             .await
             .unwrap();
 
-        let recent = list_recent(&pool).await.unwrap();
-
         assert_eq!(
-            recent
-                .iter()
-                .map(|c| c.raw_text.as_str())
-                .collect::<Vec<_>>(),
+            recent_texts(&pool).await,
             vec!["still waiting", "four", "three", "two"]
         );
     }

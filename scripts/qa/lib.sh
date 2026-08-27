@@ -418,6 +418,37 @@ qa_committed_rows_scope() {
 # The <li class="committed-row...">...</li> block whose text contains
 # needle, scoped to the committed-rows list, or "" if none matches.
 # Creates one pool task, tagged if a second argument is given, and returns
+# Captures, triages as a quota, and logs `sessions` against it, printing the
+# new quota's id. The Quota screen is the one screen whose components only
+# exist once something is DEFINED -- an empty /quota renders a single empty
+# panel and nothing else, so a gate that visits it unseeded measures the
+# empty state and reports a pass for a screen it never saw (#93's brief:
+# "a whole screen escaping its gate is exactly how a palette settlement
+# quietly stops being true"). Shared by colour.sh and phone_layout.sh.
+#
+# `sessions` is a space-separated list of `<Day>:<minutes>` pairs, and the
+# days must be days the pinned server clock has already passed -- the day
+# picker offers no others (quota-sessions-only-days-that-have-happened-03).
+qa_quota() {
+  local name="$1" hours="$2" sessions="${3:-}" capture_id quota_id pair day minutes
+  capture_id="$(qa_submit_capture "$name")"
+  qa_triage "$capture_id" "$(python3 -c 'import json,sys; print(json.dumps({"kind":"quota","name":sys.argv[1],"hours":sys.argv[2],"life_area":"Work"}))' "$name" "$hours")"
+  if [[ "$STATUS" != "201" ]]; then
+    echo "FAIL: setup -- triaging \"$name\" as a quota returned status $STATUS" >&2
+    FAILURES=1
+    return 1
+  fi
+  quota_id="$(sqlite3 "$DB_PATH" "SELECT id FROM quotas WHERE name = '${name//\'/\'\'}' ORDER BY id DESC LIMIT 1;")"
+  for pair in $sessions; do
+    day="${pair%%:*}"
+    minutes="${pair##*:}"
+    curl -s -o /dev/null -X POST "http://$ADDR/quota/$quota_id/sessions" \
+      -H 'content-type: application/x-www-form-urlencoded' \
+      -d "day=$day&minutes=$minutes"
+  done
+  printf '%s' "$quota_id"
+}
+
 # nothing -- callers that need the id use qa_submit_capture themselves.
 # Shared by mark_done.sh and pool_screen.sh.
 qa_pool_task() {

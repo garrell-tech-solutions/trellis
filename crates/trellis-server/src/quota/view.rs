@@ -28,6 +28,12 @@ pub struct QuotaRowView {
     pub readout: String,
     /// `"4h left this week · 0%"`.
     pub note: String,
+    /// The same progress the note spells out, as a number the template can
+    /// set a bar's width from -- CLAMPED TO 0..=100, which the note's own
+    /// percent is not. An over-met quota notes `120%` and reads honestly;
+    /// a bar 120% wide would simply overflow its track, so the bar stops at
+    /// full and the note is what says by how much it was beaten.
+    pub bar_percent: i64,
     /// Newest fact last: Monday's sessions before Tuesday's, and within a
     /// day, in the order they were logged
     /// (`quota-sessions-this-week-lists-what-was-logged-04`).
@@ -173,6 +179,7 @@ fn quota_row_view(
             format_duration(progress.remaining_minutes),
             progress.percent
         ),
+        bar_percent: progress.percent.clamp(0, 100),
         sessions,
         sessions_message,
         summary,
@@ -325,6 +332,40 @@ mod tests {
         );
         assert_eq!(view.quotas[0].readout, "20m / 4h");
         assert_eq!(view.quotas[0].note, "3h 40m left this week · 8%");
+    }
+
+    /// The bar and the note read the same progress while it is in range --
+    /// the bar is not a second, rounder opinion about the week.
+    #[test]
+    fn the_bar_tracks_the_percent_the_note_spells_out() {
+        let week = tuesday_week();
+        let monday_ms = week.day_ms(scheduler_core::quota::Weekday::Mon, &zone());
+        let view = build(
+            vec![row(1, "Piano", 240)],
+            vec![session(1, monday_ms, 20)],
+            &week,
+            &zone(),
+            &HashSet::new(),
+        );
+        assert_eq!(view.quotas[0].note, "3h 40m left this week · 8%");
+        assert_eq!(view.quotas[0].bar_percent, 8);
+    }
+
+    /// Beating the target is not an error and the note says so honestly; the
+    /// bar simply stops at full rather than overflowing its own track.
+    #[test]
+    fn the_bar_stops_at_full_when_the_target_is_beaten() {
+        let week = tuesday_week();
+        let monday_ms = week.day_ms(scheduler_core::quota::Weekday::Mon, &zone());
+        let view = build(
+            vec![row(1, "Piano", 240)],
+            vec![session(1, monday_ms, 300)],
+            &week,
+            &zone(),
+            &HashSet::new(),
+        );
+        assert_eq!(view.quotas[0].note, "0m left this week · 125%");
+        assert_eq!(view.quotas[0].bar_percent, 100);
     }
 
     #[test]

@@ -111,6 +111,17 @@ if qa_start_server "$BIN" "$TMP_DIR/colour.sqlite" "$TMP_DIR/colour.log" "2026-0
   qa_pool_task "fix the door latch" "@garage"
   seed_report+=("1 loose end (@garage, below threshold, keeps its tag)")
 
+  # Two quotas: one mid-week (name, readout, a part-filled bar, the note,
+  # both quick-log chips and the two disclosure summaries) and one with
+  # nothing logged (the empty-week message and "nothing logged"). TWO, not
+  # three -- /quota is declared `expectOverflow: false`, and a third row
+  # pushes the screen past 844px and fails that assertion rather than any
+  # colour one. Server pinned to a Monday above, so Mon is the only day the
+  # picker offers and the only day a session can be logged against.
+  qa_quota "Piano" "4" "Mon:60 Mon:30" >/dev/null
+  qa_quota "Spanish" "3" "" >/dev/null
+  seed_report+=("2 quotas (part-filled bar + sessions, empty week)")
+
   # A committed task with a past date: the past date cell and the PAST
   # badge. Server pinned to 2026-08-24T09:00:00Z above.
   past_id="$(qa_submit_capture "renew the passport")"

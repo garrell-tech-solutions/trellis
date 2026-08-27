@@ -34,7 +34,12 @@
     "not the match'; there is no match and no logic, only a straight line of",
     "fallible steps, and splitting it would be indirection bought purely to",
     "move a number. Recorded explicitly because the paragraph above says every",
-    "entry is a dispatcher, and from here that is no longer true."
+    "entry is a dispatcher, and from here that is no longer true.",
+    "",
+    "2026-08-27 (#140): five dispatcher scores move and two go DOWN. Retiring the",
+    "`Tasks` list took its assertions with it and pushed the replacements onto the",
+    "destination screens, so arms moved between modules rather than logic being",
+    "added. Every one is still a one-line delegation."
   ],
   "threshold": 8,
   "accepted": [
@@ -53,14 +58,14 @@
     {
       "file": "crates/acceptance-tests/src/steps/committed_screen.rs",
       "function": "dispatch",
-      "cyclomatic_complexity": 18,
-      "why": "Gherkin step dispatcher; regex chain, one-line delegation per arm. New module for features/committed_screen.feature (#94). Reviewed arm by arm: every branch is `if let Some(caps) = REGEX.captures(text) { return Some(handler(..)) }` with no conditional of its own, which is the shape T-complexity-8 says has nothing to extract."
+      "cyclomatic_complexity": 19,
+      "why": "Gherkin step dispatcher; regex chain, one-line delegation per arm. New module for features/committed_screen.feature (#94). Reviewed arm by arm: every branch is `if let Some(caps) = REGEX.captures(text) { return Some(handler(..)) }` with no conditional of its own, which is the shape T-complexity-8 says has nothing to extract. 18 -> 19 (#140): one arm for `the committed screen lists nothing`, the destination assertion that replaced `the task list is still empty`."
     },
     {
       "file": "crates/acceptance-tests/src/steps/context_tags.rs",
       "function": "dispatch",
-      "cyclomatic_complexity": 10,
-      "why": "Gherkin step dispatcher; regex chain, one-line delegation per arm. New module for features/context_tags.feature, re-specified against the demolished tree (context-tags brief, #82). The logic in this module -- resolve, captures_scope, suggested_tags/suggestions_datalist_section, then_row_contains -- was kept out of dispatch and into named helpers each arm delegates to, the same discipline every other dispatcher here follows."
+      "cyclomatic_complexity": 9,
+      "why": "Gherkin step dispatcher; regex chain, one-line delegation per arm. New module for features/context_tags.feature, re-specified against the demolished tree (context-tags brief, #82). The logic in this module -- resolve, captures_scope, suggested_tags/suggestions_datalist_section, then_row_contains -- was kept out of dispatch and into named helpers each arm delegates to, the same discipline every other dispatcher here follows. 10 -> 9 (#140): DOWN. The `task list shows ... tagged` arm went to pool_screen.rs, where the tag is now read."
     },
     {
       "file": "crates/acceptance-tests/src/steps/disclosures.rs",
@@ -77,8 +82,8 @@
     {
       "file": "crates/acceptance-tests/src/steps/inbox_view.rs",
       "function": "dispatch",
-      "cyclomatic_complexity": 11,
-      "why": "Gherkin step dispatcher; regex chain, one-line delegation per arm."
+      "cyclomatic_complexity": 17,
+      "why": "Gherkin step dispatcher; regex chain, one-line delegation per arm. 11 -> 17 (#140): six arms for Recent's two row states -- reads/offers-no-kind-buttons/shows-once, the ordered-triage fixture, and the row-state parameter. `Tasks` is gone, so what the capture page shows is now this module's whole subject."
     },
     {
       "file": "crates/acceptance-tests/src/steps/installable.rs",
@@ -101,8 +106,8 @@
     {
       "file": "crates/acceptance-tests/src/steps/pool_screen.rs",
       "function": "dispatch",
-      "cyclomatic_complexity": 28,
-      "why": "Gherkin step dispatcher; regex chain, one-line delegation per arm. 27 -> 28 (#94): then_does_not_mention moved to steps::mod as a shared helper taking `body` directly, and the tab-path lookup gained a \"committed\" arm. Both are new arms, not conditionals in the match."
+      "cyclomatic_complexity": 31,
+      "why": "Gherkin step dispatcher; regex chain, one-line delegation per arm. 27 -> 28 (#94): then_does_not_mention moved to steps::mod as a shared helper taking `body` directly, and the tab-path lookup gained a \"committed\" arm. Both are new arms, not conditionals in the match. 28 -> 31 (#140): three arms -- `lists nothing`, `lists \"X\" tagged`, and the hostile-text pair that moved here from the retired task list."
     },
     {
       "file": "crates/acceptance-tests/src/steps/quota_migration.rs",
@@ -131,14 +136,14 @@
     {
       "file": "crates/acceptance-tests/src/steps/triage.rs",
       "function": "dispatch",
-      "cyclomatic_complexity": 16,
-      "why": "Gherkin step dispatcher; regex chain, one-line delegation per arm. 17 -> 18 for the GIVEN_SERVER_BELIEVES_IT_IS clock-pinning Background step (#94) -- a new step, not new logic. 18 -> 16 (#138): DOWN. The target_count/target_minutes_each/period steps retired with the fields themselves; quota triage now carries a name and hours."
+      "cyclomatic_complexity": 15,
+      "why": "Gherkin step dispatcher; regex chain, one-line delegation per arm. 17 -> 18 for the GIVEN_SERVER_BELIEVES_IT_IS clock-pinning Background step (#94) -- a new step, not new logic. 18 -> 16 (#138): DOWN. The target_count/target_minutes_each/period steps retired with the fields themselves; quota triage now carries a name and hours. 16 -> 15 (#140): DOWN. `the task list is still empty` retired with the list it named."
     },
     {
       "file": "crates/acceptance-tests/src/steps/triage_from_page.rs",
       "function": "dispatch",
-      "cyclomatic_complexity": 14,
-      "why": "Gherkin step dispatcher; regex chain, one-line delegation per arm. 12 -> 14: two new one-line arms for the pool-needs-no-form and pool-is-cheapest scenarios (#9's amended AC-2, dismiss-capture brief #48) -- new steps, not new logic."
+      "cyclomatic_complexity": 11,
+      "why": "Gherkin step dispatcher; regex chain, one-line delegation per arm. 12 -> 14: two new one-line arms for the pool-needs-no-form and pool-is-cheapest scenarios (#9's amended AC-2, dismiss-capture brief #48) -- new steps, not new logic. 14 -> 11 (#140): DOWN. The `task list shows` arm and the hostile-text pair both left for the destination screens when the list they named was retired."
     },
     {
       "file": "crates/acceptance-tests/src/steps/trip_progress.rs",

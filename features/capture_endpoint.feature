@@ -1,5 +1,5 @@
 # acceptance-mutation-manifest-begin
-# {"version":1,"tested_at":"2026-08-21T00:04:15.164414100Z","feature_name":"Capture endpoint accepts and persists captures","feature_path":"features/capture_endpoint.feature","background_hash":"74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b","implementation_hash":"sha256:6df1ebbd17c830071d3793cb01ea6b0b46f45b48426dc1fe0b1db0af5ab0d689","scenarios":[]}
+# {"version":1,"tested_at":"2026-08-27T04:22:11.077938295Z","feature_name":"Capture endpoint accepts and persists captures","feature_path":"features/capture_endpoint.feature","background_hash":"74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b","implementation_hash":"sha256:6df1ebbd17c830071d3793cb01ea6b0b46f45b48426dc1fe0b1db0af5ab0d689","scenarios":[]}
 # acceptance-mutation-manifest-end
 
 # capture-endpoint-persists-01: a capture request persists a row and returns 201

@@ -85,6 +85,16 @@ if qa_start_server "$BIN" "$TMP_DIR/phone-layout.sqlite" "$TMP_DIR/phone-layout.
     FAILURES=1
   fi
 
+  # The Quota screen owns controls no other screen has -- the quick-log
+  # chips, two nested disclosures and a session row's correction form -- and
+  # every one of them is a tap target this check exists to measure. An
+  # unseeded /quota renders none of them, so it is seeded here for the same
+  # reason the committed task above is: a screen that renders nothing cannot
+  # fail a layout assertion. Server pinned to a Monday, so Mon is the only
+  # day the picker offers.
+  qa_quota "Piano" "4" "Mon:60 Mon:30" >/dev/null
+  qa_quota "Spanish" "3" "" >/dev/null
+
   if ! NODE_PATH="$NODE_MODULES_DIR" node "$SCRIPT_DIR/phone_layout.cjs" "http://$ADDR"; then
     FAILURES=1
   fi

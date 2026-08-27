@@ -1,13 +1,19 @@
-//! The `#lists` fragment: the inbox and task list as one swappable block.
+//! The `#lists` fragment: `Recent`, as one swappable block.
 //!
 //! Two endpoints render it — `GET /` wraps it in the full page, and a
 //! page-originated triage swaps it in on its own. It lives here, beside
 //! [`super::http`] rather than inside it, for the reason it always has: the
 //! triage endpoint needs the *fragment*, not the inbox page. What the
 //! business-domain packaging settles is which capability the fragment belongs
-//! to — it is two lists of the inbox's own rows, so the inbox owns it and
+//! to — it is a list of the inbox's own rows, so the inbox owns it and
 //! triage reaches in.
+//!
+//! The plural name outlived the second list (#140) and is kept: it is the
+//! `id` htmx swaps against, spelled in `inbox.html`, in every form's
+//! `hx-target`, and in the acceptance suite. Renaming it is a rename of the
+//! contract, not of this file.
 
+use crate::inbox::shown_kind::ShownKind;
 use crate::inbox::store;
 use crate::inbox::view::CaptureRow;
 use crate::platform::response::{render_template, write_failed};
@@ -52,7 +58,7 @@ pub(super) async fn respond(
     Ok(render_template(status, &lists))
 }
 
-/// Fetches the current inbox, task list and triage picker, attaching `error`
+/// Fetches the current `Recent` rows and triage picker, attaching `error`
 /// to whichever capture's triage attempt just failed (if any). Shared by the
 /// inbox page and [`respond`]: "the page and `POST /captures/{id}/triage` are
 /// one code path" extends to what gets rendered afterward, not just to how
@@ -106,20 +112,26 @@ async fn build_capture_rows(
     Ok(store::list_recent(pool)
         .await?
         .into_iter()
-        .map(|capture| CaptureRow {
-            id: capture.id,
-            meta: capture
-                .kind
-                .as_deref()
-                .map(|kind| triaged_meta(kind, capture.context_tag.as_deref())),
-            context_tag: capture.context_tag,
-            error: error
-                .as_ref()
-                .filter(|(id, _)| *id == capture.id)
-                .map(|(_, message)| message.clone()),
-            committed_open: capture.shown_kind.as_deref() == Some("committed"),
-            quota_open: capture.shown_kind.as_deref() == Some("quota"),
-            text: capture.raw_text,
+        .map(|capture| {
+            // Whatever the column holds, read through the domain that owns
+            // it -- a value outside it opens no panel rather than matching
+            // a literal spelled here for the third time.
+            let shown = capture.shown_kind.as_deref().and_then(ShownKind::parse);
+            CaptureRow {
+                id: capture.id,
+                meta: capture
+                    .kind
+                    .as_deref()
+                    .map(|kind| triaged_meta(kind, capture.context_tag.as_deref())),
+                context_tag: capture.context_tag,
+                error: error
+                    .as_ref()
+                    .filter(|(id, _)| *id == capture.id)
+                    .map(|(_, message)| message.clone()),
+                committed_open: shown == Some(ShownKind::Committed),
+                quota_open: shown == Some(ShownKind::Quota),
+                text: capture.raw_text,
+            }
         })
         .collect())
 }
@@ -287,7 +299,9 @@ mod tests {
         let id = insert_capture(&pool, "buy milk", "web", None, 0)
             .await
             .unwrap();
-        store::set_shown_kind(&pool, id, "committed").await.unwrap();
+        store::set_shown_kind(&pool, id, ShownKind::Committed)
+            .await
+            .unwrap();
 
         let lists = build_lists(&pool, None).await.unwrap();
 

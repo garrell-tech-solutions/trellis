@@ -1,12 +1,19 @@
-//! **Inbox** — the first page: what is still waiting to be triaged, newest
-//! first, alongside the tasks triage has already produced.
+//! **Inbox** — the first page: `Recent`. What is still waiting to be
+//! triaged, newest first, and the three most recently triaged captures
+//! reading what they became (#140).
+//!
+//! **One list, not two.** It was the untriaged queue *plus* a flat `Tasks`
+//! list of every task in the database — `D-visible-slices`' proof, back when
+//! triage wrote somewhere with nothing to show for it. There are four screens
+//! for that now (`D-four-screens`), so the second list is gone and a triaged
+//! capture stays in the first one instead.
 //!
 //! The inbox owns the shape of a listed row ([`view`]) and the `#lists`
 //! fragment those rows live in (`lists`), because both are what a reader
 //! sees on this page — and that is why [`crate::capture`],
 //! [`crate::triage`] and [`crate::dismiss`] reach in here. Creating a
 //! capture returns the new inbox row; triaging or dismissing one re-renders
-//! the inbox's two lists. Neither is the inbox reaching outward: the inbox
+//! the inbox's list. Neither is the inbox reaching outward: the inbox
 //! is the surface those capabilities act on.
 //!
 //! It also owns **membership**: whether a capture is still in the inbox, and
@@ -20,6 +27,7 @@
 
 pub mod http;
 mod lists;
+mod shown_kind;
 pub mod store;
 pub mod view;
 
@@ -43,7 +51,7 @@ pub(crate) const CAPTURE_NOT_OPEN_MESSAGE: &str = "the capture is no longer in t
 /// column meant "triage happened". Migration `0005` renamed it to
 /// `left_inbox_at` and widened it to "left the inbox, by either exit", and
 /// that rename moved the fact: `left_inbox_at IS NULL` is now the definition
-/// of [`store::list_untriaged`]'s `WHERE` clause — inbox membership — asked
+/// of [`store::list_recent`]'s untriaged half — inbox membership — asked
 /// about one row instead of all of them. `triage` and `dismiss` ask the same
 /// question for the same reason, which is one fact, not the two facts that
 /// decision licenses separate copies of.

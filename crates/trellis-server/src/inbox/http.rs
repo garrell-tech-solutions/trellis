@@ -1,5 +1,5 @@
-//! `GET /`: the untriaged capture queue and task list (D-visible-slices'
-//! first two slices, issues #30 and #33).
+//! `GET /`: the quick-add box and `Recent` — what is waiting to be triaged,
+//! and the last few that were (#30, #33, #140).
 //!
 //! `POST /captures/{id}/kind`: which kind's fields panel a still-untriaged
 //! row is showing (#119) -- a display preference the inbox owns the same
@@ -7,6 +7,7 @@
 
 use super::lists;
 use super::lists::build_lists;
+use super::shown_kind::ShownKind;
 use super::CAPTURE_NOT_OPEN_MESSAGE;
 use crate::inbox::view::CaptureRow;
 use crate::platform::nav::{self, NavLink, Page};
@@ -50,25 +51,21 @@ pub struct SetShownKindRequest {
     kind: String,
 }
 
-/// The only two kinds that have a panel at all -- pool files on one tap and
-/// never reaches this endpoint (`D-pool-is-default`).
-fn is_a_kind_with_a_panel(kind: &str) -> bool {
-    kind == "committed" || kind == "quota"
-}
-
 pub async fn set_shown_kind(
     State(pool): State<SqlitePool>,
     Path(capture_id): Path<i64>,
     Form(payload): Form<SetShownKindRequest>,
 ) -> Result<Response, StatusCode> {
-    if !is_a_kind_with_a_panel(&payload.kind) {
-        return Err(StatusCode::BAD_REQUEST);
-    }
+    // Outside the closed domain before anything else happens: `ShownKind`
+    // owns which kinds have a panel at all, and a submission naming another
+    // is refused here rather than reaching the column
+    // (`D-pool-is-default` -- pool files on one tap and never opens one).
+    let shown = ShownKind::parse(&payload.kind).ok_or(StatusCode::BAD_REQUEST)?;
     let open = super::capture_is_open(&pool, capture_id)
         .await
         .map_err(write_failed)?;
     let (status, error) = if open {
-        super::store::set_shown_kind(&pool, capture_id, &payload.kind)
+        super::store::set_shown_kind(&pool, capture_id, shown)
             .await
             .map_err(write_failed)?;
         (StatusCode::OK, None)

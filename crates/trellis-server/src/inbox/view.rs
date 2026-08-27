@@ -12,7 +12,7 @@
 //! A row is what the database returned. A view model is what the page shows.
 //! They no longer agree: a capture row now carries the id the triage-from-page
 //! slice aims its controls at, and an in-flight rejection's message — neither
-//! of which is a column `list_untriaged` selects.
+//! of which is a column the listing query selects.
 //!
 //! Nothing here depends on anything. Handlers do the mapping, so this module
 //! stays pure data and can be rendered without a database.
@@ -24,8 +24,8 @@
 /// `shown_kind` text column (#119) -- a boolean per kind rather than the raw
 /// string, the same shift `row.past`/`life_area.pool_only` already made
 /// elsewhere so a template compares a flag, never a literal. Mutually
-/// exclusive by construction: [`set_shown_kind`](super::store::set_shown_kind)
-/// only ever writes one of the two kinds it's given.
+/// exclusive because the value they are read from is: the column round-trips
+/// through `ShownKind`, which has no variant that is both.
 pub struct CaptureRow {
     pub id: i64,
     pub text: String,

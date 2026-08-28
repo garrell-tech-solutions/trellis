@@ -143,9 +143,10 @@ done action wired to an existing arrow, breaks that assertion.**
 and **a line appears naming it with a way back.** It lasts until your next
 action and **does not survive a reload** — nothing is stored.
 
-1. Two pool tasks. Tick one. Read the screen.
-2. Tick the other. Read again.
-3. Reload the page.
+1. Two pool tasks. Tick one. **Read the fragment the tick returned**, not a
+   fresh page.
+2. Tick the other. Read that fragment.
+3. **Now load the screen** — `GET /pool`.
 4. Repeat 1 on the Committed screen.
 
 ### Expected Observable Outcomes
@@ -156,8 +157,9 @@ action and **does not survive a reload** — nothing is stored.
   growing list** — if it accumulates it has become the archive
   `R-browsable-archive` refused, and `mark-done-no-completed-list-05` is the
   assertion that should catch it.
-- Step 3: **the line is gone.** This is the honest cost of the choice and it is
-  deliberate — `tasks.archived_at` would have made it survive for free, with no
+- Step 3: **the line is gone.** The way back lives in the completion's own
+  response and nowhere else, so any navigation to the screen renders without
+  it. This is the honest cost of the choice and it is deliberate — `tasks.archived_at` would have made it survive for free, with no
   column bought, and that was offered and declined. **Check the schema for a
   new column holding a "recently completed" flag: if one exists, say that
   before anything else in the report** (`T-migrations-append-only` means it can
@@ -167,7 +169,9 @@ action and **does not survive a reload** — nothing is stored.
 
 ## Procedure — taking the way back
 
-1. Three pool tasks at one tag, forming a trip. Tick one. Take the way back.
+1. Three pool tasks at one tag, forming a trip. Tick one, and **take the way
+   back from the fragment that tick returned** — do not navigate first, or the
+   control is gone by design.
 2. A committed task. Tick it. Take the way back.
 3. Tick a pool task, take the way back, then **take it again.**
 

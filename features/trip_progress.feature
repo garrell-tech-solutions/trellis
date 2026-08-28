@@ -159,10 +159,10 @@ Feature: A trip survives being worked
     Given a pool task "fix the door latch" with no context tag
     And a pool task "sharpen the mower" with no context tag
     When "fix the door latch" is marked done
-    And the pool screen is viewed
+    Then the way back offers "fix the door latch"
+    When the pool screen is viewed
     Then the loose ends list shows "<loose>" items
     And the pool screen lists "sharpen the mower" among the loose ends
-    And the way back offers "fix the door latch"
 
     Examples:
       | loose |

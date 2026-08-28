@@ -13,6 +13,13 @@
 # mark-done-way-back-is-ephemeral-09: the way back lasts until the next action and does not survive a reload
 # mark-done-second-undo-changes-nothing-10: taking a way back twice returns the task once
 #
+# THE WAY BACK LIVES IN THE COMPLETION'S OWN RESPONSE AND NOWHERE ELSE. It is
+# not on the screen you can navigate to; it is in the fragment the tick swapped
+# in -- `T-forms-swap-one-fragment`, one change, one id. A later GET renders a
+# screen with no way back on it (-09). The first draft of -01, -03 and
+# `trip-progress-08` asserted it AFTER a view and so contradicted -09; the
+# coder caught it. Every way-back assertion now sits on the completion.
+#
 # THE WAY BACK IS A LINE, NOT A LIST -- one task, gone on your next action.
 # `mark-done-no-completed-list-05` is the guard: if it ever accumulates it has
 # become the archive `R-browsable-archive` refused.
@@ -63,10 +70,10 @@ Feature: A task you have done leaves the screen it lives on
     Given a pool task "buy screws" tagged "@homedepot"
     And a pool task "fix the door latch" with no context tag
     When "buy screws" is marked done
-    And the pool screen is viewed
+    Then the way back offers "buy screws"
+    When the pool screen is viewed
     Then the loose ends list shows "<loose>" items
     And the pool screen lists "fix the door latch" among the loose ends
-    And the way back offers "buy screws"
 
     Examples:
       | loose |
@@ -77,9 +84,9 @@ Feature: A task you have done leaves the screen it lives on
     Given a committed task "Book the dentist" with no context tag due "2026-08-25T08:30:00Z" as an "at"
     And a committed task "File the tax return" with no context tag due "2026-08-27T17:00:00Z" as a "by"
     When "Book the dentist" is marked done
-    And the committed screen is viewed
+    Then the way back offers "Book the dentist"
+    When the committed screen is viewed
     Then the committed screen lists "<remaining>"
-    And the way back offers "Book the dentist"
 
     Examples:
       | remaining           |
@@ -123,31 +130,29 @@ Feature: A task you have done leaves the screen it lives on
     And a pool task "buy nails" tagged "<tag>"
     And a pool task "buy a hinge" tagged "<tag>"
     When "buy screws" is marked done
-    And the pool screen is viewed
-    Then the pool screen offers the trips "<after_done>"
+    Then the way back offers "buy screws"
     When the way back to "buy screws" is taken
     And the pool screen is viewed
-    Then the pool screen offers the trips "<after_undo>"
+    Then the pool screen offers the trips "<tag>"
     And the trip "<tag>" shows "<open>" open items
 
     Examples:
-      | tag        | after_done | after_undo | open |
-      | @homedepot |            | @homedepot | 3    |
+      | tag        | open |
+      | @homedepot | 3    |
 
   # mark-done-way-back-committed-08: completing a committed row offers a way back, and taking it returns the row
   Scenario: Taking the way back returns a completed committed row
     Given a committed task "Book the dentist" with no context tag due "2026-08-25T08:30:00Z" as an "at"
     When "Book the dentist" is marked done
-    And the committed screen is viewed
-    Then the committed screen reports "<after_done>" beside its title
+    Then the way back offers "Book the dentist"
     When the way back to "Book the dentist" is taken
     And the committed screen is viewed
     Then the committed screen lists "<remaining>"
-    And the committed screen reports "<after_undo>" beside its title
+    And the committed screen reports "<meta>" beside its title
 
     Examples:
-      | after_done    | remaining        | after_undo |
-      | nothing dated | Book the dentist | 1 dated    |
+      | remaining        | meta    |
+      | Book the dentist | 1 dated |
 
   # mark-done-way-back-is-ephemeral-09: the way back lasts until the next action and does not survive a reload
   Scenario: The way back lasts until the next action and does not survive a reload

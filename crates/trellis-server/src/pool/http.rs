@@ -3,6 +3,7 @@
 //! the `#pool-body` fragment.
 
 use super::body;
+use crate::mark_done::JustArchived;
 use crate::platform::clock::Clock;
 use crate::platform::nav::{self, NavLink, Page};
 use crate::platform::response::render_template;
@@ -51,11 +52,15 @@ struct PoolTemplate {
     empty: bool,
     trips: Vec<TripView>,
     loose: Vec<LooseItemView>,
+    /// Always `None` -- a fresh `GET /pool` never just did anything (#111,
+    /// `T-ephemeral-view-state-rides-the-request`). Carried only so
+    /// `pool_body.html`'s `{% include %}` has the field it needs.
+    way_back: Option<JustArchived>,
     nav: Vec<NavLink>,
 }
 
 pub async fn show_pool(State(pool): State<SqlitePool>) -> Result<Response, StatusCode> {
-    let built = body::build(&pool, &HashSet::new())
+    let built = body::build(&pool, &HashSet::new(), None)
         .await
         .map_err(write_failed)?;
     Ok(render_template(
@@ -65,6 +70,7 @@ pub async fn show_pool(State(pool): State<SqlitePool>) -> Result<Response, Statu
             empty: built.empty,
             trips: built.trips,
             loose: built.loose,
+            way_back: built.way_back,
             nav: nav::links(Page::Pool),
         },
     ))
@@ -76,7 +82,10 @@ pub async fn show_pool(State(pool): State<SqlitePool>) -> Result<Response, Statu
 /// contract still holds: whatever happened, the fragment reflects current
 /// state). `D-inaction-archives` still leaves nothing to un-do *silently*;
 /// #122 gave the row its own explicit undo in [`unmark_pool_task_done`],
-/// which is a deliberate tap, not an inaction.
+/// which is a deliberate tap, not an inaction. #111 gives the row this posts
+/// on a second one, for the case that tap was a mistake: `task_id` is passed
+/// through as the fragment's `just_done`, so this one response -- and only
+/// this one -- names it in the way back.
 pub async fn mark_pool_task_done(
     State(pool): State<SqlitePool>,
     State(clock): State<Clock>,
@@ -86,14 +95,15 @@ pub async fn mark_pool_task_done(
     crate::mark_done::mark_task_done(&pool, task_id, clock.now_ms())
         .await
         .map_err(write_failed)?;
-    body::respond(&pool, &expanded_tags(&expanded)).await
+    body::respond(&pool, &expanded_tags(&expanded), Some(task_id)).await
 }
 
 /// Unchecks `task_id` (#122: the direct inverse of the tap that struck it)
 /// and swaps in the current `#pool-body` fragment. Same no-failure-state
 /// shape as [`mark_pool_task_done`]: unchecking a task that is already
 /// open, already cleared, or does not exist is a no-op the fragment already
-/// reflects correctly either way.
+/// reflects correctly either way. Carries no way back of its own (#111): an
+/// undo is not itself something to undo.
 pub async fn unmark_pool_task_done(
     State(pool): State<SqlitePool>,
     Path(task_id): Path<i64>,
@@ -102,7 +112,7 @@ pub async fn unmark_pool_task_done(
     crate::mark_done::unmark_task_done(&pool, task_id)
         .await
         .map_err(write_failed)?;
-    body::respond(&pool, &expanded_tags(&expanded)).await
+    body::respond(&pool, &expanded_tags(&expanded), None).await
 }
 
 /// Clears every struck-through, not-yet-cleared task at `tag` (#122's
@@ -119,7 +129,7 @@ pub async fn clear_pool_trip_done(
     crate::pool::store::clear_done(&pool, &tag, clock.now_ms())
         .await
         .map_err(write_failed)?;
-    body::respond(&pool, &expanded_tags(&expanded)).await
+    body::respond(&pool, &expanded_tags(&expanded), None).await
 }
 
 /// Marks every open task in the trip tagged `tag` done, in one statement
@@ -127,7 +137,9 @@ pub async fn clear_pool_trip_done(
 /// `mark_done`'s front door like every other completion
 /// (`T-cross-capability-invariants-need-an-owner`) rather than a second
 /// write path -- `kind = "pool"` is the only thing this handler adds that
-/// the front door itself does not already know.
+/// the front door itself does not already know. Carries no way back (#111,
+/// #125's own debt): undo here is per task, and a group completion has no
+/// single task to name.
 pub async fn complete_pool_trip(
     State(pool): State<SqlitePool>,
     State(clock): State<Clock>,
@@ -137,7 +149,7 @@ pub async fn complete_pool_trip(
     crate::mark_done::mark_group_done(&pool, "pool", &tag, clock.now_ms())
         .await
         .map_err(write_failed)?;
-    body::respond(&pool, &expanded_tags(&expanded)).await
+    body::respond(&pool, &expanded_tags(&expanded), None).await
 }
 
 #[cfg(test)]
@@ -271,7 +283,24 @@ mod tests {
         let (status, body) = post_mark_done(&pool, task_id).await;
 
         assert_eq!(status, StatusCode::OK);
-        assert!(!body.contains("buy screws"), "got:\n{body}");
+        assert!(
+            !body.contains(r#"<div class="loose-text">buy screws</div>"#),
+            "expected the loose item gone, got:\n{body}"
+        );
+    }
+
+    #[tokio::test]
+    async fn marking_a_task_done_names_it_in_the_way_back() {
+        let (_dir, pool) = test_pool().await;
+        let capture_id = given_a_pool_task(&pool, "buy screws", Some("@homedepot")).await;
+        let task_id = task_id_for_capture(&pool, capture_id).await;
+
+        let (_, body) = post_mark_done(&pool, task_id).await;
+
+        assert!(
+            body.contains(r#"<span class="way-back-name">buy screws</span>"#),
+            "got:\n{body}"
+        );
     }
 
     #[tokio::test]

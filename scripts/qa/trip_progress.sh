@@ -455,6 +455,49 @@ else
 fi
 qa_stop_server
 
+# --- Procedure: a completed loose end, after #111 ---
+# trip-progress-loose-ends-unchanged-08 was narrowed by undo-a-completion,
+# not deleted: the row leaves the LIST, and is named exactly once, in the
+# way-back line (qa/mark_done.md owns the way back itself; this only
+# guards that the narrowing did not become a reversal).
+name="a-completed-loose-end-after-111"
+if qa_start_server "$BIN" "$TMP_DIR/$name.sqlite" "$TMP_DIR/$name.log"; then
+  qa_pool_task "fix the door latch"
+  qa_pool_task "call the dentist"
+  latch_id="$(qa_task_id_for_text "fix the door latch")"
+
+  qa_mark_pool_done "$latch_id"
+  if [[ "$STATUS" != "200" ]]; then
+    echo "FAIL: [$name] marking done returned status $STATUS" >&2
+    FAILURES=1
+  fi
+
+  loose="$(qa_loose_section "$BODY")"
+  if [[ -n "$(qa_loose_row_containing "$loose" "fix the door latch")" ]]; then
+    echo "FAIL: [$name] expected the completed loose end gone from the list, got:
+$loose" >&2
+    FAILURES=1
+  fi
+  if [[ -z "$(qa_loose_row_containing "$loose" "call the dentist")" ]]; then
+    echo "FAIL: [$name] expected the untouched loose end to remain in the list, got:
+$loose" >&2
+    FAILURES=1
+  fi
+  occurrences="$(python3 -c 'import sys; print(sys.argv[1].count(sys.argv[2]))' "$BODY" "fix the door latch")"
+  if [[ "$occurrences" != "1" ]]; then
+    echo "FAIL: [$name] expected \"fix the door latch\" named exactly once (in the way back), found $occurrences" >&2
+    FAILURES=1
+  fi
+  if [[ "$BODY" != *"way-back"* ]]; then
+    echo "FAIL: [$name] expected the way-back line in the tick's own response, got:
+$BODY" >&2
+    FAILURES=1
+  fi
+else
+  FAILURES=1
+fi
+qa_stop_server
+
 if [[ "$FAILURES" -ne 0 ]]; then
   exit 1
 fi

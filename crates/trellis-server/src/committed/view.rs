@@ -14,16 +14,6 @@ pub struct CommittedRowView {
     pub past: bool,
 }
 
-/// [`crate::pool::view::WayBackView`]'s identical shape for this screen
-/// (#111) -- not shared between the two capabilities because each
-/// template's own undo route differs (`/pool/.../undone` vs
-/// `/committed/.../undone`), and a shared type would still need each caller
-/// to know which path prefix its own `id` belongs behind.
-pub struct WayBackView {
-    pub id: i64,
-    pub text: String,
-}
-
 pub struct CommittedView {
     /// `"3 dated"`, or `"nothing dated"` when empty -- the canvas
     /// distinguishes an empty screen from a screen of zero rather than

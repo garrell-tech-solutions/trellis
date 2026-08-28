@@ -2,7 +2,8 @@
 //! task done (#97) and swaps in the `#committed-body` fragment.
 
 use super::body;
-use crate::committed::view::{CommittedRowView, WayBackView};
+use crate::committed::view::CommittedRowView;
+use crate::mark_done::JustArchived;
 use crate::platform::clock::Clock;
 use crate::platform::nav::{self, NavLink, Page};
 use crate::platform::response::{render_template, write_failed};
@@ -24,7 +25,7 @@ struct CommittedTemplate {
     rows: Vec<CommittedRowView>,
     /// Always `None` -- see `pool::http::PoolTemplate`'s identical field
     /// (#111): a fresh `GET /committed` never just did anything.
-    way_back: Option<WayBackView>,
+    way_back: Option<JustArchived>,
     nav: Vec<NavLink>,
 }
 

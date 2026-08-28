@@ -68,11 +68,39 @@ pub(super) async fn mark_group_done(
     Ok(result.rows_affected())
 }
 
+/// The task `task_id` names, and the capture text it was triaged from --
+/// but only while unmarking it would actually do something.
+///
+/// **The predicate is [`unmark_task_done`]'s own**, deliberately: `archived_at
+/// IS NOT NULL AND cleared_at IS NULL`, plus the `kind` of the screen asking.
+/// A way back is an offer to run that statement, so the offer exists exactly
+/// when the statement would change a row. Written once here rather than
+/// approximated a second time by whatever list each screen happens to have
+/// in hand.
+pub(super) async fn just_archived(
+    pool: &SqlitePool,
+    task_id: i64,
+    kind: &str,
+) -> Result<Option<String>, sqlx::Error> {
+    sqlx::query_scalar(
+        "SELECT captures.raw_text FROM tasks \
+         JOIN captures ON captures.id = tasks.capture_id \
+         WHERE tasks.id = ? AND tasks.kind = ? \
+         AND tasks.archived_at IS NOT NULL AND tasks.cleared_at IS NULL",
+    )
+    .bind(task_id)
+    .bind(kind)
+    .fetch_optional(pool)
+    .await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::platform::test_support::{archived_at, insert_capture, test_pool};
     use scheduler_core::task::TaskKind;
+
+    const TASK_POOL: &str = scheduler_core::task::POOL;
 
     async fn given_a_pool_task(pool: &SqlitePool, raw_text: &str) -> i64 {
         let capture_id = insert_capture(pool, raw_text, None).await;
@@ -84,6 +112,75 @@ mod tests {
             .fetch_one(pool)
             .await
             .unwrap()
+    }
+
+    // --- just_archived: the offer exists exactly when the undo would work ---
+
+    #[tokio::test]
+    async fn just_archived_names_a_task_this_capability_has_archived() {
+        let (_dir, pool) = test_pool().await;
+        let task_id = given_a_pool_task(&pool, "buy screws").await;
+        mark_task_done(&pool, task_id, 4242).await.unwrap();
+
+        assert_eq!(
+            just_archived(&pool, task_id, TASK_POOL).await.unwrap(),
+            Some("buy screws".to_string())
+        );
+    }
+
+    /// The half neither screen checked before: a task nobody has marked done
+    /// is not something to offer a way back from.
+    #[tokio::test]
+    async fn just_archived_is_none_for_a_task_that_is_not_done() {
+        let (_dir, pool) = test_pool().await;
+        let task_id = given_a_pool_task(&pool, "buy screws").await;
+
+        assert_eq!(
+            just_archived(&pool, task_id, TASK_POOL).await.unwrap(),
+            None
+        );
+    }
+
+    /// And the other half: `unmark_task_done` refuses a cleared task, so the
+    /// offer to run it must refuse the same one -- a control that does
+    /// nothing is worse than no control.
+    #[tokio::test]
+    async fn just_archived_is_none_once_the_task_has_been_cleared() {
+        let (_dir, pool) = test_pool().await;
+        let task_id = given_a_pool_task(&pool, "buy screws").await;
+        mark_task_done(&pool, task_id, 4242).await.unwrap();
+        sqlx::query("UPDATE tasks SET cleared_at = 9999 WHERE id = ?")
+            .bind(task_id)
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            just_archived(&pool, task_id, TASK_POOL).await.unwrap(),
+            None
+        );
+        assert!(!unmark_task_done(&pool, task_id).await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn just_archived_is_none_for_a_task_of_another_kind() {
+        let (_dir, pool) = test_pool().await;
+        let task_id = given_a_pool_task(&pool, "buy screws").await;
+        mark_task_done(&pool, task_id, 4242).await.unwrap();
+
+        assert_eq!(
+            just_archived(&pool, task_id, scheduler_core::task::COMMITTED)
+                .await
+                .unwrap(),
+            None
+        );
+    }
+
+    #[tokio::test]
+    async fn just_archived_is_none_for_an_id_naming_no_task() {
+        let (_dir, pool) = test_pool().await;
+
+        assert_eq!(just_archived(&pool, 999, TASK_POOL).await.unwrap(), None);
     }
 
     #[tokio::test]

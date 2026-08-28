@@ -66,16 +66,6 @@ pub struct LooseItemView {
     pub context_tag: Option<String>,
 }
 
-/// The line offering to undo the task most recently marked done on *this*
-/// response (#111): rides the request the way `expanded=` does, never
-/// stored, so a `GET /pool` never carries one and the response before this
-/// task's own "done" POST already stopped naming whatever was undoable
-/// before it (`T-ephemeral-view-state-rides-the-request`).
-pub struct WayBackView {
-    pub id: i64,
-    pub text: String,
-}
-
 pub struct PoolView {
     /// `"6 waiting"`, or `"empty"` when nothing is pooled — the canvas
     /// distinguishes an empty pool from a pool of zero rather than reading

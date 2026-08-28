@@ -5,9 +5,10 @@
 //! marking a task done swaps it in on its own, the same shape
 //! `inbox::lists` established for `#lists`.
 
+use crate::mark_done::JustArchived;
 use crate::platform::response::{render_template, write_failed};
 use crate::pool::store;
-use crate::pool::view::{self, LooseItemView, TripView, WayBackView};
+use crate::pool::view::{self, LooseItemView, TripView};
 use askama::Template;
 use axum::http::StatusCode;
 use axum::response::Response;
@@ -25,7 +26,7 @@ pub(super) struct PoolBodyTemplate {
     pub(super) empty: bool,
     pub(super) trips: Vec<TripView>,
     pub(super) loose: Vec<LooseItemView>,
-    pub(super) way_back: Option<WayBackView>,
+    pub(super) way_back: Option<JustArchived>,
 }
 
 /// Fetches the current pool and builds the `#pool-body` fragment. Shared by
@@ -36,9 +37,12 @@ pub(super) struct PoolBodyTemplate {
 /// for every caller but the "done" route itself, so a fresh `GET /pool` or an
 /// undo never manufactures a way back for something this request did not do.
 ///
-/// The text comes off `rows`, not a second query: a task just marked done is
-/// still in this list -- only a *cleared* one leaves it -- so the row
-/// carrying `just_done`'s id already has the capture text this line needs.
+/// The way back comes from `mark_done`, not from `rows`: the offer is to run
+/// `unmark_task_done`, so whether to make it is that capability's question
+/// and it answers with that statement's own predicate
+/// (`T-cross-capability-invariants-need-an-owner`). Scanning this screen's
+/// list for the id got the same answer here only because a done pool task
+/// happens to stay in it.
 pub(super) async fn build(
     pool: &SqlitePool,
     expanded_tags: &HashSet<String>,
@@ -46,14 +50,10 @@ pub(super) async fn build(
 ) -> Result<PoolBodyTemplate, sqlx::Error> {
     let rows = store::list_pool_tasks(pool).await?;
     let run_sizes = store::run_member_counts(pool).await?;
-    let way_back = just_done.and_then(|id| {
-        rows.iter()
-            .find(|row| row.task_id == id)
-            .map(|row| WayBackView {
-                id,
-                text: row.raw_text.clone(),
-            })
-    });
+    let way_back = match just_done {
+        Some(id) => crate::mark_done::just_archived(pool, id, scheduler_core::task::POOL).await?,
+        None => None,
+    };
     let built = view::build(rows, run_sizes, expanded_tags);
     Ok(PoolBodyTemplate {
         meta: built.meta,

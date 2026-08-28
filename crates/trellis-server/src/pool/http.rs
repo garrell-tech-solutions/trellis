@@ -3,11 +3,12 @@
 //! the `#pool-body` fragment.
 
 use super::body;
+use crate::mark_done::JustArchived;
 use crate::platform::clock::Clock;
 use crate::platform::nav::{self, NavLink, Page};
 use crate::platform::response::render_template;
 use crate::platform::response::write_failed;
-use crate::pool::view::{LooseItemView, TripView, WayBackView};
+use crate::pool::view::{LooseItemView, TripView};
 use askama::Template;
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
@@ -54,7 +55,7 @@ struct PoolTemplate {
     /// Always `None` -- a fresh `GET /pool` never just did anything (#111,
     /// `T-ephemeral-view-state-rides-the-request`). Carried only so
     /// `pool_body.html`'s `{% include %}` has the field it needs.
-    way_back: Option<WayBackView>,
+    way_back: Option<JustArchived>,
     nav: Vec<NavLink>,
 }
 

@@ -2,7 +2,8 @@
 //! swappable on its own -- the same shape `pool::body` and
 //! `inbox::lists` take.
 
-use crate::committed::view::{self, CommittedRowView, WayBackView};
+use crate::committed::view::{self, CommittedRowView};
+use crate::mark_done::JustArchived;
 use crate::platform::clock::Clock;
 use crate::platform::response::{render_template, write_failed};
 use askama::Template;
@@ -18,24 +19,22 @@ pub(super) struct CommittedBodyTemplate {
     pub(super) meta: String,
     pub(super) empty: bool,
     pub(super) rows: Vec<CommittedRowView>,
-    pub(super) way_back: Option<WayBackView>,
+    pub(super) way_back: Option<JustArchived>,
 }
 
-/// [`WayBackView`] for the task `just_done` names, if any -- looked up on
-/// its own through [`super::store::task_text`] rather than scanned off
-/// `rows`: unlike pool, [`super::store::list_committed_tasks`] excludes an
-/// archived row outright, so the task just marked done is never in that list
-/// by the time this runs.
+/// The way back for the task `just_done` names, if any -- asked of
+/// `mark_done`, which owns both the archive and the statement this line
+/// offers to run. This screen has no list to scan for it anyway:
+/// [`super::store::list_committed_tasks`] excludes an archived row outright,
+/// so by the time this runs the task is already gone from it.
 async fn way_back(
     pool: &SqlitePool,
     just_done: Option<i64>,
-) -> Result<Option<WayBackView>, sqlx::Error> {
+) -> Result<Option<JustArchived>, sqlx::Error> {
     let Some(id) = just_done else {
         return Ok(None);
     };
-    Ok(super::store::task_text(pool, id)
-        .await?
-        .map(|text| WayBackView { id, text }))
+    crate::mark_done::just_archived(pool, id, scheduler_core::task::COMMITTED).await
 }
 
 /// Fetches the current committed list and builds the `#committed-body`

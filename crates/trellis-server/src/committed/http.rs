@@ -81,7 +81,9 @@ pub async fn unmark_committed_task_done(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::platform::test_support::{archived_at, http_request, test_pool};
+    use crate::platform::test_support::{
+        archived_at, given_a_committed_task, http_request, test_pool,
+    };
 
     async fn get_committed(pool: &SqlitePool) -> (StatusCode, String) {
         http_request(pool, Clock::pinned_at(1787562000000), "GET", "/committed").await
@@ -120,30 +122,6 @@ mod tests {
         let (_, body) = get_committed(&pool).await;
 
         assert!(body.contains("book the dentist"), "got:\n{body}");
-    }
-
-    async fn given_a_committed_task(pool: &SqlitePool, raw_text: &str) -> i64 {
-        let (capture_id, _) = crate::capture::create(pool, raw_text, "web", None, 0)
-            .await
-            .unwrap();
-        crate::triage::store::insert_task(
-            pool,
-            capture_id,
-            &scheduler_core::task::TaskKind::Committed {
-                deadline: 1787646600000,
-                commitment: scheduler_core::task::Commitment::At,
-                priority: scheduler_core::task::Priority::P1,
-                estimated_minutes: 30,
-            },
-            0,
-        )
-        .await
-        .unwrap();
-        sqlx::query_scalar("SELECT id FROM tasks WHERE capture_id = ?")
-            .bind(capture_id)
-            .fetch_one(pool)
-            .await
-            .unwrap()
     }
 
     async fn post_mark_done(pool: &SqlitePool, task_id: i64) -> (StatusCode, String) {

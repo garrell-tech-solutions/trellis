@@ -21,14 +21,27 @@ pub(super) struct CommittedBodyTemplate {
     pub(super) way_back: Option<WayBackView>,
 }
 
+/// [`WayBackView`] for the task `just_done` names, if any -- looked up on
+/// its own through [`super::store::task_text`] rather than scanned off
+/// `rows`: unlike pool, [`super::store::list_committed_tasks`] excludes an
+/// archived row outright, so the task just marked done is never in that list
+/// by the time this runs.
+async fn way_back(
+    pool: &SqlitePool,
+    just_done: Option<i64>,
+) -> Result<Option<WayBackView>, sqlx::Error> {
+    let Some(id) = just_done else {
+        return Ok(None);
+    };
+    Ok(super::store::task_text(pool, id)
+        .await?
+        .map(|text| WayBackView { id, text }))
+}
+
 /// Fetches the current committed list and builds the `#committed-body`
 /// fragment. Shared by the committed page and [`respond`]. `just_done`
 /// names the task this one response just marked done, if any (#111) --
-/// `None` for every caller but the "done" route itself. Looked up on its
-/// own through [`super::store::task_text`] rather than scanned off `rows`:
-/// unlike pool, [`super::store::list_committed_tasks`] excludes an archived
-/// row outright, so the task just marked done is never in that list by the
-/// time this runs.
+/// `None` for every caller but the "done" route itself.
 pub(super) async fn build(
     pool: &SqlitePool,
     clock: Clock,
@@ -38,12 +51,7 @@ pub(super) async fn build(
     let zone_name = crate::settings::current_timezone(pool).await?;
     let zone = scheduler_core::timezone::resolve(&zone_name)
         .expect("settings::set_timezone validates a zone before storing it");
-    let way_back = match just_done {
-        Some(id) => super::store::task_text(pool, id)
-            .await?
-            .map(|text| WayBackView { id, text }),
-        None => None,
-    };
+    let way_back = way_back(pool, just_done).await?;
     let built = view::build(rows, clock.now_ms(), &zone);
     Ok(CommittedBodyTemplate {
         meta: built.meta,
@@ -68,29 +76,7 @@ pub(super) async fn respond(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::platform::test_support::{insert_capture, test_pool};
-
-    async fn given_a_committed_task(pool: &SqlitePool, raw_text: &str) -> i64 {
-        let capture_id = insert_capture(pool, raw_text, None).await;
-        crate::triage::store::insert_task(
-            pool,
-            capture_id,
-            &scheduler_core::task::TaskKind::Committed {
-                deadline: 1787646600000,
-                commitment: scheduler_core::task::Commitment::At,
-                priority: scheduler_core::task::Priority::P1,
-                estimated_minutes: 30,
-            },
-            0,
-        )
-        .await
-        .unwrap();
-        sqlx::query_scalar("SELECT id FROM tasks WHERE capture_id = ?")
-            .bind(capture_id)
-            .fetch_one(pool)
-            .await
-            .unwrap()
-    }
+    use crate::platform::test_support::{given_a_committed_task, test_pool};
 
     #[tokio::test]
     async fn just_done_none_carries_no_way_back() {

@@ -34,6 +34,31 @@ pub(crate) async fn insert_capture(pool: &SqlitePool, raw_text: &str, tag: Optio
         .unwrap()
 }
 
+/// A committed task, given only its capture text -- everything else pinned
+/// to fixed, arbitrary values neither `committed::body`'s nor
+/// `committed::http`'s own tests care about. Shared by both.
+pub(crate) async fn given_a_committed_task(pool: &SqlitePool, raw_text: &str) -> i64 {
+    let capture_id = insert_capture(pool, raw_text, None).await;
+    crate::triage::store::insert_task(
+        pool,
+        capture_id,
+        &scheduler_core::task::TaskKind::Committed {
+            deadline: 1787646600000,
+            commitment: scheduler_core::task::Commitment::At,
+            priority: scheduler_core::task::Priority::P1,
+            estimated_minutes: 30,
+        },
+        0,
+    )
+    .await
+    .unwrap();
+    sqlx::query_scalar("SELECT id FROM tasks WHERE capture_id = ?")
+        .bind(capture_id)
+        .fetch_one(pool)
+        .await
+        .unwrap()
+}
+
 /// A task's stored `archived_at` -- both `committed::http` and `pool::http`
 /// assert on it after marking a task done (#97), since both go through the
 /// same [`crate::mark_done::mark_task_done`] write.

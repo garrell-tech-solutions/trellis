@@ -2,7 +2,7 @@
 
 **Date:** 2026-08-27 · **Issue:** #111 · **Milestone:** Dogfood — daily use by 2026-09-03 · **Route:** pipeline
 
-> Base is `origin/trunk`, **green** at `0ee0eb8`, release `v2026.08.27.208`.
+> Base is `origin/trunk` at `0d76854`. **#157 (`quota-screen-redesign`, the owner's own) merged while this was being written** — it touches `quota/view.rs`, `quota_body.html`, `trellis.css` and three QA scripts, and **nothing this slice needs.** Confirm trunk is green before you start.
 
 ---
 

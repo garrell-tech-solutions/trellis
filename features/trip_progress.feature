@@ -10,7 +10,7 @@
 # trip-progress-clearing-holds-the-group-05: clearing can take a group below the threshold, and it stays a trip
 # trip-progress-fully-done-06: a group with nothing open left says so, and clearing empties it
 # trip-progress-clear-control-appears-with-work-07: the clear control appears only once something is struck, and is named
-# trip-progress-loose-ends-unchanged-08: a completed loose end still leaves the screen at once
+# trip-progress-loose-ends-unchanged-08: a completed loose end still leaves the list at once
 #
 # THE SCREEN DESTROYED THE LIST AT THE MOMENT IT WAS BEING USED FOR ITS ONLY
 # PURPOSE. pool/store.rs filters archived_at IS NULL, so a completed task left
@@ -154,14 +154,15 @@ Feature: A trip survives being worked
       | name       |
       | Clear done |
 
-  # trip-progress-loose-ends-unchanged-08: a completed loose end still leaves the screen at once
-  Scenario: A completed loose end still leaves the screen at once
+  # trip-progress-loose-ends-unchanged-08: a completed loose end still leaves the list at once
+  Scenario: A completed loose end still leaves the list at once
     Given a pool task "fix the door latch" with no context tag
     And a pool task "sharpen the mower" with no context tag
     When "fix the door latch" is marked done
     And the pool screen is viewed
-    Then the pool screen does not mention "fix the door latch"
-    And the loose ends list shows "<loose>" items
+    Then the loose ends list shows "<loose>" items
+    And the pool screen lists "sharpen the mower" among the loose ends
+    And the way back offers "fix the door latch"
 
     Examples:
       | loose |

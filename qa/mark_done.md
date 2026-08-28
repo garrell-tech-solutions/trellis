@@ -137,6 +137,64 @@ done action wired to an existing arrow, breaks that assertion.**
 - **A done control on a quota item is a defect**, and it would also prejudge
   the slice that follows this one.
 
+## Procedure — the way back
+
+**Settled by the owner 2026-08-27.** A completed task's row leaves the screen,
+and **a line appears naming it with a way back.** It lasts until your next
+action and **does not survive a reload** — nothing is stored.
+
+1. Two pool tasks. Tick one. Read the screen.
+2. Tick the other. Read again.
+3. Reload the page.
+4. Repeat 1 on the Committed screen.
+
+### Expected Observable Outcomes
+- Step 1: the row is **gone from the list**, and a line reads **`buy screws
+  done`** with a way back beside it. **The loose-ends count dropped by one** —
+  the row left, it did not stay struck.
+- Step 2: the line now names **the second task, not both.** **One task, never a
+  growing list** — if it accumulates it has become the archive
+  `R-browsable-archive` refused, and `mark-done-no-completed-list-05` is the
+  assertion that should catch it.
+- Step 3: **the line is gone.** This is the honest cost of the choice and it is
+  deliberate — `tasks.archived_at` would have made it survive for free, with no
+  column bought, and that was offered and declined. **Check the schema for a
+  new column holding a "recently completed" flag: if one exists, say that
+  before anything else in the report** (`T-migrations-append-only` means it can
+  never be taken back).
+- **The way back is at least 44px** (`--tap`). A mistap is what this exists to
+  fix; a way back you cannot reliably hit is not one.
+
+## Procedure — taking the way back
+
+1. Three pool tasks at one tag, forming a trip. Tick one. Take the way back.
+2. A committed task. Tick it. Take the way back.
+3. Tick a pool task, take the way back, then **take it again.**
+
+### Expected Observable Outcomes
+- Step 1: the task **returns**, and the trip **re-forms** — three open items
+  again. **Position is not restored and that is correct**: pool order is
+  derived (`T-trips-are-derived-not-ranked`), so an undone task returns where
+  the rule now puts it, which may not be where it left.
+- Step 2: the row is back on Committed and the count reads **`1 dated`** again.
+- Step 3: **the second take changes nothing** — one task in the pool, not two,
+  and no error page. `unmark_task_done` already returns `false` when the task
+  was already open; **the guard exists and must be used rather than re-added.**
+- **Go through the routes.** A fixture that unarchives by writing SQL proves
+  nothing (#103's trap). Every step here is a real POST.
+
+## Procedure — what has no way back
+
+1. Complete a whole trip with the group control. Read the screen.
+2. Clear the done items from a trip. Read the screen.
+
+### Expected Observable Outcomes
+- **Neither offers a way back.** Undo is **per task** in this slice; group
+  completion's missing undo is **#125's debt, named rather than assumed**, and
+  it is why `trip-persistence`'s two `does not mention` assertions still hold.
+- **If a group action does offer one, that is a finding** — it means the way
+  back is keyed on something broader than the single task that was completed.
+
 ## Procedure — nothing lists completed work
 
 1. Mark a task done.
@@ -170,6 +228,36 @@ done action wired to an existing arrow, breaks that assertion.**
 - **Believe the re-run.** A restyle has broken QA scripts three times in this
   project without CI noticing, and this slice adds a control to two styled
   screens.
+
+## Procedure — prove the new rules can fail
+
+**`T-a-check-must-be-seen-to-fail`.** #149 is the open example of not doing
+this. Each breakage names **the assertion it must trip.**
+
+1. **Render the way back for every archived task, not just the last one.** →
+   **`mark-done-way-back-is-ephemeral-09`** fails at its second step: the line
+   names both. This is the archive appearing by accident.
+2. **Keep the way back across a plain page view.** → **`-09`** fails at its
+   last step only. The two earlier steps stay green — **if they move too, the
+   breakage was too broad to prove which rule holds.**
+3. **Point the way back at `/done` instead of `/undone`.** → **`-07`** fails:
+   the trip does not re-form, and the task stays gone.
+4. **Drop `unmark_task_done`'s already-open guard.** → **`-10`** fails, and it
+   is worth reading how: a second undo on an already-open task must not
+   resurrect or duplicate anything.
+5. **Suppress the way back on Committed only.** → **`-08`** fails while `-07`
+   stays green, which is the pairing that proves the two surfaces are wired
+   separately.
+6. **Leave the completed loose end struck and visible instead of removing it.**
+   → **`trip-progress-loose-ends-unchanged-08`** fails on the count. That
+   scenario now says the row leaves the **list** and is named only in the way
+   back; **it was narrowed by this slice, not deleted.**
+
+### Expected Observable Outcomes
+- **Six breakages, six distinct messages, then restore and a clean pass with a
+  clean `git status`. Say which you ran.**
+- **Breakage 1 is the one to do if you do only one.** A way back that
+  accumulates is `R-browsable-archive` arriving through the back door.
 
 ## Independent of Implementation
 

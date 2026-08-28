@@ -167,6 +167,24 @@ for case 2 below; both cases now hold.
   `WHERE` moved out of the store to make this work, say so; that is the
   thing #108 exists to prevent.
 
+## Procedure — a completed loose end, after #111
+
+**`trip-progress-loose-ends-unchanged-08` was narrowed by `undo-a-completion`,
+not deleted.** It used to assert the pool screen *does not mention* a completed
+loose end. It now asserts the row leaves the **list** — and is named in the way
+back, which is the only place it appears.
+
+1. Two loose ends. Tick one. Read the screen.
+
+### Expected Observable Outcomes
+- **The loose-ends count drops by one** and the row is gone from the list.
+- **The completed task is named exactly once**, in the way-back line. **If it
+  is still in the list, struck, the rule that a done loose end leaves the list
+  has been reversed rather than narrowed** — `scheduler_core::pool` says *"a
+  done loose end leaves the screen"* and this slice did not change that.
+- `qa/mark_done.md` owns the way back itself; this document only guards that
+  the narrowing did not become a reversal.
+
 ## Independent of Implementation
 
 This procedure depends only on what the Pool screen shows before and after

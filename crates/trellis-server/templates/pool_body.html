@@ -65,4 +65,11 @@
 {% endfor %}
 </ul>
 {% endif %}
+
+{% if let Some(way_back) = way_back %}
+<div class="way-back">
+<span class="way-back-text"><span class="way-back-name">{{ way_back.text }}</span> done.</span>
+<button type="button" class="way-back-undo" hx-post="/pool/tasks/{{ way_back.id }}/undone" hx-target="#pool-body" hx-swap="outerHTML">Undo</button>
+</div>
+{% endif %}
 </div>

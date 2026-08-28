@@ -41,6 +41,23 @@ pub async fn list_committed_tasks(pool: &SqlitePool) -> Result<Vec<CommittedTask
     .await
 }
 
+/// The raw text `task_id` was triaged from, for the way back a "done" POST
+/// names it in (#111) -- [`list_committed_tasks`]'s own `WHERE` excludes an
+/// archived row, so the task this is asked about the instant after marking
+/// it done needs its own lookup rather than a scan of that list. Scoped to
+/// `kind = 'committed'` the same way that query is, so an id from another
+/// screen cannot borrow this one's way back.
+pub async fn task_text(pool: &SqlitePool, task_id: i64) -> Result<Option<String>, sqlx::Error> {
+    sqlx::query_scalar(
+        "SELECT captures.raw_text FROM tasks \
+         JOIN captures ON captures.id = tasks.capture_id \
+         WHERE tasks.id = ? AND tasks.kind = 'committed'",
+    )
+    .bind(task_id)
+    .fetch_optional(pool)
+    .await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -173,5 +190,61 @@ mod tests {
             .unwrap();
 
         assert_eq!(list_committed_tasks(&pool).await.unwrap(), Vec::new());
+    }
+
+    #[tokio::test]
+    async fn task_text_reads_the_capture_it_was_triaged_from() {
+        let (_dir, pool) = test_pool().await;
+        given_a_committed_task(&pool, "book the dentist", Some("@phone")).await;
+        let task_id: i64 = sqlx::query_scalar("SELECT id FROM tasks")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            task_text(&pool, task_id).await.unwrap().as_deref(),
+            Some("book the dentist")
+        );
+    }
+
+    #[tokio::test]
+    async fn task_text_still_answers_once_the_task_is_archived() {
+        let (_dir, pool) = test_pool().await;
+        given_a_committed_task(&pool, "book the dentist", None).await;
+        let task_id: i64 = sqlx::query_scalar("SELECT id FROM tasks")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        sqlx::query("UPDATE tasks SET archived_at = 1")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            task_text(&pool, task_id).await.unwrap().as_deref(),
+            Some("book the dentist")
+        );
+    }
+
+    #[tokio::test]
+    async fn task_text_is_none_for_an_unknown_id() {
+        let (_dir, pool) = test_pool().await;
+
+        assert_eq!(task_text(&pool, 999).await.unwrap(), None);
+    }
+
+    #[tokio::test]
+    async fn task_text_is_none_for_a_task_of_another_kind() {
+        let (_dir, pool) = test_pool().await;
+        let capture_id = insert_capture(&pool, "buy screws", None).await;
+        crate::triage::store::insert_task(&pool, capture_id, &TaskKind::Pool, 0)
+            .await
+            .unwrap();
+        let task_id: i64 = sqlx::query_scalar("SELECT id FROM tasks")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+
+        assert_eq!(task_text(&pool, task_id).await.unwrap(), None);
     }
 }

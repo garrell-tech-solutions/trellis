@@ -30,6 +30,10 @@ static THEN_RESPONSE_NO_UNESCAPED_SCRIPT: LazyLock<Regex> = LazyLock::new(|| {
 });
 static THEN_RESPONSE_CONTAINS_WORD: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r#"^the response contains the word "([^"]+)"$"#).unwrap());
+static THEN_WAY_BACK_OFFERS: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r#"^the way back offers "([^"]*)"$"#).unwrap());
+static WHEN_WAY_BACK_TAKEN: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r#"^the way back to "([^"]+)" is taken$"#).unwrap());
 
 pub async fn dispatch(
     world: &mut World,
@@ -57,14 +61,32 @@ pub async fn dispatch(
     if let Some(caps) = THEN_RESPONSE_CONTAINS_WORD.captures(text) {
         return Some(then_response_contains(world, &caps[1]));
     }
+    if let Some(caps) = THEN_WAY_BACK_OFFERS.captures(text) {
+        return Some(then_way_back_offers(world, &caps[1]));
+    }
+    if let Some(caps) = WHEN_WAY_BACK_TAKEN.captures(text) {
+        return Some(way_back_taken(world, &caps[1]).await);
+    }
     None
 }
 
 /// A task is named by its text in this feature, not its id -- the id is a
-/// database detail no scenario should have to know. Looks the task up by
-/// the capture it came from and routes to whichever screen's own front
-/// door owns it (`T-one-front-door-per-capability`: `pool` and `committed`
-/// each own their own mark-done route).
+/// database detail no scenario should have to know. Shared by [`mark_done`]
+/// and [`way_back_taken`], which both need to resolve a name to the task
+/// and the screen that owns it before routing.
+async fn task_id_and_kind(world: &World, raw_text: &str) -> Result<(i64, String), String> {
+    let pool = world.pool()?;
+    sqlx::query_as(
+        "SELECT tasks.id, tasks.kind FROM tasks \
+         JOIN captures ON captures.id = tasks.capture_id \
+         WHERE captures.raw_text = ?",
+    )
+    .bind(raw_text)
+    .fetch_one(pool)
+    .await
+    .map_err(|e| format!("find the task triaged from {raw_text:?}: {e}"))
+}
+
 /// Which screen owns the mark-done route for a task of this kind.
 ///
 /// Extracted from [`mark_done`] rather than baselined: that function was
@@ -81,19 +103,38 @@ fn done_route(kind: &str, task_id: i64) -> Result<String, String> {
     }
 }
 
-async fn mark_done(world: &mut World, raw_text: &str) -> Result<(), String> {
-    let pool = world.pool()?.clone();
-    let (task_id, kind): (i64, String) = sqlx::query_as(
-        "SELECT tasks.id, tasks.kind FROM tasks \
-         JOIN captures ON captures.id = tasks.capture_id \
-         WHERE captures.raw_text = ?",
-    )
-    .bind(raw_text)
-    .fetch_one(&pool)
-    .await
-    .map_err(|e| format!("find the task triaged from {raw_text:?}: {e}"))?;
+/// [`done_route`]'s inverse (#111): where undoing a completion of this kind
+/// posts. Kept as its own small table rather than deriving `/undone` from
+/// [`done_route`]'s own string -- the two routes happen to share a prefix
+/// today, but that is incidental, not a rule this step should lean on.
+fn undone_route(kind: &str, task_id: i64) -> Result<String, String> {
+    match kind {
+        "pool" => Ok(format!("/pool/tasks/{task_id}/undone")),
+        "committed" => Ok(format!("/committed/tasks/{task_id}/undone")),
+        other => Err(format!("mark-done has no undo route for kind {other:?}")),
+    }
+}
 
+async fn mark_done(world: &mut World, raw_text: &str) -> Result<(), String> {
+    let (task_id, kind) = task_id_and_kind(world, raw_text).await?;
     let path = done_route(&kind, task_id)?;
+    let request = Request::builder()
+        .method("POST")
+        .uri(path)
+        .body(Body::empty())
+        .map_err(|e| format!("build request: {e}"))?;
+    super::inbox_view::html_response(world, request).await
+}
+
+/// Posts to whichever screen's own undo route owns `raw_text`'s task
+/// (#111). Resolved by a fresh database lookup rather than a link scraped
+/// out of `world.last_html_body`: every scenario using this step takes the
+/// way back straight off the completion's own response, which the step
+/// immediately before this one already read, and re-parsing the same
+/// fragment here would only duplicate that check rather than add one.
+async fn way_back_taken(world: &mut World, raw_text: &str) -> Result<(), String> {
+    let (task_id, kind) = task_id_and_kind(world, raw_text).await?;
+    let path = undone_route(&kind, task_id)?;
     let request = Request::builder()
         .method("POST")
         .uri(path)
@@ -104,6 +145,25 @@ async fn mark_done(world: &mut World, raw_text: &str) -> Result<(), String> {
 
 fn html_body(world: &World) -> Result<&str, String> {
     super::html_body(world, "no mark-done response recorded")
+}
+
+/// The way back's own name, or `None` when no way-back line renders at all
+/// -- `""` in Examples means exactly that absence (`THEN_WAY_BACK_OFFERS`'s
+/// own `[^"]*`, not `+`).
+fn way_back_name(body: &str) -> Option<&str> {
+    html::between(body, r#"<span class="way-back-name">"#, "</span>").ok()
+}
+
+fn then_way_back_offers(world: &mut World, expected: &str) -> Result<(), String> {
+    let body = html_body(world)?;
+    let actual = way_back_name(body).unwrap_or("");
+    if actual == expected {
+        Ok(())
+    } else {
+        Err(format!(
+            "expected the way back to offer {expected:?}, got {actual:?} in:\n{body}"
+        ))
+    }
 }
 
 fn loose_scope(body: &str) -> &str {
@@ -235,5 +295,63 @@ mod tests {
         let mut world = World::new();
         world.last_html_body = Some("&lt;script&gt;alert('boom')&lt;/script&gt;".to_string());
         assert_eq!(then_response_contains(&mut world, "boom"), Ok(()));
+    }
+
+    fn body_with_way_back(name: &str) -> String {
+        format!(
+            r#"<div class="way-back"><span class="way-back-text"><span class="way-back-name">{name}</span> done.</span></div>"#
+        )
+    }
+
+    #[test]
+    fn way_back_name_reads_the_named_task() {
+        assert_eq!(
+            way_back_name(&body_with_way_back("buy screws")),
+            Some("buy screws")
+        );
+    }
+
+    #[test]
+    fn way_back_name_is_none_when_no_way_back_renders() {
+        assert_eq!(way_back_name("<div class=\"pool-header\"></div>"), None);
+    }
+
+    #[test]
+    fn then_way_back_offers_passes_when_the_name_matches() {
+        let mut world = World::new();
+        world.last_html_body = Some(body_with_way_back("buy screws"));
+        assert_eq!(then_way_back_offers(&mut world, "buy screws"), Ok(()));
+    }
+
+    #[test]
+    fn then_way_back_offers_empty_string_passes_when_nothing_renders() {
+        let mut world = World::new();
+        world.last_html_body = Some("<div class=\"pool-header\"></div>".to_string());
+        assert_eq!(then_way_back_offers(&mut world, ""), Ok(()));
+    }
+
+    #[test]
+    fn then_way_back_offers_errors_on_a_mismatched_name() {
+        let mut world = World::new();
+        world.last_html_body = Some(body_with_way_back("buy screws"));
+        assert!(then_way_back_offers(&mut world, "fix the door latch").is_err());
+    }
+
+    #[test]
+    fn done_route_and_undone_route_agree_on_which_screens_they_know() {
+        assert_eq!(done_route("pool", 7), Ok("/pool/tasks/7/done".to_string()));
+        assert_eq!(
+            undone_route("pool", 7),
+            Ok("/pool/tasks/7/undone".to_string())
+        );
+        assert_eq!(
+            done_route("committed", 7),
+            Ok("/committed/tasks/7/done".to_string())
+        );
+        assert_eq!(
+            undone_route("committed", 7),
+            Ok("/committed/tasks/7/undone".to_string())
+        );
+        assert!(undone_route("quota", 7).is_err());
     }
 }

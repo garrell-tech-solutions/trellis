@@ -17,7 +17,9 @@ use axum::Router;
 use sqlx::SqlitePool;
 
 use crate::capture::http::create_capture;
-use crate::committed::http::{mark_committed_task_done, show_committed};
+use crate::committed::http::{
+    mark_committed_task_done, show_committed, unmark_committed_task_done,
+};
 use crate::dismiss::http::dismiss_capture;
 use crate::inbox::http::{set_shown_kind, show_inbox};
 use crate::platform::assets::{
@@ -80,6 +82,10 @@ pub fn build_app(pool: SqlitePool, clock: Clock) -> Router {
         .route("/pool/trips/{tag}/complete", post(complete_pool_trip))
         .route("/committed", get(show_committed))
         .route("/committed/tasks/{id}/done", post(mark_committed_task_done))
+        .route(
+            "/committed/tasks/{id}/undone",
+            post(unmark_committed_task_done),
+        )
         .route("/quota", get(show_quota))
         .route("/quota/{id}/sessions", post(log_session))
         .route("/quota/sessions/{id}", post(correct_session))

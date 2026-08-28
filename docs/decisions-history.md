@@ -2403,3 +2403,60 @@ justified by today's contents.
 open as issues since 2026-08-24 and 2026-08-25. **Board state and issue state
 disagreeing is not cosmetic** — the board is this project's roadmap, and an issue
 list that over-reports open work is the one that gets ignored.
+
+### 2026-08-27 — quota-filing (#138, PR #150) and capture-is-triage-only (#140, PR #155)
+
+**The owner changed the quota model in the middle of its own specification, and
+the pipeline built the new one.** The brief proposed *filing* a capture into a
+quota defined on the screen first; the owner refused the premise — *"a quota is
+a task and should be fully creatable from the task in queuing and triage screen;
+there should not be any sort of way to create a quota in the quota screen."*
+`POST /quota` and the define form are deleted **one day after they shipped**.
+`D-quotas-are-selected-not-typed` is amended above rather than replaced, because
+**only two of its four clauses moved** and the one that survived is the one
+doing real work: a mistyped name still cannot create a quota, and
+`NameStanding { Free, Taken, Resembles }` is what makes typing a name at triage
+survivable at all.
+
+**The deferral in it was priced by the owner, and the thing that pricing does
+not cover is filed as #154.** *"Having too many quotas is bounded by the amount
+of time available"* answers *how many quotas*; it does not answer *where an item
+goes*. **The owner's own quotas are `workout` and `learning with lev`, and #86's
+definition of item-bearing is verbatim "learning with specific things to get
+through"** — so the deferred shape is the one the live data instantiates, and
+the gap arrives the first time a capture belongs to a quota rather than being
+one.
+
+**Two brief-level lessons, both recorded as rows because both will recur.**
+
+`T-a-grep-finds-sites-not-contradictions` is the PM's own error. The #140 brief
+counted 24 assertions across 9 files by grepping `task list`; it was 25 across
+10, and the five it missed included **a scenario asserting the exact opposite of
+the slice**, in a file with no matching text. **A count in a brief invites being
+trusted**, and the pipeline found the rest by reading.
+
+`T-crap-has-no-baseline-and-complexity-does` is a collision between two gates
+that had never met. The specifier accepted a dispatcher at 31 in the complexity
+baseline — correctly, with a defence — and CRAP failed on the same function at
+the same number, because **at full coverage CRAP is the complexity count and has
+no exception list.** The fix taken was honest: three arms that were *"one
+assertion written three times at three arities"*. **The collision is structural
+and returns at 30 arms.**
+
+**The cost of the analyzers not being run before handoff, now measured across
+four slices.** #150 reached an open pull request red on the complexity baseline,
+was merged anyway, took `trunk` red and **skipped a release** — the live
+instance could not be moved to the slice it had just merged (#151). #155 was red
+on the same gate at QA handoff, caught inside the pipeline, then red on CRAP at
+the pull request. **Every role's own verification was green every time**, because
+the constitution asks for unit and acceptance tests and these gates assert
+properties of the repository. **#156 records the half of that which is a
+documentation gap — five gates under `scripts/ci/` the constitution never names.
+CRAP is not one of them: it is listed in `stack.prompt` and was simply not run.**
+
+**And one thing that went right and is easy to miss.** `capture-is-triage-only`
+retired `list_untriaged`, which #140 had orphaned and left `pub` — reachable
+from any capability, called by none, **kept alive by its own nine tests.** An
+accidental public API sustained by its test suite is invisible to every gate
+this project has, and it was found by an architect reading rather than by a
+tool.

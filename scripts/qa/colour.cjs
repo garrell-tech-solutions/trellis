@@ -194,7 +194,20 @@ function collectPageFacts() {
     return false;
   }
 
+  // A plain offsetWidth/offsetHeight check is not enough: content inside a
+  // closed native <details> (#148's quota-change disclosure, and the
+  // pre-existing quota-other/quota-expand ones) lays out with a non-zero
+  // box -- confirmed directly against this project's own headless Chrome,
+  // where a closed <details>'s label still reports offsetHeight 61 -- even
+  // though it is not actually painted or reachable by a real user.
+  // checkVisibility() is the DOM API that gets this right (confirmed the
+  // same element reports false from it); it has been supported in Chrome
+  // since 105 (2022), well within what this project's headless Chrome
+  // requirement already assumes.
   function isRendered(el) {
+    if (typeof el.checkVisibility === 'function') {
+      return el.checkVisibility();
+    }
     return el.offsetWidth > 0 || el.offsetHeight > 0;
   }
 

@@ -29,7 +29,9 @@ use crate::platform::clock::Clock;
 use crate::pool::http::{
     clear_pool_trip_done, complete_pool_trip, mark_pool_task_done, show_pool, unmark_pool_task_done,
 };
-use crate::quota::http::{correct_session, delete_session, log_session, show_quota};
+use crate::quota::http::{
+    change_quota, correct_session, delete_session, log_session, remove_quota, show_quota,
+};
 use crate::settings::http::set_timezone;
 use crate::triage::http::create_triage;
 
@@ -87,6 +89,8 @@ pub fn build_app(pool: SqlitePool, clock: Clock) -> Router {
             post(unmark_committed_task_done),
         )
         .route("/quota", get(show_quota))
+        .route("/quota/{id}", post(change_quota))
+        .route("/quota/{id}/remove", post(remove_quota))
         .route("/quota/{id}/sessions", post(log_session))
         .route("/quota/sessions/{id}", post(correct_session))
         .route("/quota/sessions/{id}/delete", post(delete_session))

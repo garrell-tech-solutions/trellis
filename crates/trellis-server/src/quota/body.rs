@@ -41,17 +41,20 @@ pub(super) async fn current_week(
 
 /// Fetches the current quota list, this week's own sessions and builds the
 /// `#quota-body` fragment. Shared by the quota page and [`respond`] (a
-/// session write, accepted or rejected).
+/// session write or a change, accepted or rejected). `error` names the one
+/// row a rejected change failed on, `None` for everything else that swaps
+/// this fragment in.
 pub(super) async fn build(
     pool: &SqlitePool,
     clock: Clock,
     expanded_ids: &HashSet<i64>,
+    error: Option<(i64, String)>,
 ) -> Result<QuotaBodyTemplate, sqlx::Error> {
     let rows = super::store::list_quotas(pool).await?;
     let (week, zone) = current_week(pool, clock).await?;
     let (week_start_ms, week_end_ms) = week.bounds_ms(&zone);
     let sessions = super::store::week_sessions(pool, week_start_ms, week_end_ms).await?;
-    let built = view::build(rows, sessions, &week, &zone, expanded_ids);
+    let built = view::build(rows, sessions, &week, &zone, expanded_ids, error);
     Ok(QuotaBodyTemplate {
         meta: built.meta,
         empty: built.empty,
@@ -63,15 +66,16 @@ pub(super) async fn build(
 
 /// The `#quota-body` fragment, re-rendered from current state --
 /// `T-forms-swap-one-fragment`'s response contract -- at `status`, which is
-/// `200`/`201` for an accepted session write and `422`
-/// (`T-422-is-product-wide`) for a rejected one.
+/// `200`/`201` for an accepted write and `422` (`T-422-is-product-wide`)
+/// for a rejected one.
 pub(super) async fn respond(
     pool: &SqlitePool,
     clock: Clock,
     status: StatusCode,
     expanded_ids: &HashSet<i64>,
+    error: Option<(i64, String)>,
 ) -> Result<Response, StatusCode> {
-    let body = build(pool, clock, expanded_ids)
+    let body = build(pool, clock, expanded_ids, error)
         .await
         .map_err(write_failed)?;
     Ok(render_template(status, &body))

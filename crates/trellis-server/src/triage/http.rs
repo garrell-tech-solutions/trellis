@@ -93,19 +93,40 @@ fn already_confirmed(confirmed: Option<&str>, candidate_name: &str) -> bool {
 /// `crate::quota`'s business; what triage adds is the half the quota
 /// capability has no way to know -- that this submission already carried a
 /// "Create anyway", so a resemblance has been warned about once already.
+///
+/// **`Taken { archived: true, .. }` is not a rejection** (#148,
+/// `quota-screen-removed-name-returns-09`): a name a removed quota still
+/// holds is exactly the case `crate::quota::create` resolves by reviving
+/// that quota rather than inserting a duplicate. Triage never sees the
+/// difference on the page -- the row simply appears, with what it logged
+/// before removal intact -- which is the point.
 async fn check_quota_name(
     pool: &SqlitePool,
     candidate_name: &str,
     confirmed: Option<&str>,
 ) -> Result<Option<Rejection>, sqlx::Error> {
-    let rejection = match crate::quota::name_standing(pool, candidate_name).await? {
+    let standing = crate::quota::name_standing(pool, candidate_name, None).await?;
+    Ok(rejection_for_standing(standing, confirmed, candidate_name))
+}
+
+/// [`check_quota_name`]'s own translation, with no database of its own: a
+/// live `Taken` refuses, an archived one does not (#148, resolved instead by
+/// [`crate::quota::create`] reviving it), and `Resembles` warns only once.
+fn rejection_for_standing(
+    standing: NameStanding,
+    confirmed: Option<&str>,
+    candidate_name: &str,
+) -> Option<Rejection> {
+    match standing {
         NameStanding::Taken {
             name,
             weekly_target_minutes,
+            archived: false,
         } => Some(Rejection::QuotaNameExists {
             existing_name: name,
             existing_minutes: weekly_target_minutes,
         }),
+        NameStanding::Taken { archived: true, .. } => None,
         NameStanding::Resembles {
             name,
             weekly_target_minutes,
@@ -114,8 +135,7 @@ async fn check_quota_name(
             existing_minutes: weekly_target_minutes,
         }),
         _ => None,
-    };
-    Ok(rejection)
+    }
 }
 
 /// [`check_quota_name`] for a `kind` that may or may not be a quota --
@@ -690,9 +710,7 @@ mod tests {
         let (_dir, pool) = test_pool().await;
         let existing =
             scheduler_core::quota::QuotaDefinition::from_fields(Some("Piano"), Some("4")).unwrap();
-        crate::quota::store::create(&pool, &existing, 0)
-            .await
-            .unwrap();
+        crate::quota::create(&pool, &existing, 0).await.unwrap();
         let capture_id = insert_untriaged_capture(&pool, "practise piano more").await;
 
         let response = triage_response(
@@ -734,9 +752,7 @@ mod tests {
         let (_dir, pool) = test_pool().await;
         let existing =
             scheduler_core::quota::QuotaDefinition::from_fields(Some("Piano"), Some("4")).unwrap();
-        crate::quota::store::create(&pool, &existing, 0)
-            .await
-            .unwrap();
+        crate::quota::create(&pool, &existing, 0).await.unwrap();
         let capture_id = insert_untriaged_capture(&pool, "learn piano theory").await;
 
         let warned = triage_response(

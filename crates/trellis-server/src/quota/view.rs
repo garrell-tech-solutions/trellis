@@ -51,6 +51,14 @@ pub struct QuotaRowView {
     /// which quota is expanded is a thing you did with your thumb, not a
     /// durable consequence of one.
     pub expanded: bool,
+    /// The current target as a bare number of hours (`"4"`, `"1.5"`), for
+    /// the change form's own `value=""` -- `note`/`readout` are prose meant
+    /// to be read, never fed back into an `<input type="number">`.
+    pub hours_value: String,
+    /// `Some(message)` on the one row a rejected change (#148) named, `None`
+    /// on every other -- the same one-row-only shape
+    /// `inbox::view::CaptureRow::error` takes for a rejected triage.
+    pub change_error: Option<String>,
 }
 
 pub struct QuotaScreenView {
@@ -92,18 +100,22 @@ fn format_duration(minutes: i64) -> String {
 /// own this-week sessions in one flat list (`store::week_sessions`'s own
 /// bounded query, the week boundary already applied in SQL); partitioning
 /// it by `quota_id` here is display bookkeeping, not the business rule --
-/// the rule is which rows the store's own `WHERE` admitted.
+/// the rule is which rows the store's own `WHERE` admitted. `error` is a
+/// rejected change (#148), attached to the one row it failed on -- `None`
+/// for every render but that one failing response
+/// (`inbox::lists::build_capture_rows`'s identical shape).
 pub(super) fn build(
     rows: Vec<QuotaRow>,
     sessions: Vec<SessionRow>,
     week: &Week,
     zone: &jiff::tz::TimeZone,
     expanded_ids: &HashSet<i64>,
+    error: Option<(i64, String)>,
 ) -> QuotaScreenView {
     let mut sessions_by_quota = group_sessions_by_quota(sessions);
     let empty = rows.is_empty();
     let meta = quota_count_meta(rows.len());
-    let quotas = quota_row_views(rows, &mut sessions_by_quota, zone, expanded_ids);
+    let quotas = quota_row_views(rows, &mut sessions_by_quota, zone, expanded_ids, &error);
     QuotaScreenView {
         meta,
         empty,
@@ -134,14 +146,30 @@ fn quota_row_views(
     sessions_by_quota: &mut HashMap<i64, Vec<SessionRow>>,
     zone: &jiff::tz::TimeZone,
     expanded_ids: &HashSet<i64>,
+    error: &Option<(i64, String)>,
 ) -> Vec<QuotaRowView> {
     rows.into_iter()
         .map(|row| {
             let sessions = sessions_by_quota.remove(&row.id).unwrap_or_default();
             let expanded = expanded_ids.contains(&row.id);
-            quota_row_view(row, sessions, zone, expanded)
+            let change_error = error
+                .as_ref()
+                .filter(|(id, _)| *id == row.id)
+                .map(|(_, message)| message.clone());
+            quota_row_view(row, sessions, zone, expanded, change_error)
         })
         .collect()
+}
+
+/// `minutes` as a bare decimal number of hours, for [`QuotaRowView::hours_value`]
+/// -- the number-only half of [`super::hours_a_week`]'s message, since an
+/// `<input value="">` must not carry that sentence's own words.
+fn hours_value(minutes: i64) -> String {
+    if minutes % 60 == 0 {
+        (minutes / 60).to_string()
+    } else {
+        format!("{:.1}", minutes as f64 / 60.0)
+    }
 }
 
 fn day_option_labels(week: &Week) -> Vec<String> {
@@ -156,6 +184,7 @@ fn quota_row_view(
     sessions: Vec<SessionRow>,
     zone: &jiff::tz::TimeZone,
     expanded: bool,
+    change_error: Option<String>,
 ) -> QuotaRowView {
     let logged_minutes: i64 = sessions.iter().map(|s| s.minutes).sum();
     let progress = quota::progress(row.weekly_target, logged_minutes);
@@ -183,6 +212,8 @@ fn quota_row_view(
         sessions,
         sessions_message,
         summary,
+        hours_value: hours_value(row.weekly_target.minutes()),
+        change_error,
         name: row.name,
         expanded,
     }
@@ -247,11 +278,18 @@ mod tests {
     }
 
     fn build_with(rows: Vec<QuotaRow>) -> QuotaScreenView {
-        build(rows, vec![], &tuesday_week(), &zone(), &HashSet::new())
+        build(
+            rows,
+            vec![],
+            &tuesday_week(),
+            &zone(),
+            &HashSet::new(),
+            None,
+        )
     }
 
     fn build_with_expanded(rows: Vec<QuotaRow>, expanded_ids: &HashSet<i64>) -> QuotaScreenView {
-        build(rows, vec![], &tuesday_week(), &zone(), expanded_ids)
+        build(rows, vec![], &tuesday_week(), &zone(), expanded_ids, None)
     }
 
     #[test]
@@ -329,6 +367,7 @@ mod tests {
             &week,
             &zone(),
             &HashSet::new(),
+            None,
         );
         assert_eq!(view.quotas[0].readout, "20m / 4h");
         assert_eq!(view.quotas[0].note, "3h 40m left this week · 8%");
@@ -346,6 +385,7 @@ mod tests {
             &week,
             &zone(),
             &HashSet::new(),
+            None,
         );
         assert_eq!(view.quotas[0].note, "3h 40m left this week · 8%");
         assert_eq!(view.quotas[0].bar_percent, 8);
@@ -363,6 +403,7 @@ mod tests {
             &week,
             &zone(),
             &HashSet::new(),
+            None,
         );
         assert_eq!(view.quotas[0].note, "0m left this week · 125%");
         assert_eq!(view.quotas[0].bar_percent, 100);
@@ -378,6 +419,7 @@ mod tests {
             &week,
             &zone(),
             &HashSet::new(),
+            None,
         );
         assert_eq!(view.quotas[0].readout, "20m / 4h");
         assert_eq!(view.quotas[1].readout, "0m / 3h");
@@ -393,6 +435,7 @@ mod tests {
             &week,
             &zone(),
             &HashSet::new(),
+            None,
         );
         assert_eq!(view.quotas[0].sessions[0].label, "Mon 60m");
         assert_eq!(view.quotas[0].sessions[0].day, "Mon");
@@ -420,6 +463,7 @@ mod tests {
             &week,
             &zone,
             &HashSet::new(),
+            None,
         );
         assert_eq!(view.quotas[0].sessions_message, None);
         assert_eq!(view.quotas[0].summary, "2 sessions · 1h");
@@ -436,6 +480,7 @@ mod tests {
             &week,
             &zone,
             &HashSet::new(),
+            None,
         );
         assert_eq!(view.quotas[0].summary, "1 session · 20m");
     }
@@ -467,5 +512,39 @@ mod tests {
         );
         assert!(view.quotas[0].expanded);
         assert!(!view.quotas[1].expanded);
+    }
+
+    // --- change and remove (#148) ------------------------------------------
+
+    #[test]
+    fn hours_value_reads_a_whole_number_of_hours_with_no_decimal() {
+        assert_eq!(hours_value(240), "4");
+    }
+
+    #[test]
+    fn hours_value_reads_a_fractional_number_of_hours_to_one_decimal() {
+        assert_eq!(hours_value(270), "4.5");
+    }
+
+    #[test]
+    fn hours_value_rounds_a_target_that_is_not_a_whole_tenth_of_an_hour() {
+        assert_eq!(hours_value(100), "1.7");
+    }
+
+    #[test]
+    fn a_rejected_changes_error_attaches_to_the_row_it_failed_on_and_no_other() {
+        let view = build(
+            vec![row(1, "Piano", 240), row(2, "Running", 180)],
+            vec![],
+            &tuesday_week(),
+            &zone(),
+            &HashSet::new(),
+            Some((2, "name already exists".to_string())),
+        );
+        assert_eq!(view.quotas[0].change_error, None);
+        assert_eq!(
+            view.quotas[1].change_error,
+            Some("name already exists".to_string())
+        );
     }
 }

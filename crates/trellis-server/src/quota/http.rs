@@ -56,7 +56,7 @@ pub async fn show_quota(
     State(pool): State<SqlitePool>,
     State(clock): State<Clock>,
 ) -> Result<Response, StatusCode> {
-    let built = body::build(&pool, clock, &HashSet::new())
+    let built = body::build(&pool, clock, &HashSet::new(), None)
         .await
         .map_err(write_failed)?;
     Ok(render_template(
@@ -103,8 +103,14 @@ async fn validated_session(
     ) {
         Ok(session) => Ok(Ok((week.day_ms(session.day, &zone), session.minutes))),
         Err(_) => {
-            let rejection =
-                body::respond(pool, clock, StatusCode::UNPROCESSABLE_ENTITY, expanded_ids).await?;
+            let rejection = body::respond(
+                pool,
+                clock,
+                StatusCode::UNPROCESSABLE_ENTITY,
+                expanded_ids,
+                None,
+            )
+            .await?;
             Ok(Err(rejection))
         }
     }
@@ -129,7 +135,7 @@ pub async fn log_session(
     super::store::log_session(&pool, quota_id, day_ms, minutes, clock.now_ms())
         .await
         .map_err(write_failed)?;
-    body::respond(&pool, clock, StatusCode::CREATED, &expanded_ids).await
+    body::respond(&pool, clock, StatusCode::CREATED, &expanded_ids, None).await
 }
 
 /// `POST /quota/sessions/{session_id}` -- corrects a logged session's day
@@ -149,7 +155,7 @@ pub async fn correct_session(
     super::store::update_session(&pool, session_id, day_ms, minutes)
         .await
         .map_err(write_failed)?;
-    body::respond(&pool, clock, StatusCode::OK, &expanded_ids).await
+    body::respond(&pool, clock, StatusCode::OK, &expanded_ids, None).await
 }
 
 /// `POST /quota/sessions/{session_id}/delete` -- deletes a logged session
@@ -164,31 +170,68 @@ pub async fn delete_session(
     super::store::delete_session(&pool, session_id)
         .await
         .map_err(write_failed)?;
-    body::respond(&pool, clock, StatusCode::OK, &expanded_ids(&expanded)).await
+    body::respond(&pool, clock, StatusCode::OK, &expanded_ids(&expanded), None).await
+}
+
+/// A quota's own change: a new name and a new hour target, together
+/// (#148) -- one gesture, never two round trips one of which could apply
+/// without the other.
+#[derive(Deserialize, Default)]
+pub struct ChangeForm {
+    name: Option<String>,
+    hours: Option<String>,
+}
+
+/// `POST /quota/{quota_id}` -- renames and retargets `quota_id`, or
+/// refuses with the row carrying why (#148, `T-422-is-product-wide`).
+/// `crate::quota::change` is where well-formedness and the name guard
+/// live; this handler's only job is turning its answer into a response.
+pub async fn change_quota(
+    State(pool): State<SqlitePool>,
+    State(clock): State<Clock>,
+    Path(quota_id): Path<i64>,
+    Query(expanded): Query<ExpandedQuery>,
+    Form(form): Form<ChangeForm>,
+) -> Result<Response, StatusCode> {
+    let expanded_ids = expanded_ids(&expanded);
+    let outcome =
+        crate::quota::change(&pool, quota_id, form.name.as_deref(), form.hours.as_deref())
+            .await
+            .map_err(write_failed)?;
+    let (status, error) = match outcome {
+        Ok(()) => (StatusCode::OK, None),
+        Err(message) => (StatusCode::UNPROCESSABLE_ENTITY, Some((quota_id, message))),
+    };
+    body::respond(&pool, clock, status, &expanded_ids, error).await
+}
+
+/// `POST /quota/{quota_id}/remove` -- removes `quota_id` (#148, remove
+/// means archive: `crate::quota::remove` stamps `archived_at` and nothing
+/// is deleted). No failure state to report: a removal cannot collide with
+/// anything the way a rename can, so this always swaps in the current
+/// fragment at `200`.
+pub async fn remove_quota(
+    State(pool): State<SqlitePool>,
+    State(clock): State<Clock>,
+    Path(quota_id): Path<i64>,
+    Query(expanded): Query<ExpandedQuery>,
+) -> Result<Response, StatusCode> {
+    crate::quota::remove(&pool, quota_id, clock.now_ms())
+        .await
+        .map_err(write_failed)?;
+    body::respond(&pool, clock, StatusCode::OK, &expanded_ids(&expanded), None).await
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::platform::test_support::test_pool;
+    use crate::platform::test_support::{http_request, test_pool};
     use axum::body::{to_bytes, Body};
     use axum::http::Request;
     use tower::ServiceExt;
 
     async fn get_quota(pool: &SqlitePool) -> (StatusCode, String) {
-        let app = crate::platform::app::build_app(pool.clone(), Clock::system());
-        let response = app
-            .oneshot(
-                Request::builder()
-                    .uri("/quota")
-                    .body(Body::empty())
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-        let status = response.status();
-        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
-        (status, String::from_utf8(body.to_vec()).unwrap())
+        http_request(pool, Clock::system(), "GET", "/quota").await
     }
 
     /// Percent-encoding for the handful of characters this module's own
@@ -564,5 +607,64 @@ mod tests {
             !body.contains("<details class=\"quota-expand\" open>"),
             "a fresh GET must always start collapsed, got:\n{body}"
         );
+    }
+
+    // --- change and remove (#148) ------------------------------------------
+
+    #[tokio::test]
+    async fn changing_a_quota_through_the_route_renames_and_retargets_it() {
+        let (_dir, pool) = test_pool().await;
+        let quota_id = given_a_quota(&pool, "Piano", "4").await;
+
+        let (status, body) = post_path(
+            &pool,
+            tuesday_clock(),
+            &format!("/quota/{quota_id}"),
+            &[("name", "Guitar"), ("hours", "5")],
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::OK);
+        assert!(body.contains("Guitar"), "got:\n{body}");
+        assert!(!body.contains("Piano"), "got:\n{body}");
+    }
+
+    #[tokio::test]
+    async fn changing_a_quota_onto_a_taken_name_is_refused_and_changes_nothing() {
+        let (_dir, pool) = test_pool().await;
+        given_a_quota(&pool, "Piano", "4").await;
+        let guitar_id = given_a_quota(&pool, "Guitar", "5").await;
+
+        let (status, body) = post_path(
+            &pool,
+            tuesday_clock(),
+            &format!("/quota/{guitar_id}"),
+            &[("name", "Piano"), ("hours", "6")],
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+        assert!(body.contains("Guitar"), "got:\n{body}");
+    }
+
+    #[tokio::test]
+    async fn removing_a_quota_through_the_route_archives_it_and_the_screen_stops_listing_it() {
+        let (_dir, pool) = test_pool().await;
+        let quota_id = given_a_quota(&pool, "Piano", "4").await;
+
+        let (status, body) = post_path(
+            &pool,
+            tuesday_clock(),
+            &format!("/quota/{quota_id}/remove"),
+            &[],
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::OK);
+        // Not just "no Piano" -- a default empty response would pass that
+        // too. This is the real re-rendered fragment, now showing the
+        // empty state its only quota's removal leaves behind.
+        assert!(body.contains("quota-empty"), "got:\n{body}");
+        assert!(!body.contains("Piano"), "got:\n{body}");
     }
 }

@@ -107,11 +107,7 @@ pub(super) fn rejection_message(rejection: &Rejection, kind_submitted: &Value) -
         Rejection::QuotaNameExists {
             existing_name,
             existing_minutes,
-        } => format!(
-            "\u{201c}{existing_name}\u{201d} already exists at {}. Log your time against that \
-             one, or give this a different name.",
-            crate::quota::hours_a_week(*existing_minutes)
-        ),
+        } => crate::quota::name_exists_message(existing_name, *existing_minutes),
         Rejection::QuotaNameSimilar {
             existing_name,
             existing_minutes,

@@ -608,4 +608,63 @@ mod tests {
             "a fresh GET must always start collapsed, got:\n{body}"
         );
     }
+
+    // --- change and remove (#148) ------------------------------------------
+
+    #[tokio::test]
+    async fn changing_a_quota_through_the_route_renames_and_retargets_it() {
+        let (_dir, pool) = test_pool().await;
+        let quota_id = given_a_quota(&pool, "Piano", "4").await;
+
+        let (status, body) = post_path(
+            &pool,
+            tuesday_clock(),
+            &format!("/quota/{quota_id}"),
+            &[("name", "Guitar"), ("hours", "5")],
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::OK);
+        assert!(body.contains("Guitar"), "got:\n{body}");
+        assert!(!body.contains("Piano"), "got:\n{body}");
+    }
+
+    #[tokio::test]
+    async fn changing_a_quota_onto_a_taken_name_is_refused_and_changes_nothing() {
+        let (_dir, pool) = test_pool().await;
+        given_a_quota(&pool, "Piano", "4").await;
+        let guitar_id = given_a_quota(&pool, "Guitar", "5").await;
+
+        let (status, body) = post_path(
+            &pool,
+            tuesday_clock(),
+            &format!("/quota/{guitar_id}"),
+            &[("name", "Piano"), ("hours", "6")],
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+        assert!(body.contains("Guitar"), "got:\n{body}");
+    }
+
+    #[tokio::test]
+    async fn removing_a_quota_through_the_route_archives_it_and_the_screen_stops_listing_it() {
+        let (_dir, pool) = test_pool().await;
+        let quota_id = given_a_quota(&pool, "Piano", "4").await;
+
+        let (status, body) = post_path(
+            &pool,
+            tuesday_clock(),
+            &format!("/quota/{quota_id}/remove"),
+            &[],
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::OK);
+        // Not just "no Piano" -- a default empty response would pass that
+        // too. This is the real re-rendered fragment, now showing the
+        // empty state its only quota's removal leaves behind.
+        assert!(body.contains("quota-empty"), "got:\n{body}");
+        assert!(!body.contains("Piano"), "got:\n{body}");
+    }
 }

@@ -513,4 +513,38 @@ mod tests {
         assert!(view.quotas[0].expanded);
         assert!(!view.quotas[1].expanded);
     }
+
+    // --- change and remove (#148) ------------------------------------------
+
+    #[test]
+    fn hours_value_reads_a_whole_number_of_hours_with_no_decimal() {
+        assert_eq!(hours_value(240), "4");
+    }
+
+    #[test]
+    fn hours_value_reads_a_fractional_number_of_hours_to_one_decimal() {
+        assert_eq!(hours_value(270), "4.5");
+    }
+
+    #[test]
+    fn hours_value_rounds_a_target_that_is_not_a_whole_tenth_of_an_hour() {
+        assert_eq!(hours_value(100), "1.7");
+    }
+
+    #[test]
+    fn a_rejected_changes_error_attaches_to_the_row_it_failed_on_and_no_other() {
+        let view = build(
+            vec![row(1, "Piano", 240), row(2, "Running", 180)],
+            vec![],
+            &tuesday_week(),
+            &zone(),
+            &HashSet::new(),
+            Some((2, "name already exists".to_string())),
+        );
+        assert_eq!(view.quotas[0].change_error, None);
+        assert_eq!(
+            view.quotas[1].change_error,
+            Some("name already exists".to_string())
+        );
+    }
 }

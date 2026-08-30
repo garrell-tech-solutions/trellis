@@ -71,7 +71,6 @@ fn quota_row(stored: StoredQuotaRow) -> Result<QuotaRow, sqlx::Error> {
 /// has been removed.
 #[derive(sqlx::FromRow)]
 pub(super) struct ExistingQuota {
-    pub id: i64,
     pub name: String,
     pub weekly_target_minutes: i64,
     /// #148: an archived quota still counts as "taken" -- its name is
@@ -96,11 +95,23 @@ pub(super) struct ExistingQuota {
 /// reached is nobody else's business). That visibility is also what keeps
 /// the Gaps entry under this one function: the day the exact tier moves
 /// into the query, no caller changes.
-pub(super) async fn existing(pool: &SqlitePool) -> Result<Vec<ExistingQuota>, sqlx::Error> {
+///
+/// `exclude` is the one row a rename must not measure itself against -- its
+/// own (#148: renaming `workout` to `Workout` is a respelling, not a
+/// collision). It is a `WHERE`, not a filter the caller applies afterwards
+/// (`T-set-operations-execute-in-the-store`); the tier that cannot execute
+/// here is the similarity comparison, and that is no reason to hand back a
+/// row the question has already excluded.
+pub(super) async fn existing(
+    pool: &SqlitePool,
+    exclude: Option<i64>,
+) -> Result<Vec<ExistingQuota>, sqlx::Error> {
     sqlx::query_as(
-        "SELECT id, name, weekly_target_minutes, (archived_at IS NOT NULL) AS archived \
-         FROM quotas ORDER BY id ASC",
+        "SELECT name, weekly_target_minutes, (archived_at IS NOT NULL) AS archived \
+         FROM quotas WHERE (? IS NULL OR id <> ?) ORDER BY id ASC",
     )
+    .bind(exclude)
+    .bind(exclude)
     .fetch_all(pool)
     .await
 }
@@ -328,7 +339,7 @@ mod tests {
         let (_dir, pool) = test_pool().await;
         create(&pool, &definition("Piano", 240), 0).await.unwrap();
 
-        let rows = existing(&pool).await.unwrap();
+        let rows = existing(&pool, None).await.unwrap();
 
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].name, "Piano");
@@ -342,10 +353,25 @@ mod tests {
         let id = given_a_quota(&pool, "Piano", 240).await;
         archive(&pool, id, 4242).await.unwrap();
 
-        let rows = existing(&pool).await.unwrap();
+        let rows = existing(&pool, None).await.unwrap();
 
         assert_eq!(rows.len(), 1, "an archived quota still holds its name");
         assert!(rows[0].archived);
+    }
+
+    /// The rename door's own exclusion, and the reason it is a `WHERE`: a
+    /// quota measured against itself collides with itself, so `workout`
+    /// could never be respelled `Workout`.
+    #[tokio::test]
+    async fn existing_omits_the_row_the_caller_excluded() {
+        let (_dir, pool) = test_pool().await;
+        let piano = given_a_quota(&pool, "Piano", 240).await;
+        given_a_quota(&pool, "Running", 120).await;
+
+        let rows = existing(&pool, Some(piano)).await.unwrap();
+
+        let names: Vec<&str> = rows.iter().map(|r| r.name.as_str()).collect();
+        assert_eq!(names, vec!["Running"]);
     }
 
     #[tokio::test]

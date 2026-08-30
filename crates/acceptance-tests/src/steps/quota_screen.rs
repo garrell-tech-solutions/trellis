@@ -82,11 +82,7 @@ pub async fn dispatch(
         return Some(dispatch_offers_quotas(world, example, &caps).await);
     }
     if let Some(caps) = THEN_DOES_NOT_MENTION.captures(text) {
-        let expected = caps[1].to_string();
-        return Some(match html_body(world).await {
-            Ok(body) => super::then_does_not_mention(body, &expected),
-            Err(e) => Err(e),
-        });
+        return Some(dispatch_does_not_mention(world, &caps).await);
     }
     if let Some(caps) = THEN_OFFERS_CHANGE_AND_REMOVE.captures(text) {
         return Some(then_offers_change_and_remove(world, example, &caps).await);
@@ -260,6 +256,19 @@ async fn dispatch_quota_reads(
         &expected,
         format!("expected the quota {name:?} to read {expected:?}, got {readout:?}"),
     )
+}
+
+/// The one arm that was not a delegation: it unpacked `html_body`'s
+/// `Result` inline, which put a conditional of its own inside the dispatch
+/// chain -- the thing `T-complexity-8` says to extract rather than baseline,
+/// and the thing this file's own baseline row claims no arm does.
+async fn dispatch_does_not_mention(
+    world: &mut World,
+    caps: &regex::Captures<'_>,
+) -> Result<(), String> {
+    let expected = caps[1].to_string();
+    let body = html_body(world).await?;
+    super::then_does_not_mention(body, &expected)
 }
 
 async fn dispatch_quota_notes(

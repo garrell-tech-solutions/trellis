@@ -710,9 +710,7 @@ mod tests {
         let (_dir, pool) = test_pool().await;
         let existing =
             scheduler_core::quota::QuotaDefinition::from_fields(Some("Piano"), Some("4")).unwrap();
-        crate::quota::store::create(&pool, &existing, 0)
-            .await
-            .unwrap();
+        crate::quota::create(&pool, &existing, 0).await.unwrap();
         let capture_id = insert_untriaged_capture(&pool, "practise piano more").await;
 
         let response = triage_response(
@@ -754,9 +752,7 @@ mod tests {
         let (_dir, pool) = test_pool().await;
         let existing =
             scheduler_core::quota::QuotaDefinition::from_fields(Some("Piano"), Some("4")).unwrap();
-        crate::quota::store::create(&pool, &existing, 0)
-            .await
-            .unwrap();
+        crate::quota::create(&pool, &existing, 0).await.unwrap();
         let capture_id = insert_untriaged_capture(&pool, "learn piano theory").await;
 
         let warned = triage_response(

@@ -7,11 +7,23 @@
 //! into the view the template renders; [`body`] is the `#quota-body`
 //! fragment `GET /quota` and every session write swap in, the same shape
 //! `pool::body` and `committed::body` take.
+//!
+//! **All three are private, so this file is the whole of what another
+//! capability can reach.** `create`, `name_standing`, `change`, `remove`
+//! and the two message helpers below are the front door
+//! (`T-one-front-door-per-capability`); `http` is public only because
+//! `platform::app` mounts its handlers on routes. #148 grew that door by
+//! four functions, which is exactly when it is worth having the compiler
+//! hold the line rather than a comment and a CI gate --
+//! `scripts/ci/capability_front_doors.sh` still checks the tree, but for
+//! this capability it can no longer be the thing that catches a reach: a
+//! reach does not compile. `inbox` says the same of itself and got there
+//! the same way.
 
 mod body;
 pub mod http;
-pub mod store;
-pub mod view;
+mod store;
+mod view;
 
 use sqlx::SqlitePool;
 
@@ -103,10 +115,9 @@ pub async fn name_standing(
     candidate: &str,
     exclude_id: Option<i64>,
 ) -> Result<NameStanding, sqlx::Error> {
-    let existing = store::existing(pool).await?;
+    let existing = store::existing(pool, exclude_id).await?;
     let candidates: Vec<(String, i64)> = existing
         .iter()
-        .filter(|q| Some(q.id) != exclude_id)
         .map(|q| (q.name.clone(), q.weekly_target_minutes))
         .collect();
     let matched = scheduler_core::quota::check_name(candidate, &candidates);
@@ -236,9 +247,11 @@ pub(crate) fn name_exists_message(existing_name: &str, existing_minutes: i64) ->
 /// context with its own established spelling, and this project does not
 /// invent a third.
 ///
-/// Its only caller is now `triage::rejection`: #138 retired the quota
-/// screen's define form, and with it the collision message this was first
-/// written for. It stays here rather than moving with its caller because a
+/// Read by [`name_exists_message`] just above, and by `triage::rejection`
+/// for the resemblance warning triage alone offers. #138 retired the quota
+/// screen's define form and with it the collision message this was first
+/// written for; #148 gave it a second refusal to word, on this screen's own
+/// rename door. It stays here rather than moving to either caller because a
 /// quota's target is spelled the way this capability spells it -- a refusal
 /// quoting one is borrowing quota's words, not coining its own.
 pub(crate) fn hours_a_week(minutes: i64) -> String {
@@ -253,6 +266,8 @@ pub(crate) fn hours_a_week(minutes: i64) -> String {
 mod tests {
     use super::*;
     use crate::platform::test_support::test_pool;
+    use proptest::prelude::*;
+    use proptest::{prop_assert, prop_assert_eq, proptest, test_runner::Config as ProptestConfig};
     use scheduler_core::quota::WeeklyTarget;
 
     async fn given_quota(pool: &SqlitePool, name: &str, weekly_target_minutes: i64) {
@@ -538,5 +553,136 @@ mod tests {
             "\u{201c}Piano\u{201d} already exists at 4 h a week. Log your time against that \
              one, or give this a different name."
         );
+    }
+
+    // --- The two halves of #148, as properties ---------------------------
+
+    /// Characters `T-collation-enforces-name-identity` folds away entirely.
+    const SEPARATORS: [&str; 5] = ["-", " ", "_", ".", "'"];
+
+    /// One name, spelled two ways: same alphanumeric runs in the same order,
+    /// different punctuation and different case. ASCII-only on purpose --
+    /// `to_uppercase` expands some characters into several, which would
+    /// change the letters rather than only their case.
+    fn any_respelling() -> impl Strategy<Value = (String, String)> {
+        (
+            prop::collection::vec("[a-zA-Z0-9]{1,6}", 1..4),
+            prop::collection::vec(prop::sample::select(SEPARATORS.as_slice()), 1..3),
+            prop::collection::vec(prop::sample::select(SEPARATORS.as_slice()), 1..3),
+            any::<bool>(),
+        )
+            .prop_map(|(runs, first, second, shout)| {
+                let spell = |seps: &Vec<&str>| {
+                    let mut out = runs[0].clone();
+                    for (i, run) in runs.iter().enumerate().skip(1) {
+                        out.push_str(seps[(i - 1) % seps.len()]);
+                        out.push_str(run);
+                    }
+                    out
+                };
+                let other = spell(&second);
+                let other = if shout {
+                    other.to_uppercase()
+                } else {
+                    other.to_lowercase()
+                };
+                (spell(&first), other)
+            })
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig { cases: 24, ..ProptestConfig::default() })]
+
+        /// **A quota never collides with itself.** However the owner
+        /// respells a name they already have, on the quota they already have
+        /// it on, [`change`] accepts it -- `workout` becomes `Workout`
+        /// (#148). This is the guarantee `store::existing`'s `exclude`
+        /// exists for, and it is exactly the one an example test cannot
+        /// pin: `check_name` folds case, spaces and punctuation, so the set
+        /// of spellings that must be accepted here is unbounded.
+        ///
+        /// Its mirror is in the same run: the *other* quota's name,
+        /// respelled, is still refused. An `exclude` that excluded too much
+        /// would pass the first half and fail this one.
+        #[test]
+        #[ignore]
+        fn a_quota_can_be_respelled_but_not_renamed_onto_another(
+            (name, respelling) in any_respelling(),
+        ) {
+            let rt = tokio::runtime::Runtime::new().unwrap();
+            let (own, onto_other) = rt.block_on(async {
+                let (_dir, pool) = test_pool().await;
+                given_quota(&pool, &name, 240).await;
+                given_quota(&pool, "a quota with some other name", 120).await;
+                let id = quota_id(&pool, &name).await;
+
+                let own = change(&pool, id, Some(&respelling), Some("4")).await.unwrap();
+                let onto_other = change(
+                    &pool, id, Some("A Quota, With Some Other Name"), Some("4"),
+                ).await.unwrap();
+                (own, onto_other)
+            });
+
+            prop_assert!(own.is_ok(), "{:?} refused on its own quota: {:?}", respelling, own);
+            prop_assert!(onto_other.is_err(), "renaming onto another quota was allowed");
+        }
+
+        /// **Removing a quota takes it off the screen and leaves its name
+        /// taken.** Both halves of #148's bargain, asserted together over any
+        /// arrangement of live and removed quotas, because they are only
+        /// coherent together: `list_quotas` hiding an archived row is what
+        /// makes removal mean anything, and `name_standing` still reporting
+        /// it `Taken` is what stops the `UNIQUE COLLATE NOCASE` column
+        /// refusing a write the screen had already promised
+        /// (`T-collation-enforces-name-identity`).
+        #[test]
+        #[ignore]
+        fn a_removed_quota_leaves_the_screen_and_keeps_its_name(
+            removed in prop::collection::vec(any::<bool>(), 0..6),
+        ) {
+            let rt = tokio::runtime::Runtime::new().unwrap();
+            let (listed, standings) = rt.block_on(async {
+                let (_dir, pool) = test_pool().await;
+                let names: Vec<String> =
+                    (0..removed.len()).map(|n| format!("quota {n}")).collect();
+                for name in &names {
+                    given_quota(&pool, name, 60).await;
+                }
+                for (name, gone) in names.iter().zip(&removed) {
+                    if *gone {
+                        remove(&pool, quota_id(&pool, name).await, 4242).await.unwrap();
+                    }
+                }
+
+                let listed: Vec<String> = store::list_quotas(&pool)
+                    .await
+                    .unwrap()
+                    .into_iter()
+                    .map(|q| q.name)
+                    .collect();
+                let mut standings = Vec::new();
+                for name in &names {
+                    standings.push(name_standing(&pool, name, None).await.unwrap());
+                }
+                (listed, standings)
+            });
+
+            let expected: Vec<String> = (0..removed.len())
+                .filter(|n| !removed[*n])
+                .map(|n| format!("quota {n}"))
+                .collect();
+            prop_assert_eq!(listed, expected);
+
+            for (standing, gone) in standings.iter().zip(&removed) {
+                match standing {
+                    NameStanding::Taken { archived, .. } => {
+                        prop_assert_eq!(archived, gone, "archived flag disagreed with the removal")
+                    }
+                    other => prop_assert!(
+                        false, "a quota that exists read as {:?} rather than Taken", other
+                    ),
+                }
+            }
+        }
     }
 }

@@ -130,8 +130,8 @@
     {
       "file": "crates/acceptance-tests/src/steps/quota_screen.rs",
       "function": "dispatch",
-      "cyclomatic_complexity": 13,
-      "why": "Gherkin step dispatcher; regex chain, one-line delegation per arm. New module for features/quota_screen.feature (#93). Reviewed arm by arm: every branch is `if let Some(caps) = REGEX.captures(text) { return Some(handler(..).await) }`, `if let Some(caps) = REGEX.captures(text) { return Some(handler(..)) }`, or `if REGEX.is_match(text) { return Some(handler(..)) }` with no conditional of its own. 17 -> 13 (#138): DOWN. The owner settled that the quota screen creates nothing, so the define form's steps left with the form -- arms removed, not logic extracted."
+      "cyclomatic_complexity": 15,
+      "why": "Gherkin step dispatcher; regex chain, one-line delegation per arm. New module for features/quota_screen.feature (#93). Reviewed arm by arm: every branch is `if let Some(caps) = REGEX.captures(text) { return Some(handler(..).await) }`, `if let Some(caps) = REGEX.captures(text) { return Some(handler(..)) }`, or `if REGEX.is_match(text) { return Some(handler(..)) }` with no conditional of its own. 17 -> 13 (#138): DOWN. The owner settled that the quota screen creates nothing, so the define form's steps left with the form -- arms removed, not logic extracted. 13 -> 15 (#148): UP by four new arms (change, remove, refusal, the controls assertion) and DOWN by two, because the review above had stopped being true -- the `does not mention` arm had grown an inline `match` unpacking `html_body`'s Result, a conditional of its own inside the chain. Extracted to `dispatch_does_not_mention`, which is what T-complexity-8 asks for and what this row already claimed. Recorded at 17 before that extraction; the gate printed 17 and the file said 13."
     },
     {
       "file": "crates/acceptance-tests/src/steps/quota_sessions.rs",

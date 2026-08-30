@@ -7,62 +7,41 @@
 # quota-screen-empty-explains-itself-02: an empty quota screen says what a quota is and points at Capture
 # quota-screen-reads-its-target-03: a triaged quota reads its target with nothing logged yet
 # quota-screen-triaged-order-04: quotas are listed in the order they were triaged
+# quota-screen-retarget-05: a quota's weekly target can be changed, and the readout moves
+# quota-screen-rename-06: a quota can be renamed, and the listing follows
+# quota-screen-rename-refused-07: renaming onto a name already taken is refused
+# quota-screen-remove-08: a removed quota leaves the screen and stops counting
+# quota-screen-removed-name-returns-09: triaging a removed quota's name brings it back with its hours
 #
-# --- THIS SCREEN NO LONGER CREATES ANYTHING ------------------------------
-# Settled by the owner 2026-08-26, and it reverses the larger half of #147:
-# "there should not be any sort of way to create a quota in the quota screen
-# -- the quota screen is only displaying the quotas that you have inserted
-# as a task and triaged as a quota."
+# REMOVE MEANS ARCHIVE, settled by the owner 2026-08-29: the quota stops
+# appearing and stops counting, its sessions are kept, and there is nowhere to
+# browse them -- the bargain `D-kill-means-archive` already struck for tasks.
+# Nothing is deleted, so the foreign key never fires.
 #
-# `+ Define a new quota` AND ITS WHOLE FORM LEAVE THIS SCREEN. Five of the
-# nine scenarios this file shipped with go with them, and NOT ONE OF THEM IS
-# DELETED: `-03` both-fields-required, `-04` target-must-be-positive, `-06`
-# repeated-name-refused and `-07` similar-name-warns are now
-# `quota_triage_validation.feature`'s `-01`/`-02`, `-03`, `-04` and `-05`
-# respectively. THE RULES SURVIVED, THE SURFACE MOVED, and the guard that
-# `D-quotas-are-selected-not-typed` exists for is enforced at the one door
-# that remains. That decision's own "can be done directly from the Menu
-# WITHOUT A CAPTURE" clause is superseded; the PM places the dated row.
+# AND IT WOULD HAVE FIRED. The brief warned that a delete silently orphans
+# sessions because no `PRAGMA foreign_keys` is set in the tree. THE OPPOSITE IS
+# TRUE, proved by running it: sqlx sets it ON for every connection, so a delete
+# is REFUSED with SQLite 787. A delete-based removal would have passed testing
+# and 500'd on exactly the quotas the owner had been logging against.
 #
-# `-09` IS THE ONE SCENARIO THAT IS GONE OUTRIGHT, and it is gone because it
-# has been INVERTED rather than weakened. It asserted "quota tasks from
-# triage are a different thing and do not appear here" -- the boundary
-# between two coexisting quota concepts, asserted deliberately while that
-# state was knowingly accepted. #138 CLOSES THAT STATE: a triaged quota is
-# now the ONLY thing this screen can show, so the assertion's replacement is
-# every remaining scenario in this file, all of which now arrive by triage.
-# Keeping a narrowed version would be asserting the opposite of the product.
+# TRIAGING A REMOVED NAME REVIVES IT (-09) rather than being refused by a quota
+# you cannot see. Freeing the name would mean rebuilding `quotas` -- `UNIQUE`
+# is inline in 0014 -- against live data, for a case the Monday reset hides.
+# SO A RENAME ONTO AN ARCHIVED NAME IS STILL REFUSED (-07): `NameStanding`
+# weighs every quota, the only reading that agrees with the column
+# (`T-collation-enforces-name-identity`). Triage alone resolves `Taken` by
+# reviving.
 #
-# --- WHAT IS LEFT IS A SCREEN THAT READS -------------------------------
-# Display and session logging, nothing else. `quota_sessions.feature` is
-# UNTOUCHED by this slice: not one of its scenarios cares how a quota came
-# to exist, so its `Given a quota named "Piano" with a target of "4" hours a
-# week` keeps its wording and changes only which door its handler goes
-# through. THAT IS THE TEST OF WHETHER A GIVEN WAS WRITTEN AS STATE OR AS
-# IMPLEMENTATION, and it passed.
+# THE QUOTA'S `tasks` ROW IS LEFT ALONE -- `mark_done` is the one place
+# `archived_at` is written on a task, and that row is invisible everywhere.
+# -02's "offers no way to define a quota" holds, and -03 now says why: a
+# control that CHANGES a quota is not one that CREATES it (#150).
 #
-# -02 SAYS "POINT AT CAPTURE" AND MEANS IT LITERALLY. With no define control
-# here, an empty quota screen that only explains itself is a dead end, so it
-# takes the shape `pool-screen-empty-07` already established for exactly
-# this situation. THE EMPTY-STATE NOTE HAD TO CHANGE TOO: "Define one below"
-# named a control that no longer exists, which is the same failure as the
-# refusal message in `quota_triage_validation.feature` and is corrected for
-# the same reason -- TEXT THAT INSTRUCTS THE OWNER TO USE SOMETHING THAT IS
-# NOT THERE.
-#
-# THE ABSENCE OF THE DEFINE CONTROL IS ASSERTED, and that is legitimate here
-# where the reorder arrows' absence still is not. The difference is not
-# style: the owner settled this one today, so it is a rule; on the arrows
-# (#139) the absence remains UNDECIDED, exactly as `quota_sessions.feature`
-# and `qa/quota_screen.md` both say. -02 carries it rather than becoming a
-# scenario of its own, so it rides alongside parameters that genuinely vary
-# and never becomes #90's "the point is that nothing happens".
-#
-# ORDER IS THE ORDER YOU TRIAGED THEM IN (-04), oldest first. Unchanged in
-# substance from `-08` -- the store's `ORDER BY id ASC` still degrades to
-# exactly this with the priority arrows out of scope -- but its Given now
-# names the act that really produces a quota.
-Feature: The quota screen shows what you triaged as a quota
+# THIS SCREEN CREATES NOTHING (#150, owner 2026-08-26). `+ Define a new quota`
+# and its form moved to `quota_triage_validation.feature`, where the one door
+# is. That era's `-09`, asserting triaged quotas do NOT appear here, was
+# inverted rather than weakened.
+Feature: The quota screen shows what you triaged, and lets you change or remove it
 
   Background:
     Given the trellis server is running with an empty task list
@@ -95,6 +74,7 @@ Feature: The quota screen shows what you triaged as a quota
     Then the quota "Piano" reads "<readout>"
     And the quota "Piano" notes "<note>"
     And the quota screen reports "<meta>" beside its title
+    And the quota "Piano" offers to be changed and removed
 
     Examples:
       | hours | readout | note                     | meta    |
@@ -112,3 +92,72 @@ Feature: The quota screen shows what you triaged as a quota
     Examples:
       | quotas               | meta     |
       | Piano, Running, Rust | 3 quotas |
+
+  # quota-screen-retarget-05: a quota's weekly target can be changed, and the readout moves
+  Scenario: A quota's weekly target can be changed
+    Given a quota named "Piano" with a target of "4" hours a week
+    And a session of "30" minutes on "Mon" is logged against "Piano"
+    When the quota "Piano" is changed to "Piano" at "<hours>" hours a week
+    And the "quota" screen is viewed
+    Then the quota "Piano" reads "<readout>"
+    And the quota "Piano" notes "<note>"
+
+    Examples:
+      | hours | readout   | note                          |
+      | 2     | 30m / 2h  | 1h 30m left this week · 25% |
+
+  # quota-screen-rename-06: a quota can be renamed, and the listing follows
+  Scenario: A quota can be renamed, and what it logged comes with it
+    Given a quota named "Piano" with a target of "4" hours a week
+    And a session of "30" minutes on "Mon" is logged against "Piano"
+    When the quota "Piano" is changed to "<new_name>" at "4" hours a week
+    And the "quota" screen is viewed
+    Then the quota screen offers the quotas "<new_name>"
+    And the quota "<new_name>" reads "<readout>"
+
+    Examples:
+      | new_name     | readout  |
+      | Piano theory | 30m / 4h |
+
+  # quota-screen-rename-refused-07: renaming onto a name already taken is refused
+  Scenario: Renaming onto a name already taken is refused
+    Given a quota named "Piano" with a target of "4" hours a week
+    And a quota named "Running" with a target of "3" hours a week
+    When the quota "Running" is changed to "<name>" at "3" hours a week
+    Then the change is refused with "“Piano” already exists at 4 h a week. Log your time against that one, or give this a different name."
+    And the quota screen offers the quotas "<quotas>"
+
+    Examples:
+      | name   | quotas          |
+      | piano  | Piano, Running  |
+      | Pi-ano | Piano, Running  |
+
+  # quota-screen-remove-08: a removed quota leaves the screen and stops counting
+  Scenario: A removed quota leaves the screen and stops counting
+    Given a quota named "Piano" with a target of "4" hours a week
+    And a quota named "Running" with a target of "3" hours a week
+    And a session of "30" minutes on "Mon" is logged against "Piano"
+    When the quota "Piano" is removed
+    And the "quota" screen is viewed
+    Then the quota screen offers the quotas "<quotas>"
+    And the quota screen reports "<meta>" beside its title
+
+    Examples:
+      | quotas  | meta    |
+      | Running | 1 quota |
+
+  # quota-screen-removed-name-returns-09: triaging a removed quota's name brings it back with its hours
+  Scenario: Triaging a removed quota's name brings it back with what it logged
+    Given a quota named "Piano" with a target of "4" hours a week
+    And a session of "30" minutes on "Mon" is logged against "Piano"
+    And the quota "Piano" is removed
+    And a capture with raw text "Piano" is waiting in the untriaged queue
+    When the capture is triaged as a quota named "Piano" with a target of "<hours>" hours a week
+    And the "quota" screen is viewed
+    Then the quota screen offers the quotas "Piano"
+    And the quota screen reports "<meta>" beside its title
+    And the quota "Piano" reads "<readout>"
+
+    Examples:
+      | hours | meta    | readout  |
+      | 2     | 1 quota | 30m / 2h |

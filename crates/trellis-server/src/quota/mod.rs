@@ -103,15 +103,27 @@ pub async fn name_standing(
     candidate: &str,
     exclude_id: Option<i64>,
 ) -> Result<NameStanding, sqlx::Error> {
-    use scheduler_core::quota::NameMatch;
-
     let existing = store::existing(pool).await?;
     let candidates: Vec<(String, i64)> = existing
         .iter()
         .filter(|q| Some(q.id) != exclude_id)
         .map(|q| (q.name.clone(), q.weekly_target_minutes))
         .collect();
-    let standing = match scheduler_core::quota::check_name(candidate, &candidates) {
+    let matched = scheduler_core::quota::check_name(candidate, &candidates);
+    Ok(standing_from_match(matched, &existing))
+}
+
+/// [`NameStanding`] for what [`scheduler_core::quota::check_name`] found --
+/// the domain translation half of [`name_standing`], with no database of
+/// its own. Takes `existing` rather than re-querying: an exact match still
+/// needs it, to say whether the row it found is currently archived.
+fn standing_from_match(
+    matched: Option<scheduler_core::quota::NameMatch>,
+    existing: &[store::ExistingQuota],
+) -> NameStanding {
+    use scheduler_core::quota::NameMatch;
+
+    match matched {
         Some(NameMatch::Exact(name, weekly_target_minutes)) => {
             let archived = existing
                 .iter()
@@ -128,8 +140,30 @@ pub async fn name_standing(
             weekly_target_minutes,
         },
         None => NameStanding::Free,
-    };
-    Ok(standing)
+    }
+}
+
+/// [`change`]'s own name guard: `Some` message when `name` collides with a
+/// live quota other than `id` itself, `None` when nothing is in the way.
+/// Unlike triage, `Taken` is always refused here, archived or not
+/// (`quota-screen-rename-refused-07`): only triage resolves that case by
+/// reviving, because only triage is naming a quota that does not otherwise
+/// exist on screen. `Resembles` is not checked -- there is no scenario
+/// asking this door to warn-and-confirm the way triage's does, and adding
+/// that flow here would be inventing behavior nobody asked for.
+async fn change_name_rejection(
+    pool: &SqlitePool,
+    id: i64,
+    name: &str,
+) -> Result<Option<String>, sqlx::Error> {
+    match name_standing(pool, name, Some(id)).await? {
+        NameStanding::Taken {
+            name,
+            weekly_target_minutes,
+            ..
+        } => Ok(Some(name_exists_message(&name, weekly_target_minutes))),
+        _ => Ok(None),
+    }
 }
 
 /// Renames and retargets `id` in one gesture (#148,
@@ -137,13 +171,6 @@ pub async fn name_standing(
 /// `NameStanding` guard triage's own creation door reuses
 /// (`T-one-front-door-per-capability`: a rename that skipped it could
 /// produce the exact duplicate the create path refuses).
-///
-/// Unlike triage, `Taken` is always refused here, archived or not
-/// (`quota-screen-rename-refused-07`): only triage resolves that case by
-/// reviving, because only triage is naming a quota that does not otherwise
-/// exist on screen. `Resembles` is not checked -- there is no scenario
-/// asking this door to warn-and-confirm the way triage's does, and adding
-/// that flow here would be inventing behavior nobody asked for.
 pub async fn change(
     pool: &SqlitePool,
     id: i64,
@@ -154,23 +181,17 @@ pub async fn change(
         Ok(definition) => definition,
         Err(rejection) => return Ok(Err(definition_rejection_message(rejection))),
     };
-    match name_standing(pool, &definition.name, Some(id)).await? {
-        NameStanding::Taken {
-            name,
-            weekly_target_minutes,
-            ..
-        } => Ok(Err(name_exists_message(&name, weekly_target_minutes))),
-        _ => {
-            store::update(
-                pool,
-                id,
-                &definition.name,
-                definition.weekly_target.minutes(),
-            )
-            .await?;
-            Ok(Ok(()))
-        }
+    if let Some(message) = change_name_rejection(pool, id, &definition.name).await? {
+        return Ok(Err(message));
     }
+    store::update(
+        pool,
+        id,
+        &definition.name,
+        definition.weekly_target.minutes(),
+    )
+    .await?;
+    Ok(Ok(()))
 }
 
 /// Removes `id` -- the write half of #148's other new door

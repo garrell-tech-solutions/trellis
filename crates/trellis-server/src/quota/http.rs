@@ -225,25 +225,13 @@ pub async fn remove_quota(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::platform::test_support::test_pool;
+    use crate::platform::test_support::{http_request, test_pool};
     use axum::body::{to_bytes, Body};
     use axum::http::Request;
     use tower::ServiceExt;
 
     async fn get_quota(pool: &SqlitePool) -> (StatusCode, String) {
-        let app = crate::platform::app::build_app(pool.clone(), Clock::system());
-        let response = app
-            .oneshot(
-                Request::builder()
-                    .uri("/quota")
-                    .body(Body::empty())
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-        let status = response.status();
-        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
-        (status, String::from_utf8(body.to_vec()).unwrap())
+        http_request(pool, Clock::system(), "GET", "/quota").await
     }
 
     /// Percent-encoding for the handful of characters this module's own

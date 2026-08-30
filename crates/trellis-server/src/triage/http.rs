@@ -105,7 +105,19 @@ async fn check_quota_name(
     candidate_name: &str,
     confirmed: Option<&str>,
 ) -> Result<Option<Rejection>, sqlx::Error> {
-    let rejection = match crate::quota::name_standing(pool, candidate_name, None).await? {
+    let standing = crate::quota::name_standing(pool, candidate_name, None).await?;
+    Ok(rejection_for_standing(standing, confirmed, candidate_name))
+}
+
+/// [`check_quota_name`]'s own translation, with no database of its own: a
+/// live `Taken` refuses, an archived one does not (#148, resolved instead by
+/// [`crate::quota::create`] reviving it), and `Resembles` warns only once.
+fn rejection_for_standing(
+    standing: NameStanding,
+    confirmed: Option<&str>,
+    candidate_name: &str,
+) -> Option<Rejection> {
+    match standing {
         NameStanding::Taken {
             name,
             weekly_target_minutes,
@@ -123,8 +135,7 @@ async fn check_quota_name(
             existing_minutes: weekly_target_minutes,
         }),
         _ => None,
-    };
-    Ok(rejection)
+    }
 }
 
 /// [`check_quota_name`] for a `kind` that may or may not be a quota --

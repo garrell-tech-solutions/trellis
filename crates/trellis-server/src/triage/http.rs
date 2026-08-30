@@ -93,19 +93,28 @@ fn already_confirmed(confirmed: Option<&str>, candidate_name: &str) -> bool {
 /// `crate::quota`'s business; what triage adds is the half the quota
 /// capability has no way to know -- that this submission already carried a
 /// "Create anyway", so a resemblance has been warned about once already.
+///
+/// **`Taken { archived: true, .. }` is not a rejection** (#148,
+/// `quota-screen-removed-name-returns-09`): a name a removed quota still
+/// holds is exactly the case `crate::quota::create` resolves by reviving
+/// that quota rather than inserting a duplicate. Triage never sees the
+/// difference on the page -- the row simply appears, with what it logged
+/// before removal intact -- which is the point.
 async fn check_quota_name(
     pool: &SqlitePool,
     candidate_name: &str,
     confirmed: Option<&str>,
 ) -> Result<Option<Rejection>, sqlx::Error> {
-    let rejection = match crate::quota::name_standing(pool, candidate_name).await? {
+    let rejection = match crate::quota::name_standing(pool, candidate_name, None).await? {
         NameStanding::Taken {
             name,
             weekly_target_minutes,
+            archived: false,
         } => Some(Rejection::QuotaNameExists {
             existing_name: name,
             existing_minutes: weekly_target_minutes,
         }),
+        NameStanding::Taken { archived: true, .. } => None,
         NameStanding::Resembles {
             name,
             weekly_target_minutes,

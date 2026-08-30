@@ -109,6 +109,33 @@
 </div>
 </details>
 
+{# A rename and a retarget are one gesture (#148): one form, one submit,
+   never two round trips one of which could apply without the other.
+   `T-422-is-product-wide`: a refusal re-renders this same fragment at 422
+   with the message on this row, so the disclosure opens on its own to show
+   it rather than leaving the owner to notice something failed. #}
+<details class="quota-change"{% if quota.change_error.is_some() %} open{% endif %}>
+<summary>Change</summary>
+<form class="quota-change-form" hx-post="/quota/{{ quota.id }}" hx-target="#quota-body" hx-swap="outerHTML">
+<label>Name <input type="text" name="name" value="{{ quota.name }}"></label>
+<label>Hours a week <input type="number" name="hours" min="0.5" step="0.5" value="{{ quota.hours_value }}"></label>
+<button type="submit">Save</button>
+</form>
+{% if let Some(message) = quota.change_error %}
+<p class="quota-change-error">{{ message }}</p>
+{% endif %}
+</details>
+
+{# Remove means archive (#148, `D-kill-means-archive`'s bargain): the row
+   and its sessions stay in the database, this screen just stops reading
+   them. One tap, no confirmation step -- the same weight `pool`'s own done
+   checkbox carries, and just as reversible in the database even though
+   nothing on screen offers a way back to it -- there is nowhere to browse
+   a removed quota from (`R-browsable-archive`). #}
+<form class="quota-remove" hx-post="/quota/{{ quota.id }}/remove" hx-target="#quota-body" hx-swap="outerHTML">
+<button type="submit">Remove</button>
+</form>
+
 </div>
 {% endfor %}
 </div>

@@ -27,9 +27,11 @@ struct StoredQuotaRow {
     weekly_target_minutes: i64,
 }
 
-/// Every defined quota, oldest first -- the store's own `ORDER BY`
+/// Every quota not yet removed, oldest first -- the store's own `ORDER BY`
 /// (`T-set-operations-execute-in-the-store`), not a sort a caller performs
-/// after fetching.
+/// after fetching. `archived_at IS NULL` is the whole of what "removed"
+/// means (#148, `D-kill-means-archive`'s bargain applied to a quota): the
+/// row and its sessions stay, this screen just stops reading it.
 ///
 /// A row whose target is not positive has broken its own `CHECK`, so this
 /// reports it as what it is -- a value that cannot be decoded into the type
@@ -38,10 +40,12 @@ struct StoredQuotaRow {
 /// turns a store error into a 500, which is the honest answer to a corrupt
 /// row; nothing here can render it.
 pub async fn list_quotas(pool: &SqlitePool) -> Result<Vec<QuotaRow>, sqlx::Error> {
-    let stored: Vec<StoredQuotaRow> =
-        sqlx::query_as("SELECT id, name, weekly_target_minutes FROM quotas ORDER BY id ASC")
-            .fetch_all(pool)
-            .await?;
+    let stored: Vec<StoredQuotaRow> = sqlx::query_as(
+        "SELECT id, name, weekly_target_minutes FROM quotas \
+         WHERE archived_at IS NULL ORDER BY id ASC",
+    )
+    .fetch_all(pool)
+    .await?;
     stored.into_iter().map(quota_row).collect()
 }
 
@@ -63,9 +67,27 @@ fn quota_row(stored: StoredQuotaRow) -> Result<QuotaRow, sqlx::Error> {
     })
 }
 
-/// Every existing quota's own spelling and target, for
+/// One row of [`existing`]: a quota's own spelling, target and whether it
+/// has been removed.
+#[derive(sqlx::FromRow)]
+pub(super) struct ExistingQuota {
+    pub id: i64,
+    pub name: String,
+    pub weekly_target_minutes: i64,
+    /// #148: an archived quota still counts as "taken" -- its name is
+    /// still sitting in the `UNIQUE COLLATE NOCASE` column -- so
+    /// [`super::name_standing`] weighs it exactly like a live one. Whether
+    /// *that* is a refusal or a revival is the caller's decision, not this
+    /// query's.
+    pub archived: bool,
+}
+
+/// Every quota that has ever existed, live or removed, for
 /// `scheduler_core::quota::check_name` to compare a candidate name against
-/// before writing it.
+/// before writing it -- `T-collation-enforces-name-identity`'s rule must
+/// see the same rows the `UNIQUE` column itself would refuse a duplicate
+/// against, and that column does not stop enforcing itself once a quota is
+/// archived.
 ///
 /// Reachable only from this capability: the question "where does this name
 /// stand?" leaves through [`super::name_standing`], which is the whole of
@@ -74,14 +96,17 @@ fn quota_row(stored: StoredQuotaRow) -> Result<QuotaRow, sqlx::Error> {
 /// reached is nobody else's business). That visibility is also what keeps
 /// the Gaps entry under this one function: the day the exact tier moves
 /// into the query, no caller changes.
-pub(super) async fn existing_names(pool: &SqlitePool) -> Result<Vec<(String, i64)>, sqlx::Error> {
-    sqlx::query_as("SELECT name, weekly_target_minutes FROM quotas ORDER BY id ASC")
-        .fetch_all(pool)
-        .await
+pub(super) async fn existing(pool: &SqlitePool) -> Result<Vec<ExistingQuota>, sqlx::Error> {
+    sqlx::query_as(
+        "SELECT id, name, weekly_target_minutes, (archived_at IS NOT NULL) AS archived \
+         FROM quotas ORDER BY id ASC",
+    )
+    .fetch_all(pool)
+    .await
 }
 
 /// Writes a new quota row. Callers must have already checked
-/// `scheduler_core::quota::check_name` against [`existing_names`] -- the
+/// `scheduler_core::quota::check_name` against [`existing`] -- the
 /// `UNIQUE COLLATE NOCASE` constraint on `name` is the backstop for a write
 /// path that forgot to (`T-collation-enforces-name-identity`), not the
 /// primary guard, so a caller that skipped the check sees a constraint
@@ -97,6 +122,73 @@ pub async fn create(
         .bind(created_at_ms)
         .execute(pool)
         .await?;
+    Ok(())
+}
+
+/// Renames and retargets `id` in one statement
+/// (`T-set-operations-execute-in-the-store`) -- a rename and a retarget are
+/// one gesture on this screen (#148), never two round trips one of which
+/// could apply without the other. Leaves every logged session untouched:
+/// they hang off `quota_id`, not the name, so what was logged comes with
+/// whichever spelling and target the quota now carries.
+pub(super) async fn update(
+    pool: &SqlitePool,
+    id: i64,
+    name: &str,
+    weekly_target_minutes: i64,
+) -> Result<(), sqlx::Error> {
+    sqlx::query("UPDATE quotas SET name = ?, weekly_target_minutes = ? WHERE id = ?")
+        .bind(name)
+        .bind(weekly_target_minutes)
+        .bind(id)
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
+/// Removes `id` (#148, `D-kill-means-archive`'s bargain: stamped, not
+/// deleted). Guarded by `archived_at IS NULL` the same way
+/// `mark_done::store::mark_task_done` guards its own stamp -- idempotent
+/// rather than merely harmless, since a second removal has nothing left to
+/// change.
+pub(super) async fn archive(
+    pool: &SqlitePool,
+    id: i64,
+    archived_at_ms: i64,
+) -> Result<(), sqlx::Error> {
+    sqlx::query("UPDATE quotas SET archived_at = ? WHERE id = ? AND archived_at IS NULL")
+        .bind(archived_at_ms)
+        .bind(id)
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
+/// Brings an archived quota back at its newly typed name and target,
+/// keeping its `id` -- and with it every session already logged against
+/// that `id`, and its original position in `list_quotas`' `ORDER BY id ASC`
+/// (#148, `quota-screen-removed-name-returns-09`: the identity that logged
+/// those sessions is what returns, not a fresh one that happens to read the
+/// same). `archived_name` is [`super::NameStanding::Taken`]'s own exact
+/// stored spelling, not the newly typed candidate -- the two need not
+/// match byte-for-byte (`T-collation-enforces-name-identity` folds case,
+/// spaces and punctuation), and this `WHERE` must find the row the
+/// candidate matched, not merely a name that looks like it.
+pub(super) async fn revive(
+    pool: &SqlitePool,
+    archived_name: &str,
+    new_name: &str,
+    weekly_target_minutes: i64,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "UPDATE quotas SET name = ?, weekly_target_minutes = ?, archived_at = NULL \
+         WHERE name = ? AND archived_at IS NOT NULL",
+    )
+    .bind(new_name)
+    .bind(weekly_target_minutes)
+    .bind(archived_name)
+    .execute(pool)
+    .await?;
     Ok(())
 }
 
@@ -232,13 +324,101 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn existing_names_reports_every_quotas_name_and_target() {
+    async fn existing_reports_every_quotas_name_target_and_archived_flag() {
         let (_dir, pool) = test_pool().await;
         create(&pool, &definition("Piano", 240), 0).await.unwrap();
 
-        let names = existing_names(&pool).await.unwrap();
+        let rows = existing(&pool).await.unwrap();
 
-        assert_eq!(names, vec![("Piano".to_string(), 240)]);
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].name, "Piano");
+        assert_eq!(rows[0].weekly_target_minutes, 240);
+        assert!(!rows[0].archived);
+    }
+
+    #[tokio::test]
+    async fn existing_still_reports_an_archived_quota() {
+        let (_dir, pool) = test_pool().await;
+        let id = given_a_quota(&pool, "Piano", 240).await;
+        archive(&pool, id, 4242).await.unwrap();
+
+        let rows = existing(&pool).await.unwrap();
+
+        assert_eq!(rows.len(), 1, "an archived quota still holds its name");
+        assert!(rows[0].archived);
+    }
+
+    #[tokio::test]
+    async fn update_renames_and_retargets_in_place() {
+        let (_dir, pool) = test_pool().await;
+        let id = given_a_quota(&pool, "Piano", 240).await;
+
+        update(&pool, id, "Piano theory", 120).await.unwrap();
+
+        let rows = list_quotas(&pool).await.unwrap();
+        assert_eq!(rows.len(), 1, "the same row, not a second one");
+        assert_eq!(rows[0].name, "Piano theory");
+        assert_eq!(rows[0].weekly_target.minutes(), 120);
+    }
+
+    #[tokio::test]
+    async fn archive_removes_a_quota_from_list_quotas_without_deleting_it() {
+        let (_dir, pool) = test_pool().await;
+        let id = given_a_quota(&pool, "Piano", 240).await;
+
+        archive(&pool, id, 4242).await.unwrap();
+
+        assert!(list_quotas(&pool).await.unwrap().is_empty());
+        let still_there: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM quotas WHERE id = ?")
+            .bind(id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(still_there, 1, "nothing was deleted");
+    }
+
+    #[tokio::test]
+    async fn archive_is_a_no_op_the_second_time() {
+        let (_dir, pool) = test_pool().await;
+        let id = given_a_quota(&pool, "Piano", 240).await;
+        archive(&pool, id, 1).await.unwrap();
+
+        archive(&pool, id, 2).await.unwrap();
+
+        let archived_at: i64 = sqlx::query_scalar("SELECT archived_at FROM quotas WHERE id = ?")
+            .bind(id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(archived_at, 1, "the first stamp must not be overwritten");
+    }
+
+    #[tokio::test]
+    async fn revive_clears_archived_at_and_applies_the_new_name_and_target() {
+        let (_dir, pool) = test_pool().await;
+        let id = given_a_quota(&pool, "Piano", 240).await;
+        archive(&pool, id, 4242).await.unwrap();
+
+        revive(&pool, "Piano", "Piano", 120).await.unwrap();
+
+        let rows = list_quotas(&pool).await.unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].id, id, "the same identity, not a fresh row");
+        assert_eq!(rows[0].weekly_target.minutes(), 120);
+    }
+
+    #[tokio::test]
+    async fn revive_leaves_a_live_quota_of_the_same_name_alone() {
+        let (_dir, pool) = test_pool().await;
+        given_a_quota(&pool, "Piano", 240).await;
+
+        revive(&pool, "Piano", "Piano", 120).await.unwrap();
+
+        assert_eq!(
+            list_quotas(&pool).await.unwrap()[0].weekly_target.minutes(),
+            240,
+            "a live quota is not archived, so revive must not touch it"
+        );
     }
 
     fn stored(weekly_target_minutes: i64) -> StoredQuotaRow {

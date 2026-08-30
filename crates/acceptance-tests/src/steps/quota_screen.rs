@@ -6,7 +6,7 @@
 //! tried before this module — nothing here duplicates them.
 
 use super::html;
-use super::inbox_view::html_response;
+use super::inbox_view::{html_response, urlencode};
 use super::*;
 use axum::body::Body;
 use axum::http::Request;
@@ -37,6 +37,17 @@ static THEN_OFFERS_QUOTAS: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r#"^the quota screen offers the quotas "([^"]+)"$"#).unwrap());
 static THEN_DOES_NOT_MENTION: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r#"^the quota screen does not mention "([^"]+)"$"#).unwrap());
+static THEN_OFFERS_CHANGE_AND_REMOVE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r#"^the quota "([^"]+)" offers to be changed and removed$"#).unwrap()
+});
+static WHEN_CHANGED: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r#"^the quota "([^"]+)" is changed to "([^"]+)" at "([^"]+)" hours a week$"#)
+        .unwrap()
+});
+static THEN_CHANGE_REFUSED: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r#"^the change is refused with "([^"]+)"$"#).unwrap());
+static WHEN_REMOVED: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r#"^the quota "([^"]+)" is removed$"#).unwrap());
 
 pub async fn dispatch(
     world: &mut World,
@@ -76,6 +87,18 @@ pub async fn dispatch(
             Ok(body) => super::then_does_not_mention(body, &expected),
             Err(e) => Err(e),
         });
+    }
+    if let Some(caps) = THEN_OFFERS_CHANGE_AND_REMOVE.captures(text) {
+        return Some(then_offers_change_and_remove(world, example, &caps).await);
+    }
+    if let Some(caps) = WHEN_CHANGED.captures(text) {
+        return Some(dispatch_changed(world, example, &caps).await);
+    }
+    if let Some(caps) = THEN_CHANGE_REFUSED.captures(text) {
+        return Some(then_change_refused(world, example, &caps).await);
+    }
+    if let Some(caps) = WHEN_REMOVED.captures(text) {
+        return Some(dispatch_removed(world, example, &caps).await);
     }
     None
 }
@@ -272,6 +295,102 @@ async fn dispatch_offers_quotas(
     let expected = resolve(example, &caps[1])?;
     let body = html_body(world).await?;
     html::listed_in_order(&expected, quota_names_in_order(body), "quotas")
+}
+
+/// A quota's own row is markup, not a database detail a scenario should
+/// have to know -- looked up by its current name each time, since a rename
+/// (#148) means the same identity can answer to a different one from one
+/// step to the next.
+async fn quota_id_by_name(world: &World, name: &str) -> Result<i64, String> {
+    let pool = world.pool()?;
+    sqlx::query_scalar("SELECT id FROM quotas WHERE name = ?")
+        .bind(name)
+        .fetch_one(pool)
+        .await
+        .map_err(|e| format!("find quota named {name:?}: {e}"))
+}
+
+/// #148: a row that lets you change what you triaged (a rename, a
+/// retarget) and remove it outright, the two controls this slice adds
+/// beside the session ones every row already had.
+async fn then_offers_change_and_remove(
+    world: &mut World,
+    example: &BTreeMap<String, String>,
+    caps: &regex::Captures<'_>,
+) -> Result<(), String> {
+    let name = resolve(example, &caps[1])?;
+    let body = html_body(world).await?;
+    let row = html::quota_row(body, &name)?;
+    if row.contains("quota-change") && row.contains("quota-remove") {
+        Ok(())
+    } else {
+        Err(format!(
+            "expected the row for {name:?} to offer to be changed and removed, got:\n{row}"
+        ))
+    }
+}
+
+/// `POST /quota/{id}`, `id` resolved from `name`'s *current* row (#148: a
+/// rename and a retarget are one gesture, `new_name`/`hours` the fields
+/// that form posts).
+async fn dispatch_changed(
+    world: &mut World,
+    example: &BTreeMap<String, String>,
+    caps: &regex::Captures<'_>,
+) -> Result<(), String> {
+    let name = resolve(example, &caps[1])?;
+    let new_name = resolve(example, &caps[2])?;
+    let hours = resolve(example, &caps[3])?;
+    let id = quota_id_by_name(world, &name).await?;
+    let body = format!("name={}&hours={}", urlencode(&new_name), urlencode(&hours));
+    let request = Request::builder()
+        .method("POST")
+        .uri(format!("/quota/{id}"))
+        .header("content-type", "application/x-www-form-urlencoded")
+        .body(Body::from(body))
+        .map_err(|e| format!("build request: {e}"))?;
+    html_response(world, request).await
+}
+
+/// `T-422-is-product-wide`: a refused change is a `422` whose body carries
+/// the message, not merely a body that happens to contain the words
+/// somewhere -- checking the status alongside the text is what tells this
+/// apart from a coincidental match on an otherwise-accepted response.
+async fn then_change_refused(
+    world: &mut World,
+    example: &BTreeMap<String, String>,
+    caps: &regex::Captures<'_>,
+) -> Result<(), String> {
+    let expected = resolve(example, &caps[1])?;
+    match world.last_status {
+        Some(422) => {}
+        Some(status) => return Err(format!("expected a 422 refusal, got status {status}")),
+        None => return Err("no change response recorded".to_string()),
+    }
+    let body = html_body(world).await?;
+    if body.contains(expected.as_str()) {
+        Ok(())
+    } else {
+        Err(format!(
+            "expected the refusal {expected:?} in the response, got:\n{body}"
+        ))
+    }
+}
+
+/// `POST /quota/{id}/remove` (#148: remove means archive).
+async fn dispatch_removed(
+    world: &mut World,
+    example: &BTreeMap<String, String>,
+    caps: &regex::Captures<'_>,
+) -> Result<(), String> {
+    let name = resolve(example, &caps[1])?;
+    let id = quota_id_by_name(world, &name).await?;
+    let request = Request::builder()
+        .method("POST")
+        .uri(format!("/quota/{id}/remove"))
+        .body(Body::empty())
+        .map_err(|e| format!("build request: {e}"))?;
+    html_response(world, request).await
 }
 
 #[cfg(test)]

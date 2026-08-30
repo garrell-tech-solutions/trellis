@@ -56,7 +56,7 @@ pub async fn show_quota(
     State(pool): State<SqlitePool>,
     State(clock): State<Clock>,
 ) -> Result<Response, StatusCode> {
-    let built = body::build(&pool, clock, &HashSet::new())
+    let built = body::build(&pool, clock, &HashSet::new(), None)
         .await
         .map_err(write_failed)?;
     Ok(render_template(
@@ -103,8 +103,14 @@ async fn validated_session(
     ) {
         Ok(session) => Ok(Ok((week.day_ms(session.day, &zone), session.minutes))),
         Err(_) => {
-            let rejection =
-                body::respond(pool, clock, StatusCode::UNPROCESSABLE_ENTITY, expanded_ids).await?;
+            let rejection = body::respond(
+                pool,
+                clock,
+                StatusCode::UNPROCESSABLE_ENTITY,
+                expanded_ids,
+                None,
+            )
+            .await?;
             Ok(Err(rejection))
         }
     }
@@ -129,7 +135,7 @@ pub async fn log_session(
     super::store::log_session(&pool, quota_id, day_ms, minutes, clock.now_ms())
         .await
         .map_err(write_failed)?;
-    body::respond(&pool, clock, StatusCode::CREATED, &expanded_ids).await
+    body::respond(&pool, clock, StatusCode::CREATED, &expanded_ids, None).await
 }
 
 /// `POST /quota/sessions/{session_id}` -- corrects a logged session's day
@@ -149,7 +155,7 @@ pub async fn correct_session(
     super::store::update_session(&pool, session_id, day_ms, minutes)
         .await
         .map_err(write_failed)?;
-    body::respond(&pool, clock, StatusCode::OK, &expanded_ids).await
+    body::respond(&pool, clock, StatusCode::OK, &expanded_ids, None).await
 }
 
 /// `POST /quota/sessions/{session_id}/delete` -- deletes a logged session
@@ -164,7 +170,56 @@ pub async fn delete_session(
     super::store::delete_session(&pool, session_id)
         .await
         .map_err(write_failed)?;
-    body::respond(&pool, clock, StatusCode::OK, &expanded_ids(&expanded)).await
+    body::respond(&pool, clock, StatusCode::OK, &expanded_ids(&expanded), None).await
+}
+
+/// A quota's own change: a new name and a new hour target, together
+/// (#148) -- one gesture, never two round trips one of which could apply
+/// without the other.
+#[derive(Deserialize, Default)]
+pub struct ChangeForm {
+    name: Option<String>,
+    hours: Option<String>,
+}
+
+/// `POST /quota/{quota_id}` -- renames and retargets `quota_id`, or
+/// refuses with the row carrying why (#148, `T-422-is-product-wide`).
+/// `crate::quota::change` is where well-formedness and the name guard
+/// live; this handler's only job is turning its answer into a response.
+pub async fn change_quota(
+    State(pool): State<SqlitePool>,
+    State(clock): State<Clock>,
+    Path(quota_id): Path<i64>,
+    Query(expanded): Query<ExpandedQuery>,
+    Form(form): Form<ChangeForm>,
+) -> Result<Response, StatusCode> {
+    let expanded_ids = expanded_ids(&expanded);
+    let outcome =
+        crate::quota::change(&pool, quota_id, form.name.as_deref(), form.hours.as_deref())
+            .await
+            .map_err(write_failed)?;
+    let (status, error) = match outcome {
+        Ok(()) => (StatusCode::OK, None),
+        Err(message) => (StatusCode::UNPROCESSABLE_ENTITY, Some((quota_id, message))),
+    };
+    body::respond(&pool, clock, status, &expanded_ids, error).await
+}
+
+/// `POST /quota/{quota_id}/remove` -- removes `quota_id` (#148, remove
+/// means archive: `crate::quota::remove` stamps `archived_at` and nothing
+/// is deleted). No failure state to report: a removal cannot collide with
+/// anything the way a rename can, so this always swaps in the current
+/// fragment at `200`.
+pub async fn remove_quota(
+    State(pool): State<SqlitePool>,
+    State(clock): State<Clock>,
+    Path(quota_id): Path<i64>,
+    Query(expanded): Query<ExpandedQuery>,
+) -> Result<Response, StatusCode> {
+    crate::quota::remove(&pool, quota_id, clock.now_ms())
+        .await
+        .map_err(write_failed)?;
+    body::respond(&pool, clock, StatusCode::OK, &expanded_ids(&expanded), None).await
 }
 
 #[cfg(test)]
